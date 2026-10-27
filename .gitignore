@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.*
+*.key
+*.pem
+.DS_Store
+
+# MeshCentral lokal ishga tushirish ma'lumotlari (sertifikat va kalitlar bor)
+meshcentral-data/
+meshcentral-files/
+meshcentral-backups/
+meshcentral-recordings/
+meshcentral-web/
+
+# superpowers visual companion
+.superpowers/

@@ -1,0 +1,9 @@
+{
+  "upstream": "https://github.com/Ylianst/MeshCentral.git",
+  "commit": "adce1ec488dc884ce947ea4e4808e6a520609b17",
+  "packageVersion": "1.3.1",
+  "node": ">=20.0.0",
+  "imageDigest": null,
+  "agentManifest": null,
+  "note": "Pilotdan keyin sinovdan o'tgan release/commit, image digest va agent manifest shu yerga yoziladi."
+}

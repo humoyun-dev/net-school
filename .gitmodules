@@ -1,0 +1,3 @@
+[submodule "infra/meshcentral/upstream"]
+	path = infra/meshcentral/upstream
+	url = https://github.com/Ylianst/MeshCentral.git
