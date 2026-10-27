@@ -211,6 +211,40 @@ describe('filterControlUp', () => {
     }
   });
 
+  test('filterControlUp allows the real viewer nodes request', () => {
+    const ctx = makeCtx();
+    const frames = [
+      { action: 'nodes', id: '', skip: 0, filter: '' },
+      { action: 'nodes', id: NODE, skip: 0, filter: 'pc' },
+      { action: 'nodes', skip: 5 },
+      { action: 'nodes', skip: 0, responseid: 'r' },
+    ];
+    for (const f of frames) {
+      const text = JSON.stringify(f);
+      expect(filterControlUp(text, ctx), text).toEqual({ ok: true, data: text });
+    }
+  });
+
+  test('filterControlUp rejects nodes with a foreign id, bad skip or oversized filter', () => {
+    const ctx = makeCtx();
+    const frames: Record<string, unknown>[] = [
+      { action: 'nodes', id: OTHER, skip: 0 },
+      { action: 'nodes', id: 5 },
+      { action: 'nodes', skip: -1 },
+      { action: 'nodes', skip: 1.5 },
+      { action: 'nodes', skip: '0' },
+      { action: 'nodes', filter: 'a'.repeat(257) },
+      { action: 'nodes', filter: 5 },
+      { action: 'nodes', skip: 0, meshid: 'mesh//x' },
+    ];
+    for (const f of frames) {
+      const text = JSON.stringify(f);
+      expect(filterControlUp(text, ctx), text).toEqual({ ok: false, reason: 'action:nodes' });
+    }
+    const maxFilter = JSON.stringify({ action: 'nodes', filter: 'a'.repeat(256) });
+    expect(filterControlUp(maxFilter, ctx).ok).toBe(true);
+  });
+
   test('filterControlUp rejects every non-tunnel msg', () => {
     const ctx = makeCtx('control');
     for (const type of ['pskill', 'serviceStop', 'openUrl', 'setclip', 'getclip', 'console', 'localapp']) {

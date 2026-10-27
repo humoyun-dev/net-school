@@ -20,6 +20,7 @@ const HIDE = /^\d{1,4}$/;
 const TUNNEL_ID = /^[0-9a-z]{1,16}$/;
 const TUNNEL_PREFIX = '*/meshrelay.ashx?';
 const MAX_RESPONSE_ID = 128;
+const MAX_NODES_FILTER = 256;
 
 export function viewerEntryPath(nodeId: string): string {
   return `/?gotonode=${encodeURIComponent(nodeId)}&viewmode=11&hide=31`;
@@ -98,13 +99,22 @@ function keysMatch(frame: Frame, required: readonly string[], optional: readonly
   return keys.every((key) => required.includes(key) || optional.includes(key));
 }
 
-const PLAIN_ACTIONS = new Set(['ping', 'pong', 'authcookie', 'usergroups', 'meshes', 'nodes', 'loginTokens', 'files']);
+const PLAIN_ACTIONS = new Set(['ping', 'pong', 'authcookie', 'usergroups', 'meshes', 'loginTokens', 'files']);
 const NODE_ACTIONS = new Set(['powertimeline', 'lastconnect', 'getsysinfo', 'getnetworkinfo', 'deviceShares']);
 
 function validResponseId(frame: Frame): boolean {
   if (!Object.hasOwn(frame, 'responseid')) return true;
   const id = frame.responseid;
   return typeof id === 'string' && id.length <= MAX_RESPONSE_ID;
+}
+
+// Brauzerning `nodes` so'rovi: id bo'sh yoki sessiya node'i, skip >= 0 butun son, filter qisqa matn.
+function validNodesRequest(frame: Frame, ctx: ViewerContext): boolean {
+  if (!keysMatch(frame, ['action'], ['responseid', 'id', 'skip', 'filter']) || !validResponseId(frame)) return false;
+  const { id, skip, filter } = frame;
+  if (id !== undefined && id !== '' && id !== ctx.nodeId) return false;
+  if (skip !== undefined && !(typeof skip === 'number' && Number.isInteger(skip) && skip >= 0)) return false;
+  return filter === undefined || (typeof filter === 'string' && filter.length <= MAX_NODES_FILTER);
 }
 
 export function filterControlUp(text: string, ctx: ViewerContext): FrameVerdict {
@@ -119,6 +129,7 @@ export function filterControlUp(text: string, ctx: ViewerContext): FrameVerdict 
   if (PLAIN_ACTIONS.has(action)) {
     return keysMatch(frame, ['action'], ['responseid']) && validResponseId(frame) ? { ok: true, data: text } : reason;
   }
+  if (action === 'nodes') return validNodesRequest(frame, ctx) ? { ok: true, data: text } : reason;
   if (NODE_ACTIONS.has(action)) {
     const ok = keysMatch(frame, ['action', 'nodeid'], ['responseid']) && validResponseId(frame);
     return ok && frame.nodeid === ctx.nodeId ? { ok: true, data: text } : reason;
