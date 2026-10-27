@@ -1,5 +1,7 @@
 export { MeshControlClient, type MeshControlClientOptions, type MeshRequester } from './control-client.ts';
+export { CookieJar } from './desktop/cookie-jar.ts';
 export { CredentialHandles, type CredentialKind } from './desktop/credential-handles.ts';
+export { loginPrincipal, type UpstreamEndpoint } from './desktop/upstream-login.ts';
 export {
   type FrameVerdict,
   filterControlDown,
@@ -13,6 +15,11 @@ export {
   type ViewerContext,
   viewerEntryPath,
 } from './desktop/viewer-policy.ts';
+export {
+  MeshCentralViewerSession,
+  MeshCentralViewerUpstream,
+  type MeshCentralViewerUpstreamOptions,
+} from './desktop/viewer-upstream.ts';
 export { MeshCentralDeviceManagement } from './device-management.ts';
 export { AdapterError, type AdapterErrorCode } from './errors.ts';
 export type { SiteMeshScope } from './node-id.ts';
