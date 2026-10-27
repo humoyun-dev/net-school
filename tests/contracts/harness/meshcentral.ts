@@ -20,7 +20,7 @@ export interface MeshCentralInstance {
   stop(): Promise<void>; // process kill + datapath o'chirish
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
     const server = createServer();
     server.once('error', reject);

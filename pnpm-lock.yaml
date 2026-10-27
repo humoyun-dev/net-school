@@ -87,6 +87,9 @@ importers:
       '@netschool/meshcentral-adapter':
         specifier: workspace:*
         version: link:../../packages/meshcentral-adapter
+      '@netschool/session-gateway':
+        specifier: workspace:*
+        version: link:../../packages/session-gateway
     devDependencies:
       '@netschool/test-support':
         specifier: workspace:*

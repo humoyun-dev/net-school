@@ -5,7 +5,8 @@
   "type": "module",
   "dependencies": {
     "@netschool/domain": "workspace:*",
-    "@netschool/meshcentral-adapter": "workspace:*"
+    "@netschool/meshcentral-adapter": "workspace:*",
+    "@netschool/session-gateway": "workspace:*"
   },
   "devDependencies": {
     "@netschool/test-support": "workspace:*"
