@@ -121,14 +121,13 @@ function pageValue(html: string, name: 'authCookie' | 'authRelayCookie'): string
   return value;
 }
 
-// ws klient tomoni: yopilishi `ms` ichida ('close' hodisasi).
-function closesWithin(ws: WebSocket, ms: number): Promise<boolean> {
+// ws klient tomoni: 'close' kodi yoki `ms` ichida yopilmasa undefined. Tinglovchi yopishdan OLDIN o'rnatiladi.
+function closeCodeWithin(ws: WebSocket, ms: number): Promise<number | undefined> {
   return new Promise((resolve) => {
-    if (ws.readyState === WebSocket.CLOSED) return resolve(true);
-    const timer = setTimeout(() => resolve(false), ms);
-    ws.once('close', () => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    ws.once('close', (code) => {
       clearTimeout(timer);
-      resolve(true);
+      resolve(code);
     });
   });
 }
@@ -242,6 +241,10 @@ describe('session gateway against pinned MeshCentral', () => {
     expect(await directOutcome(stack.directSocket(relayPath(s.nodeId, real), xff), 1_000)).toBe('open');
     // Brauzerga ko'rinadigan handle upstream uchun hech narsa emas.
     expect(await directOutcome(stack.directSocket(relayPath(s.nodeId, handle), xff), 2_000)).toBe('not-open');
+    // Ijobiy nazorat: real authCookie control.ashx'da ham `auth=` bilan ochiladi, shu sabab quyidagi rad etishlar auth tufayli.
+    expect(await directOutcome(stack.directSocket(`/control.ashx?auth=${encodeURIComponent(real)}`, xff), 1_000)).toBe(
+      'open',
+    );
     // control.ashx: handle auth sifatida ham, gateway cookie'si bilan ham rad.
     expect(
       await directOutcome(stack.directSocket(`/control.ashx?auth=${encodeURIComponent(handle)}`, xff), 2_000),
@@ -378,8 +381,10 @@ describe('session gateway against pinned MeshCentral', () => {
     await tick(500);
     expect(relay.ws.readyState).toBe(WebSocket.OPEN);
 
+    // 2 s chegarasi close() chaqiruvidan boshlanadi: soketlar upstream revoke tugashini kutmasligi shart.
+    const closing = Promise.all([closeCodeWithin(control.ws, 2_000), closeCodeWithin(relay.ws, 2_000)]);
     await stack.broker.close(s.sessionId);
-    expect(await Promise.all([closesWithin(control.ws, 2_000), closesWithin(relay.ws, 2_000)])).toEqual([true, true]);
+    expect(await closing).toEqual([1008, 1008]);
 
     expect((await s.browser.get('/scripts/x.js')).status).toBe(401);
     expect(await upgrade(s.browser.socket('/control.ashx'))).toBe(401);
