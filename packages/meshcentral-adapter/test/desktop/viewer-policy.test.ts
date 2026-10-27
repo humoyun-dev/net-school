@@ -520,6 +520,33 @@ describe('filterRelayUp', () => {
     }
   });
 
+  test('filterRelayUp strips autolock from options in view mode', () => {
+    const inputs = [
+      { type: 'options', autolock: true, x: 1 },
+      { ctrlChannel: '102938', type: 'options', autolock: true },
+    ];
+    for (const input of inputs) {
+      const verdict = filterRelayUp(JSON.stringify(input), false, 'view');
+      expect(verdict.ok).toBe(true);
+      if (!verdict.ok) continue;
+      const { autolock: _removed, ...rest } = input;
+      expect(JSON.parse(String(verdict.data))).toEqual(rest);
+      expect(Object.hasOwn(JSON.parse(String(verdict.data)), 'autolock')).toBe(false);
+    }
+    const plain = JSON.stringify({ type: 'options', consent: 0 });
+    expect(filterRelayUp(plain, false, 'view')).toEqual({ ok: true, data: plain });
+  });
+
+  test('filterRelayUp keeps options unchanged in control mode', () => {
+    for (const input of [
+      { type: 'options', autolock: true, x: 1 },
+      { ctrlChannel: '102938', type: 'options', autolock: true },
+    ]) {
+      const text = JSON.stringify(input);
+      expect(filterRelayUp(text, false, 'control')).toEqual({ ok: true, data: text });
+    }
+  });
+
   test('filterRelayUp drops other text frames', () => {
     for (const text of ['', '1', '3', '2 ', ' 2', 'c', '{', '[]', 'null', '"2"', '{"type":"unknown"}', '{"a":1}']) {
       expect(filterRelayUp(text, false, 'control').ok).toBe(false);

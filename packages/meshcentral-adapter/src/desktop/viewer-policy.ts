@@ -209,7 +209,12 @@ export function filterRelayUp(data: string | Buffer, isBinary: boolean, mode: Re
 
   const frame = parseObject(text);
   if (!frame) return deny('relay_text');
-  if (frame.type === 'options') return { ok: true, data };
+  if (frame.type === 'options') {
+    if (mode === 'control' || !Object.hasOwn(frame, 'autolock')) return { ok: true, data };
+    // Ko'rish rejimida agentda autolock yoqilmasligi uchun kalit olib tashlanadi.
+    delete frame.autolock;
+    return { ok: true, data: JSON.stringify(frame) };
+  }
   if (mode === 'control' && frame.ctrlChannel === LOCK_CHANNEL && typeof frame.type === 'string') {
     if (LOCK_TYPES.has(frame.type)) return { ok: true, data };
   }
