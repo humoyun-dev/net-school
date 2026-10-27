@@ -57,6 +57,12 @@ importers:
         specifier: ^8.18.2
         version: 8.18.2
 
+  packages/session-gateway:
+    dependencies:
+      '@netschool/domain':
+        specifier: workspace:*
+        version: link:../domain
+
   packages/test-support:
     dependencies:
       selfsigned:
