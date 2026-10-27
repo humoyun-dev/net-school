@@ -82,6 +82,18 @@ function relayPath(nodeId: string, handle: string, extra = ''): string {
   return `/meshrelay.ashx?browser=1&p=2&nodeid=${encodeURIComponent(nodeId)}&id=abc&auth=${encodeURIComponent(handle)}${extra}`;
 }
 
+// Principal login natijasi: 'resolved' yoki AdapterError kodi.
+function loginOutcome(credentials: { username: string; password: string }): Promise<string> {
+  return loginPrincipal(
+    stack.upstreamEndpoint,
+    { username: credentials.username, password: credentials.password },
+    CLIENT_IP,
+  ).then(
+    () => 'resolved',
+    (err: unknown) => (err instanceof AdapterError ? err.code : String(err)),
+  );
+}
+
 function parsed(frames: string[]): Record<string, unknown>[] {
   return frames.flatMap((f) => {
     try {
@@ -213,6 +225,9 @@ describe('session gateway against pinned MeshCentral', () => {
     expect(asset.headers['set-cookie']).toBeUndefined();
 
     const real = stack.credentialsOf(s.sessionId);
+    // Ijobiy nazorat: ushlangan parol haqiqiy (aks holda tekshiruv bo'sh o'tadi).
+    expect(real.password.length).toBeGreaterThanOrEqual(16);
+    expect(await loginOutcome(real)).toBe('resolved');
     const secrets = [
       real.password,
       ...real.upstreamCookies,
@@ -373,6 +388,9 @@ describe('session gateway against pinned MeshCentral', () => {
     const page = await s.browser.get(s.entryPath);
     const handle = pageValue(page.body, 'authCookie');
     const credentials = stack.credentialsOf(s.sessionId);
+    // Ijobiy nazorat: ushlangan login/parol haqiqiy, ya'ni revoke'dan keyingi rad bo'sh o'tmaydi.
+    expect(credentials.password.length).toBeGreaterThanOrEqual(16);
+    expect(await loginOutcome(credentials)).toBe('resolved');
 
     const control = await openControl(s);
     await frameWhere(control, (f) => f.action === 'serverinfo');
@@ -389,14 +407,6 @@ describe('session gateway against pinned MeshCentral', () => {
 
     expect((await s.browser.get('/scripts/x.js')).status).toBe(401);
     expect(await upgrade(s.browser.socket('/control.ashx'))).toBe(401);
-    const login = await loginPrincipal(
-      stack.upstreamEndpoint,
-      { username: credentials.username, password: credentials.password },
-      CLIENT_IP,
-    ).then(
-      () => 'resolved',
-      (err: unknown) => (err instanceof AdapterError ? err.code : String(err)),
-    );
-    expect(login).toBe('upstream_auth_failed');
+    expect(await loginOutcome(credentials)).toBe('upstream_auth_failed');
   });
 });
