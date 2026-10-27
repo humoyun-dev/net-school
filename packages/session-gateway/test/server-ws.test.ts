@@ -493,6 +493,81 @@ describe('gateway WS: proxying', () => {
   });
 });
 
+describe('gateway WS: backpressure', () => {
+  const FRAME = 16 * 1024;
+  const FRAMES = 1_200; // ~19 MB: yadro bufferlaridan ancha katta
+
+  // Birinchi 4 bayt: tartib raqami.
+  const frame = (n: number): Buffer => {
+    const b = Buffer.alloc(FRAME, 7);
+    b.writeUInt32BE(n, 0);
+    return b;
+  };
+
+  test('paused browser pauses the upstream source instead of buffering without bound', async () => {
+    await restart({ wsHighWaterMark: 64 * 1024 });
+    const value = await login(1);
+    const browser = await openBrowser(value);
+    await until(() => conns.length === 1);
+    browser.ws.pause(); // brauzer o'qimaydi
+
+    for (let n = 0; n < FRAMES; n++) conn(0).ws.send(frame(n));
+    await tick(600);
+
+    // Gateway upstream'dan o'qishni to'xtatgan: oqim upstream tomonda qolgan, gateway xotirasida emas.
+    expect(conn(0).ws.bufferedAmount).toBeGreaterThan(4 * 1024 * 1024);
+    expect(browser.closeCode()).toBeUndefined(); // juft yopilmagan
+    expect(sess(0).frames.length).toBeLessThan(FRAMES / 2);
+  });
+
+  test('resumed browser drains and the stream continues', async () => {
+    await restart({ wsHighWaterMark: 64 * 1024 });
+    const value = await login(1);
+    const browser = await openBrowser(value);
+    await until(() => conns.length === 1);
+    browser.ws.pause();
+    for (let n = 0; n < FRAMES; n++) conn(0).ws.send(frame(n));
+    await tick(300);
+    expect(sess(0).frames.length).toBeLessThan(FRAMES);
+
+    browser.ws.resume();
+    await until(() => browser.messages.length === FRAMES, 10_000);
+    expect(browser.messages.map((m) => m.data.readUInt32BE(0))).toEqual(Array.from({ length: FRAMES }, (_, n) => n));
+    expect(conn(0).ws.bufferedAmount).toBe(0);
+    expect(browser.closeCode()).toBeUndefined();
+  });
+
+  test('a paused upstream pauses the browser source in the up direction', async () => {
+    await restart({ wsHighWaterMark: 64 * 1024 });
+    const value = await login(1);
+    const browser = await openBrowser(value);
+    await until(() => conns.length === 1);
+    conn(0).ws.pause(); // upstream o'qimaydi
+
+    for (let n = 0; n < FRAMES; n++) browser.ws.send(frame(n));
+    await tick(600);
+    expect(browser.ws.bufferedAmount).toBeGreaterThan(4 * 1024 * 1024);
+    expect(browser.closeCode()).toBeUndefined();
+
+    conn(0).ws.resume();
+    await until(() => conn(0).received.length === FRAMES, 10_000);
+    expect(conn(0).received.map((m) => m.data.readUInt32BE(0))).toEqual(Array.from({ length: FRAMES }, (_, n) => n));
+  });
+
+  test('exceeding 4x the high-water mark closes the pair with 1008 and emits upstream_error', async () => {
+    await restart({ wsHighWaterMark: 16 * 1024 });
+    const value = await login(1);
+    const browser = await openBrowser(value);
+    await until(() => conns.length === 1);
+    conn(0).ws.send(Buffer.alloc(128 * 1024, 1)); // 128 KiB > 4 * 16 KiB
+    await until(() => browser.closeCode() !== undefined, 1000);
+    expect(browser.closeCode()).toBe(1008);
+    await until(() => conn(0).closed, 1000);
+    expect(events).toContainEqual({ type: 'upstream_error', sessionId: 'rs-1', message: 'backpressure' });
+    expect(browser.messages).toEqual([]);
+  });
+});
+
 describe('gateway WS: disconnect', () => {
   test('registry close() closes both browser and upstream sockets within 1 s', async () => {
     const value = await login(1);

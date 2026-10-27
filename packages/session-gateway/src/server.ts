@@ -12,6 +12,7 @@ export const GATEWAY_COOKIE = '__Host-ns_rs';
 
 const DEFAULT_MAX_HTML_BYTES = 5 * 1024 * 1024;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000;
+const DEFAULT_WS_HIGH_WATER_MARK = 8 * 1024 * 1024;
 
 export interface GatewayOptions {
   tls: { key: string; cert: string };
@@ -22,6 +23,7 @@ export interface GatewayOptions {
   publicOrigin: string; // brauzer ko'radigan origin; WS Origin tekshiruvi shunga teng bo'lishi shart
   maxHtmlBytes?: number;
   upstreamTimeoutMs?: number; // upstream soketi shuncha jim tursa 504 (default 30 s)
+  wsHighWaterMark?: number; // WS manzil buferi shundan oshsa manba pauza qilinadi, 4x da juft yopiladi (default 8 MiB)
   onEvent?: (e: GatewayEvent) => void;
 }
 
@@ -310,6 +312,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
     publicOrigin: opts.publicOrigin,
     upstream: opts.upstream,
     upstreamTimeoutMs,
+    highWaterMark: opts.wsHighWaterMark ?? DEFAULT_WS_HIGH_WATER_MARK,
     emit,
   });
   server.on('upgrade', (req, socket, head) => {

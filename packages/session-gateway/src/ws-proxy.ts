@@ -11,7 +11,9 @@ const BROWSER_CLOSE_GRACE_MS = 1_000;
 
 const CLOSE_NORMAL = 1000;
 const CLOSE_TOO_BIG = 1009;
+const CLOSE_POLICY = 1008;
 const CLOSE_INTERNAL = 1011;
+const HARD_CAP_FACTOR = 4;
 
 type Channel = 'control' | 'relay';
 type Direction = 'up' | 'down';
@@ -25,6 +27,7 @@ export interface WsProxyOptions {
   publicOrigin: string;
   upstream: { origin: string; ca: string | Buffer; servername?: string };
   upstreamTimeoutMs: number;
+  highWaterMark: number; // manzil bufferi shundan oshsa manba pauza qilinadi
   emit: (e: GatewayEvent) => void;
 }
 
@@ -135,15 +138,25 @@ export function createWsProxy(opts: WsProxyOptions): WsProxy {
       }
       return undefined;
     };
-    const send = (dst: WebSocket, data: string | Buffer, isBinary: boolean): void => {
+    // Backpressure: manzil sekin bo'lsa manba pauza qilinadi, yuborish tugaganda davom ettiriladi;
+    // pauza yetmasa (4x chegara) juft yopiladi: xotira hech qachon cheksiz o'smaydi.
+    const send = (src: WebSocket, dst: WebSocket, data: string | Buffer, isBinary: boolean): void => {
       if (dst.readyState !== WebSocket.OPEN) return;
+      const size = typeof data === 'string' ? Buffer.byteLength(data) : data.length;
+      if (dst.bufferedAmount + size > opts.highWaterMark * HARD_CAP_FACTOR) {
+        emit({ type: 'upstream_error', sessionId: session.id, message: 'backpressure' });
+        closeBoth(CLOSE_POLICY); // kadr yuborilmaydi
+        return;
+      }
       dst.send(data, { binary: isBinary }, (err) => {
-        if (err) closeBoth(CLOSE_INTERNAL);
+        if (err) return closeBoth(CLOSE_INTERNAL);
+        if (src.isPaused && dst.bufferedAmount < opts.highWaterMark / 2) src.resume();
       });
+      if (dst.bufferedAmount > opts.highWaterMark && !src.isPaused) src.pause();
     };
     const forwardUp = (data: Buffer, isBinary: boolean): void => {
       const out = filter('up', data, isBinary);
-      if (out !== undefined) send(upstream, out, isBinary);
+      if (out !== undefined) send(browser, upstream, out, isBinary);
     };
 
     browser.on('message', (raw, isBinary) => {
@@ -170,7 +183,7 @@ export function createWsProxy(opts: WsProxyOptions): WsProxy {
 
     upstream.on('open', () => {
       if (finished || session.closed) {
-        closeBoth(1008);
+        closeBoth(CLOSE_POLICY);
         return;
       }
       for (const frame of queue.splice(0)) {
@@ -180,7 +193,7 @@ export function createWsProxy(opts: WsProxyOptions): WsProxy {
     });
     upstream.on('message', (raw, isBinary) => {
       const out = filter('down', asBuffer(raw), isBinary);
-      if (out !== undefined) send(browser, out, isBinary);
+      if (out !== undefined) send(upstream, browser, out, isBinary);
     });
     upstream.on('error', (err) => {
       if (finished || closing) return; // o'zimiz terminate() qilgan: xato kutilgan
