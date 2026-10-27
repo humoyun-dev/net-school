@@ -22,7 +22,10 @@ export interface MeshCentralViewerUpstreamOptions {
   admin: MeshRequester;
   endpoint: UpstreamEndpoint;
   publicHost: string;
+  login?: typeof loginPrincipal; // sinov uchun almashtiriladi; default: loginPrincipal
 }
+
+const CLOSED = { ok: false, reason: 'session_closed' } as const;
 
 // Har sessiya uchun alohida principal yaratadi; admin ulanishi faqat shu yerda ishlatiladi.
 export class MeshCentralViewerUpstream {
@@ -47,10 +50,13 @@ export class MeshCentralViewerSession {
   readonly #endpoint: UpstreamEndpoint;
   readonly #publicHost: string;
   readonly #principals: MeshCentralPrincipals;
+  readonly #loginFn: typeof loginPrincipal;
   #jar: CookieJar | undefined;
   #clientIp: string | undefined;
   #login: Promise<void> | undefined;
-  #revoked: Promise<void> | undefined;
+  // #closed: revoke() chaqirilgach sessiya butunlay yopiq; #deleted: deleteuser bajarildi (xato bo'lsa qayta uriniladi).
+  #closed = false;
+  #deleted: Promise<void> | undefined;
 
   constructor(
     principal: SessionPrincipal,
@@ -63,20 +69,22 @@ export class MeshCentralViewerSession {
     this.#endpoint = opts.endpoint;
     this.#publicHost = opts.publicHost;
     this.#principals = principals;
+    this.#loginFn = opts.login ?? loginPrincipal;
     this.entryPath = viewerEntryPath(principal.nodeId);
   }
 
   // Birinchi chaqiruvda login; sessiya shu IP'ga bog'lanadi, boshqa IP rad etiladi.
   async attach(clientIp: string): Promise<void> {
-    if (this.#revoked) throw new AdapterError('scope_denied', 'Viewer session is revoked');
+    this.#assertOpen();
     if (this.#clientIp !== undefined && this.#clientIp !== clientIp) {
       throw new AdapterError('scope_denied', 'Viewer session is bound to another client IP');
     }
     if (!this.#login) {
       this.#clientIp = clientIp;
-      this.#login = loginPrincipal(this.#endpoint, this.#principal, clientIp).then(
+      this.#login = this.#loginFn(this.#endpoint, this.#principal, clientIp).then(
         (jar) => {
-          this.#jar = jar;
+          // Login davomida revoke boshlangan bo'lsa, cookie saqlanmaydi.
+          if (!this.#closed) this.#jar = jar;
         },
         (err: unknown) => {
           // Muvaffaqiyatsiz login keyingi urinishni to'smaydi.
@@ -87,17 +95,20 @@ export class MeshCentralViewerSession {
       );
     }
     await this.#login;
+    // Login kutilayotganda revoke boshlangan bo'lishi mumkin.
+    this.#assertOpen();
   }
 
   routeHttp(method: string, url: URL): RouteVerdict {
-    return routeViewerHttp(method, url, this.#ctx);
+    return this.#closed ? CLOSED : routeViewerHttp(method, url, this.#ctx);
   }
 
   routeWs(url: URL): RouteVerdict {
-    return routeViewerWs(url, this.#ctx);
+    return this.#closed ? CLOSED : routeViewerWs(url, this.#ctx);
   }
 
   requestHeaders(): Record<string, string> {
+    if (this.#closed) return {};
     if (!this.#jar || this.#clientIp === undefined) {
       throw new AdapterError('scope_denied', 'Viewer session is not attached');
     }
@@ -105,11 +116,13 @@ export class MeshCentralViewerSession {
   }
 
   absorbSetCookie(values: readonly string[]): void {
+    if (this.#closed) return;
     if (!this.#jar) throw new AdapterError('scope_denied', 'Viewer session is not attached');
     this.#jar.absorb(values);
   }
 
   rewriteHtml(url: URL, html: string): string {
+    this.#assertOpen();
     return url.pathname === '/' ? rewriteViewerHtml(html, this.#ctx, this.#publicHost) : html;
   }
 
@@ -119,6 +132,7 @@ export class MeshCentralViewerSession {
     data: string | Buffer,
     isBinary: boolean,
   ): FrameVerdict {
+    if (this.#closed) return CLOSED;
     if (channel === 'relay') {
       return direction === 'up' ? filterRelayUp(data, isBinary, this.#ctx.mode) : { ok: true, data };
     }
@@ -127,16 +141,22 @@ export class MeshCentralViewerSession {
     return direction === 'up' ? filterControlUp(text, this.#ctx) : filterControlDown(text, this.#ctx);
   }
 
-  // Principal o'chirilishi control.ashx sessiyalarini ham yopadi; qayta chaqiruv no-op.
+  // Birinchi chaqiruvdanoq sessiya butunlay yopiladi (deleteuser xato bersa ham); faqat deleteuser qayta uriniladi.
   revoke(): Promise<void> {
-    this.#revoked ??= (async () => {
+    this.#closed = true;
+    this.#jar = undefined;
+    this.#deleted ??= (async () => {
       await this.#login?.catch(() => {});
+      this.#jar = undefined;
       await this.#principals.revoke(this.#principal.userId);
     })().catch((err: unknown) => {
-      // O'chirish muvaffaqiyatsiz bo'lsa, qayta urinish mumkin.
-      this.#revoked = undefined;
+      this.#deleted = undefined;
       throw err;
     });
-    return this.#revoked;
+    return this.#deleted;
+  }
+
+  #assertOpen(): void {
+    if (this.#closed) throw new AdapterError('upstream_unavailable', 'Viewer session is closed');
   }
 }
