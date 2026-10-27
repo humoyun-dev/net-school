@@ -4,9 +4,12 @@ export {
   type FrameVerdict,
   filterControlDown,
   filterControlUp,
+  filterRelayUp,
   type RouteVerdict,
+  rewriteViewerHtml,
   routeViewerHttp,
   routeViewerWs,
+  VIEW_ONLY_INPUT_COMMANDS,
   type ViewerContext,
   viewerEntryPath,
 } from './desktop/viewer-policy.ts';

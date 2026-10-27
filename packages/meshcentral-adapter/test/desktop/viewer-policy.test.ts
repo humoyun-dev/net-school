@@ -1,13 +1,18 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { CredentialHandles } from '../../src/desktop/credential-handles.ts';
 import {
   filterControlDown,
   filterControlUp,
+  filterRelayUp,
+  rewriteViewerHtml,
   routeViewerHttp,
   routeViewerWs,
+  VIEW_ONLY_INPUT_COMMANDS,
   type ViewerContext,
   viewerEntryPath,
 } from '../../src/desktop/viewer-policy.ts';
+import { AdapterError } from '../../src/errors.ts';
 
 const NODE = 'node//abc';
 const OTHER = 'node//xyz';
@@ -471,5 +476,141 @@ describe('filterControlDown', () => {
     ctx.handles.remember('relay', 'OLDRELAY');
     const text = JSON.stringify({ action: 'authcookie', cookie: 'NEW', note: 'OLDRELAY' });
     expect(filterControlDown(text, ctx)).toEqual({ ok: false, reason: 'credential_leak' });
+  });
+});
+
+function relayFrame(cmd: number, size?: number, length = 8): Buffer {
+  const buf = Buffer.alloc(length);
+  if (length >= 2) buf.writeUInt16BE(cmd, 0);
+  if (length >= 4) buf.writeUInt16BE(size ?? length, 2);
+  return buf;
+}
+
+describe('filterRelayUp', () => {
+  test('filterRelayUp drops every view-only input command', () => {
+    expect([...VIEW_ONLY_INPUT_COMMANDS].sort((a, b) => a - b)).toEqual([1, 2, 10, 12, 85, 87]);
+    for (const cmd of VIEW_ONLY_INPUT_COMMANDS) {
+      const frame = relayFrame(cmd);
+      expect(filterRelayUp(frame, true, 'view').ok).toBe(false);
+      expect(filterRelayUp(frame, true, 'control')).toEqual({ ok: true, data: frame });
+    }
+  });
+
+  test('filterRelayUp passes non-input desktop commands in view mode', () => {
+    for (const cmd of [6, 5]) {
+      const frame = relayFrame(cmd);
+      expect(filterRelayUp(frame, true, 'view')).toEqual({ ok: true, data: frame });
+    }
+  });
+
+  test('filterRelayUp drops malformed binary frames in view mode', () => {
+    expect(filterRelayUp(relayFrame(6, 3, 3), true, 'view').ok).toBe(false);
+    expect(filterRelayUp(Buffer.alloc(0), true, 'view').ok).toBe(false);
+    expect(filterRelayUp(relayFrame(6, 9, 8), true, 'view').ok).toBe(false);
+    expect(filterRelayUp(relayFrame(6, 7, 8), true, 'view').ok).toBe(false);
+    expect(filterRelayUp('binary as string', true, 'view').ok).toBe(false);
+  });
+
+  test('filterRelayUp allows the protocol number and options text frames', () => {
+    for (const mode of ['view', 'control'] as const) {
+      expect(filterRelayUp('2', false, mode)).toEqual({ ok: true, data: '2' });
+      expect(filterRelayUp(Buffer.from('2'), false, mode)).toEqual({ ok: true, data: Buffer.from('2') });
+      const opts = JSON.stringify({ type: 'options', consent: 0 });
+      expect(filterRelayUp(opts, false, mode)).toEqual({ ok: true, data: opts });
+    }
+  });
+
+  test('filterRelayUp drops other text frames', () => {
+    for (const text of ['', '1', '3', '2 ', ' 2', 'c', '{', '[]', 'null', '"2"', '{"type":"unknown"}', '{"a":1}']) {
+      expect(filterRelayUp(text, false, 'control').ok).toBe(false);
+    }
+  });
+
+  test('filterRelayUp drops WebRTC negotiation in both modes', () => {
+    const frames = [
+      JSON.stringify({ type: 'offer', sdp: 'x' }),
+      JSON.stringify({ type: 'answer', sdp: 'x' }),
+      JSON.stringify({ ctrlChannel: '102938', type: 'webrtc0' }),
+      JSON.stringify({ ctrlChannel: '102938', type: 'webrtc1' }),
+      JSON.stringify({ ctrlChannel: '102938', type: 'webrtc2' }),
+    ];
+    for (const mode of ['view', 'control'] as const) {
+      for (const f of frames) expect(filterRelayUp(f, false, mode).ok).toBe(false);
+    }
+  });
+
+  test('filterRelayUp allows lock only for control', () => {
+    for (const type of ['lock', 'autolock']) {
+      const f = JSON.stringify({ ctrlChannel: '102938', type });
+      expect(filterRelayUp(f, false, 'control')).toEqual({ ok: true, data: f });
+      expect(filterRelayUp(f, false, 'view').ok).toBe(false);
+    }
+    const wrongChannel = JSON.stringify({ ctrlChannel: '1', type: 'lock' });
+    expect(filterRelayUp(wrongChannel, false, 'control').ok).toBe(false);
+    const noChannel = JSON.stringify({ type: 'lock' });
+    expect(filterRelayUp(noChannel, false, 'control').ok).toBe(false);
+  });
+});
+
+const PAGE = readFileSync(new URL('../fixtures/viewer-page.html', import.meta.url), 'utf8');
+const PUBLIC_HOST = 'gw.example:9443';
+const REAL_AUTH = 'REAL-AUTH-COOKIE@1';
+const REAL_RELAY = 'REAL-RELAY-COOKIE$2';
+
+describe('rewriteViewerHtml', () => {
+  test('rewriteViewerHtml replaces credentials and public host', () => {
+    const ctx = makeCtx();
+    const out = rewriteViewerHtml(PAGE, ctx, PUBLIC_HOST);
+    expect(out).not.toContain(REAL_AUTH);
+    expect(out).not.toContain(REAL_RELAY);
+    expect(out).not.toContain('mesh.internal');
+    expect(out).toContain(`var serverPublicNamePort = '${PUBLIC_HOST}';`);
+    const auth = /var authCookie = '([^']*)';/.exec(out)?.[1] ?? '';
+    const relay = /var authRelayCookie = '([^']*)';/.exec(out)?.[1] ?? '';
+    expect(ctx.handles.resolve('auth', auth)).toBe(REAL_AUTH);
+    expect(ctx.handles.resolve('relay', relay)).toBe(REAL_RELAY);
+    expect(out).toContain('var multiDesktop = {};');
+  });
+
+  test('rewriteViewerHtml does not interpret $ patterns in the public host', () => {
+    const out = rewriteViewerHtml(PAGE, makeCtx(), 'gw.example:9443');
+    expect(out).not.toContain('$');
+  });
+
+  test('rewriteViewerHtml fails closed when a credential line is missing or duplicated', () => {
+    const lines = [
+      "var authCookie = 'REAL-AUTH-COOKIE@1';",
+      "var authRelayCookie = 'REAL-RELAY-COOKIE$2';",
+      "var serverPublicNamePort = 'mesh.internal:8443';",
+    ];
+    const bad = (html: string) => {
+      try {
+        rewriteViewerHtml(html, makeCtx(), PUBLIC_HOST);
+      } catch (error) {
+        expect(error).toBeInstanceOf(AdapterError);
+        expect((error as AdapterError).code).toBe('invalid_upstream_message');
+        return;
+      }
+      throw new Error('expected rewriteViewerHtml to throw');
+    };
+    for (const line of lines) {
+      expect(PAGE).toContain(line);
+      bad(PAGE.replace(line, ''));
+      bad(PAGE.replace(line, `${line}\n${line.replace(/'[^']*'/, "'OTHER'")}`));
+      bad(PAGE.replace(line, line.replace(/'[^']*'/, "''")));
+    }
+  });
+
+  test('rewriteViewerHtml fails closed when a credential appears elsewhere in the page', () => {
+    for (const real of [REAL_AUTH, REAL_RELAY]) {
+      const html = PAGE.replace('</body>', `<div data-x="${real}"></div></body>`);
+      expect(() => rewriteViewerHtml(html, makeCtx(), PUBLIC_HOST)).toThrowError(AdapterError);
+    }
+  });
+
+  test('rewriteViewerHtml rejects an unsafe public host', () => {
+    for (const host of ['', "a'b", 'a b', 'a\nb', '</script>', "x';alert(1);'"]) {
+      expect(() => rewriteViewerHtml(PAGE, makeCtx(), host)).toThrowError(AdapterError);
+    }
   });
 });

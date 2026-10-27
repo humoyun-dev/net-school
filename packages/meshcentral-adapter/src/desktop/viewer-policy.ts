@@ -1,4 +1,5 @@
 import type { RemoteMode } from '@netschool/domain';
+import { AdapterError } from '../errors.ts';
 import type { CredentialHandles } from './credential-handles.ts';
 
 export type RouteVerdict = { ok: true; upstreamPath: string } | { ok: false; reason: string };
@@ -188,4 +189,69 @@ export function filterControlDown(text: string, ctx: ViewerContext): FrameVerdic
     if (real !== '' && (out.includes(real) || normalized.includes(real))) return deny('credential_leak');
   }
   return { ok: true, data: out };
+}
+
+// Ko'rish rejimida agent tomoni ham rad etadigan desktop kiritish buyruqlari (klaviatura, sichqoncha, ...).
+export const VIEW_ONLY_INPUT_COMMANDS: ReadonlySet<number> = new Set([1, 2, 10, 12, 85, 87]);
+
+const LOCK_CHANNEL = '102938';
+const LOCK_TYPES = new Set(['lock', 'autolock']);
+const HEADER_BYTES = 4;
+
+// Relay'ga yuqoriga: aniq ruxsat etilganlardan boshqasi rad (WebRTC ham yopiq).
+export function filterRelayUp(data: string | Buffer, isBinary: boolean, mode: RemoteMode): FrameVerdict {
+  if (isBinary) {
+    if (typeof data === 'string') return deny('binary_string');
+    return mode === 'control' ? { ok: true, data } : filterViewBinary(data);
+  }
+  const text = typeof data === 'string' ? data : data.toString('utf8');
+  if (text === '2') return { ok: true, data };
+
+  const frame = parseObject(text);
+  if (!frame) return deny('relay_text');
+  if (frame.type === 'options') return { ok: true, data };
+  if (mode === 'control' && frame.ctrlChannel === LOCK_CHANNEL && typeof frame.type === 'string') {
+    if (LOCK_TYPES.has(frame.type)) return { ok: true, data };
+  }
+  return deny('relay_text');
+}
+
+function filterViewBinary(data: Buffer): FrameVerdict {
+  if (data.length < HEADER_BYTES || data.readUInt16BE(2) !== data.length) return deny('relay_malformed');
+  if (VIEW_ONLY_INPUT_COMMANDS.has(data.readUInt16BE(0))) return deny('relay_input');
+  return { ok: true, data };
+}
+
+const AUTH_LINE = /var authCookie = '([^']*)';/g;
+const RELAY_LINE = /var authRelayCookie = '([^']*)';/g;
+const HOST_LINE = /var serverPublicNamePort = '([^']*)';/g;
+const PUBLIC_HOST = /^[A-Za-z0-9.-]+(?::\d{1,5})?$/;
+
+function invalidPage(message: string): AdapterError {
+  return new AdapterError('invalid_upstream_message', message);
+}
+
+// Har bir qator aynan bir marta va bo'sh bo'lmagan qiymat bilan bo'lishi shart.
+function singleValue(html: string, pattern: RegExp, name: string): void {
+  const matches = [...html.matchAll(pattern)];
+  if (matches.length !== 1) throw invalidPage(`Viewer page: ${name} must appear exactly once`);
+  if ((matches[0]?.[1] ?? '') === '') throw invalidPage(`Viewer page: ${name} is empty`);
+}
+
+// Sahifadagi real cookie'lar opaque handle'ga, upstream host gateway hostiga almashtiriladi.
+export function rewriteViewerHtml(html: string, ctx: ViewerContext, publicHost: string): string {
+  if (!PUBLIC_HOST.test(publicHost)) throw invalidPage('Viewer page: invalid public host');
+  singleValue(html, AUTH_LINE, 'authCookie');
+  singleValue(html, RELAY_LINE, 'authRelayCookie');
+  singleValue(html, HOST_LINE, 'serverPublicNamePort');
+
+  const out = html
+    .replace(AUTH_LINE, (_line, real: string) => `var authCookie = '${ctx.handles.remember('auth', real)}';`)
+    .replace(RELAY_LINE, (_line, real: string) => `var authRelayCookie = '${ctx.handles.remember('relay', real)}';`)
+    .replace(HOST_LINE, () => `var serverPublicNamePort = '${publicHost}';`);
+
+  for (const real of ctx.handles.reals()) {
+    if (real !== '' && out.includes(real)) throw invalidPage('Viewer page: credential left in page');
+  }
+  return out;
 }
