@@ -3,10 +3,10 @@ export { CookieJar } from './desktop/cookie-jar.ts';
 export { CredentialHandles, type CredentialKind } from './desktop/credential-handles.ts';
 export { loginPrincipal, type UpstreamEndpoint } from './desktop/upstream-login.ts';
 export {
+  type FrameFilter,
   type FrameVerdict,
   filterControlDown,
   filterControlUp,
-  filterRelayUp,
   type RouteVerdict,
   rewriteViewerHtml,
   routeViewerHttp,
@@ -14,6 +14,7 @@ export {
   VIEW_ONLY_INPUT_COMMANDS,
   type ViewerContext,
   viewerEntryPath,
+  type WsRouteVerdict,
 } from './desktop/viewer-policy.ts';
 export {
   MeshCentralViewerSession,

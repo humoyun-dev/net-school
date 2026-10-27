@@ -367,6 +367,30 @@ describe('gateway WS: proxying', () => {
     ]);
   });
 
+  test('each connection uses its own filter from routeWs for both directions', async () => {
+    const value = await login(1);
+    const a = await openBrowser(value);
+    await until(() => conns.length === 1);
+    const b = await openBrowser(value, '/meshrelay.ashx');
+    await until(() => conns.length === 2);
+    expect(sess(0).filterCalls).toEqual([0, 0]);
+
+    a.ws.send('a-up');
+    b.ws.send('b-up-1');
+    b.ws.send('b-up-2');
+    await until(() => conn(0).received.length === 1 && conn(1).received.length === 2);
+    conn(1).ws.send('b-down');
+    await until(() => b.messages.length === 1);
+
+    expect(sess(0).filterCalls).toEqual([1, 3]);
+    expect(sess(0).frames.map((f) => `${f.channel}:${f.direction}:${String(f.data)}`)).toEqual([
+      'control:up:a-up',
+      'relay:up:b-up-1',
+      'relay:up:b-up-2',
+      'relay:down:b-down',
+    ]);
+  });
+
   test('meshrelay.ashx frames are filtered on the relay channel', async () => {
     const value = await login(1);
     const browser = await openBrowser(value, '/meshrelay.ashx');
@@ -411,7 +435,7 @@ describe('gateway WS: proxying', () => {
     expect(conn(0).ws.readyState).toBe(WebSocket.OPEN);
   });
 
-  test('filterFrame throwing drops the frame, emits filter_error and closes both sides', async () => {
+  test('connection filter throwing drops the frame, emits filter_error and closes both sides', async () => {
     const value = await login(1);
     sess(0).frameFilter = () => {
       throw new Error('session closed');
@@ -433,7 +457,7 @@ describe('gateway WS: proxying', () => {
     expect(sess(0).frames).toHaveLength(1);
   });
 
-  test('downstream filterFrame throwing also closes both sides', async () => {
+  test('downstream connection filter throwing also closes both sides', async () => {
     const value = await login(1);
     const browser = await openBrowser(value);
     await until(() => conns.length === 1);

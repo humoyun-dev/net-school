@@ -2,22 +2,19 @@ import type { AuthorizedDesktopRequest } from '@netschool/domain';
 
 export type RouteVerdict = { ok: true; upstreamPath: string } | { ok: false; reason: string };
 export type FrameVerdict = { ok: true; data: string | Buffer } | { ok: false; reason: string };
+// Bitta WS ulanishiga bog'langan kadr filtri: holat (masalan relay protokoli) shu ulanishda saqlanadi.
+export type FrameFilter = (direction: 'up' | 'down', data: string | Buffer, isBinary: boolean) => FrameVerdict;
+export type WsRouteVerdict = { ok: true; upstreamPath: string; filter: FrameFilter } | { ok: false; reason: string };
 
 // Upstream sessiyasi (MeshCentral'dan mustaqil): a'zolar adapterdagi MeshCentralViewerSession bilan bir xil.
 export interface UpstreamViewerSession {
   readonly entryPath: string;
   attach(clientIp: string): Promise<void>;
   routeHttp(method: string, url: URL): RouteVerdict;
-  routeWs(url: URL): RouteVerdict;
+  routeWs(url: URL): WsRouteVerdict;
   requestHeaders(): Record<string, string>;
   absorbSetCookie(values: readonly string[]): void;
   rewriteHtml(url: URL, html: string): string;
-  filterFrame(
-    channel: 'control' | 'relay',
-    direction: 'up' | 'down',
-    data: string | Buffer,
-    isBinary: boolean,
-  ): FrameVerdict;
   revoke(): Promise<void>;
 }
 

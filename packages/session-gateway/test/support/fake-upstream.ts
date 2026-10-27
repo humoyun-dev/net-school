@@ -1,5 +1,11 @@
 import type { AuthorizedDesktopRequest } from '@netschool/domain';
-import type { FrameVerdict, RouteVerdict, UpstreamViewerSession, ViewerUpstream } from '../../src/types.ts';
+import type {
+  FrameVerdict,
+  RouteVerdict,
+  UpstreamViewerSession,
+  ViewerUpstream,
+  WsRouteVerdict,
+} from '../../src/types.ts';
 
 // Chaqiruvlar tartibini yozib boruvchi soxta upstream sessiya.
 export class FakeUpstreamSession implements UpstreamViewerSession {
@@ -10,8 +16,9 @@ export class FakeUpstreamSession implements UpstreamViewerSession {
   readonly attached: string[] = []; // attach(clientIp) chaqiruvlari
   httpVerdict: RouteVerdict = { ok: true, upstreamPath: '/' };
   routedHttp: Array<{ method: string; url: string }> = [];
-  wsVerdict: RouteVerdict = { ok: true, upstreamPath: '/' };
+  wsVerdict: RouteVerdict = { ok: true, upstreamPath: '/' }; // routeWs bunga ulanish filtrini qo'shadi
   readonly routedWs: string[] = [];
+  readonly filterCalls: number[] = []; // routeWs bergan har filtr (ulanish) necha marta chaqirilgani
   readonly frames: Array<{
     channel: 'control' | 'relay';
     direction: 'up' | 'down';
@@ -42,9 +49,18 @@ export class FakeUpstreamSession implements UpstreamViewerSession {
     this.routedHttp.push({ method, url: url.pathname + url.search });
     return this.httpVerdict;
   }
-  routeWs(url: URL): RouteVerdict {
+  routeWs(url: URL): WsRouteVerdict {
     this.routedWs.push(url.pathname + url.search);
-    return this.wsVerdict;
+    const verdict = this.wsVerdict;
+    if (!verdict.ok) return verdict;
+    const channel = url.pathname === '/meshrelay.ashx' ? 'relay' : 'control';
+    const index = this.filterCalls.push(0) - 1;
+    const filter = (direction: 'up' | 'down', data: string | Buffer, isBinary: boolean): FrameVerdict => {
+      this.filterCalls[index] = (this.filterCalls[index] ?? 0) + 1;
+      this.frames.push({ channel, direction, data, isBinary });
+      return this.frameFilter ? this.frameFilter(channel, direction, data, isBinary) : { ok: true, data };
+    };
+    return { ...verdict, filter };
   }
   requestHeaders(): Record<string, string> {
     if (this.headersError) throw this.headersError;
@@ -55,15 +71,6 @@ export class FakeUpstreamSession implements UpstreamViewerSession {
   }
   rewriteHtml(url: URL, html: string): string {
     return this.rewrite ? this.rewrite(url, html) : html;
-  }
-  filterFrame(
-    channel: 'control' | 'relay',
-    direction: 'up' | 'down',
-    data: string | Buffer,
-    isBinary: boolean,
-  ): FrameVerdict {
-    this.frames.push({ channel, direction, data, isBinary });
-    return this.frameFilter ? this.frameFilter(channel, direction, data, isBinary) : { ok: true, data };
   }
   async revoke(): Promise<void> {
     this.revokeCalls++;

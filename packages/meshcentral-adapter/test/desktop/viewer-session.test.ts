@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { CookieJar } from '../../src/desktop/cookie-jar.ts';
 import { MeshCentralViewerUpstream } from '../../src/desktop/viewer-upstream.ts';
@@ -8,6 +9,7 @@ const device = { meshInstanceId: 'mc1', meshDomainId: '', meshNodeId: 'abc' };
 const endpoint = { origin: 'https://localhost:1', ca: 'ca' };
 const IP = '10.0.0.1';
 const CLOSED = { ok: false, reason: 'session_closed' };
+const PAGE = readFileSync(new URL('../fixtures/viewer-page.html', import.meta.url), 'utf8');
 
 function jarWithSession(): CookieJar {
   const jar = new CookieJar();
@@ -52,6 +54,14 @@ describe('MeshCentralViewerSession revoke', () => {
     const session = await upstream.open({ sessionId: 's', actorId: 'a', device, mode: 'control' });
     await session.attach(IP);
     expect(session.requestHeaders().cookie).toContain('real-xid');
+    // Revoke'dan oldin ochilgan ulanishlarning filtrlari.
+    const page = session.rewriteHtml(new URL(`https://gw.test:9443${session.entryPath}`), PAGE);
+    const auth = /var authCookie = '([^']+)';/.exec(page)?.[1] ?? '';
+    const relayUrl = `wss://gw.test:9443/meshrelay.ashx?browser=1&p=2&nodeid=${encodeURIComponent('node//abc')}&id=abc&auth=${auth}`;
+    const control = session.routeWs(new URL('wss://gw.test:9443/control.ashx'));
+    const relay = session.routeWs(new URL(relayUrl));
+    if (!control.ok || !relay.ok) throw new Error('route denied before revoke');
+    expect(control.filter('up', '{"action":"ping"}', false).ok).toBe(true);
 
     await session.revoke();
 
@@ -60,10 +70,11 @@ describe('MeshCentralViewerSession revoke', () => {
     expect(session.requestHeaders()).toEqual({});
     expect(session.routeHttp('GET', new URL(`https://gw.test:9443${session.entryPath}`))).toEqual(CLOSED);
     expect(session.routeWs(new URL('wss://gw.test:9443/control.ashx'))).toEqual(CLOSED);
-    expect(session.filterFrame('control', 'up', '{"action":"ping"}', false)).toEqual(CLOSED);
-    expect(session.filterFrame('control', 'down', '{"action":"ping"}', false)).toEqual(CLOSED);
-    expect(session.filterFrame('relay', 'up', '2', false)).toEqual(CLOSED);
-    expect(session.filterFrame('relay', 'down', Buffer.from('x'), true)).toEqual(CLOSED);
+    expect(session.routeWs(new URL(relayUrl))).toEqual(CLOSED);
+    expect(control.filter('up', '{"action":"ping"}', false)).toEqual(CLOSED);
+    expect(control.filter('down', '{"action":"ping"}', false)).toEqual(CLOSED);
+    expect(relay.filter('up', '2', false)).toEqual(CLOSED);
+    expect(relay.filter('down', Buffer.from('x'), true)).toEqual(CLOSED);
     expect(await codeOf(session.attach(IP))).toBe('upstream_unavailable');
   });
 

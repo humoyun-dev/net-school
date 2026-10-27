@@ -3,7 +3,7 @@ import type { Duplex } from 'node:stream';
 import WebSocket, { type RawData, WebSocketServer } from 'ws';
 import { sanitizeRequestHeaders } from './headers.ts';
 import type { GatewaySession } from './registry.ts';
-import type { GatewayEvent } from './types.ts';
+import type { FrameFilter, GatewayEvent } from './types.ts';
 
 const MAX_PAYLOAD = 4 * 1024 * 1024;
 const MAX_QUEUED_BYTES = 1024 * 1024; // upstream ochilguncha navbatdagi brauzer kadrlari
@@ -80,6 +80,7 @@ export function createWsProxy(opts: WsProxyOptions): WsProxy {
     session: GatewaySession,
     channel: Channel,
     upstreamPath: string,
+    frameFilter: FrameFilter,
     headers: Record<string, string>,
   ): void {
     let finished = false; // brauzer tomoni yopildi
@@ -126,10 +127,10 @@ export function createWsProxy(opts: WsProxyOptions): WsProxy {
     session.sockets.add(handle);
     active.add(handle);
 
-    // Kadr filtri: istisno ham tashlash (filter_error) va ulanishni yopish.
+    // Kadr filtri (shu ulanishniki): istisno ham tashlash (filter_error) va ulanishni yopish.
     const filter = (direction: Direction, data: Buffer, isBinary: boolean): string | Buffer | undefined => {
       try {
-        const verdict = session.upstream.filterFrame(channel, direction, isBinary ? data : data.toString(), isBinary);
+        const verdict = frameFilter(direction, isBinary ? data : data.toString(), isBinary);
         if (verdict.ok) return verdict.data;
         emit({ type: 'frame_dropped', sessionId: session.id, channel, direction, reason: verdict.reason });
       } catch {
@@ -251,7 +252,7 @@ export function createWsProxy(opts: WsProxyOptions): WsProxy {
           setTimeout(() => browser.terminate(), BROWSER_CLOSE_GRACE_MS).unref();
           return;
         }
-        proxyPair(browser, session, channel, verdict.upstreamPath, headers);
+        proxyPair(browser, session, channel, verdict.upstreamPath, verdict.filter, headers);
       });
     },
     closeAll() {

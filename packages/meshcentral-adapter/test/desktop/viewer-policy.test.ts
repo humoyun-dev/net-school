@@ -5,7 +5,6 @@ import {
   entryNodeKey,
   filterControlDown,
   filterControlUp,
-  filterRelayUp,
   rewriteViewerHtml,
   routeViewerHttp,
   routeViewerWs,
@@ -137,7 +136,7 @@ describe('routeViewerWs', () => {
 
   test('routeViewerWs allows control.ashx without query only', () => {
     const ctx = makeCtx();
-    expect(routeViewerWs(u('/control.ashx'), ctx)).toEqual({ ok: true, upstreamPath: '/control.ashx' });
+    expect(routeViewerWs(u('/control.ashx'), ctx)).toMatchObject({ ok: true, upstreamPath: '/control.ashx' });
     expect(routeViewerWs(u('/control.ashx?auth=x'), ctx).ok).toBe(false);
     expect(routeViewerWs(u('/control.ashx/'), ctx).ok).toBe(false);
     expect(routeViewerWs(u('/other.ashx'), ctx).ok).toBe(false);
@@ -503,47 +502,178 @@ function relayFrame(cmd: number, size?: number, length = 8): Buffer {
   return buf;
 }
 
-describe('filterRelayUp', () => {
-  test('filterRelayUp drops every view-only input command', () => {
+type RelayUp = (data: string | Buffer, isBinary: boolean) => ReturnType<typeof filterControlUp>;
+
+// Bitta relay ulanishining filtri (routeViewerWs orqali, har chaqiruvda yangi holat).
+function relayFilter(mode: 'view' | 'control'): RelayUp {
+  const ctx = makeCtx(mode);
+  const auth = ctx.handles.remember('auth', 'REALAUTH');
+  const url = u(`/meshrelay.ashx?browser=1&p=2&nodeid=${encodeURIComponent(NODE)}&id=abc&auth=${auth}`);
+  const verdict = routeViewerWs(url, ctx);
+  if (!verdict.ok) throw new Error(verdict.reason);
+  return (data, isBinary) => verdict.filter('up', data, isBinary);
+}
+
+// Protokol '2' tanlangan relay ulanishi.
+function desktopFilter(mode: 'view' | 'control'): RelayUp {
+  const up = relayFilter(mode);
+  expect(up('2', false)).toEqual({ ok: true, data: '2' });
+  return up;
+}
+
+const MODES = ['view', 'control'] as const;
+const REGISTRY_PLUGIN_BINARY = Buffer.from([0x34, 0x00, 0x00, 0x04]); // parseInt -> 4, sarlavha uzunligi to'g'ri
+
+describe('relay protocol gate', () => {
+  test('protocol-selecting frames other than 2 are dropped before the protocol is chosen', () => {
+    for (const mode of MODES) {
+      const up = relayFilter(mode);
+      const frames: Array<[string | Buffer, boolean]> = [
+        [Buffer.from('4'), true],
+        [Buffer.from('7'), true],
+        ['4', false],
+        ['7', false],
+        [Buffer.from('4'), false],
+        [REGISTRY_PLUGIN_BINARY, true],
+        ['1', false],
+        ['10', false],
+        ['2 ', false],
+        [' 2', false],
+        ['02', false],
+      ];
+      for (const [data, isBinary] of frames) {
+        expect(up(data, isBinary), `${mode} ${String(data)}`).toEqual({ ok: false, reason: 'relay_protocol' });
+      }
+      // Rad etilgan kadrlar holatni o'zgartirmaydi: '2' hali ham birinchi tanlov.
+      expect(up('2', false)).toEqual({ ok: true, data: '2' });
+    }
+  });
+
+  test('any binary frame before the protocol is chosen is dropped', () => {
+    for (const mode of MODES) {
+      const up = relayFilter(mode);
+      expect(up(relayFrame(6, 4, 4), true)).toEqual({ ok: false, reason: 'relay_protocol' });
+      expect(up(Buffer.from('2'), true)).toEqual({ ok: false, reason: 'relay_protocol' });
+    }
+  });
+
+  test('a second protocol selection after 2 is dropped', () => {
+    for (const mode of MODES) {
+      const up = desktopFilter(mode);
+      for (const text of ['2', '4', '7']) {
+        expect(up(text, false), `${mode} ${text}`).toEqual({ ok: false, reason: 'relay_protocol' });
+      }
+    }
+  });
+
+  test('a binary frame whose command is 256 or more is dropped after 2 in both modes', () => {
+    for (const mode of MODES) {
+      const up = desktopFilter(mode);
+      expect(up(REGISTRY_PLUGIN_BINARY, true)).toEqual({ ok: false, reason: 'relay_malformed' });
+      expect(up(relayFrame(0x100, 4, 4), true)).toEqual({ ok: false, reason: 'relay_malformed' });
+      expect(up(relayFrame(0xff, 4, 4), true).ok).toBe(true);
+    }
+  });
+
+  test('binary frames with a malformed header are dropped in both modes', () => {
+    for (const mode of MODES) {
+      const up = desktopFilter(mode);
+      expect(up(relayFrame(6, 3, 3), true).ok).toBe(false);
+      expect(up(Buffer.alloc(0), true).ok).toBe(false);
+      expect(up(relayFrame(6, 9, 8), true).ok).toBe(false);
+      expect(up(relayFrame(6, 7, 8), true).ok).toBe(false);
+      expect(up('binary as string', true).ok).toBe(false);
+    }
+  });
+
+  test('the real viewer sequence passes: options, 2, desktop command', () => {
+    for (const mode of MODES) {
+      const up = relayFilter(mode);
+      const opts = JSON.stringify({ type: 'options', consent: 0 });
+      expect(up(opts, false)).toEqual({ ok: true, data: opts });
+      expect(up('2', false)).toEqual({ ok: true, data: '2' });
+      const frame = relayFrame(6, 4, 4);
+      expect(up(frame, true)).toEqual({ ok: true, data: frame });
+      const settings = relayFrame(5, 10, 10);
+      expect(up(settings, true)).toEqual({ ok: true, data: settings });
+    }
+  });
+
+  test('the protocol text frame may arrive as a Buffer', () => {
+    for (const mode of MODES) {
+      expect(relayFilter(mode)(Buffer.from('2'), false)).toEqual({ ok: true, data: Buffer.from('2') });
+    }
+  });
+
+  test('gate state is per connection', () => {
+    const ctx = makeCtx('control');
+    const auth = ctx.handles.remember('auth', 'REALAUTH');
+    const url = u(`/meshrelay.ashx?browser=1&p=2&nodeid=${encodeURIComponent(NODE)}&id=abc&auth=${auth}`);
+    const a = routeViewerWs(url, ctx);
+    const b = routeViewerWs(url, ctx);
+    if (!a.ok || !b.ok) throw new Error('route denied');
+    expect(a.filter('up', '2', false).ok).toBe(true);
+    expect(a.filter('up', relayFrame(6, 4, 4), true).ok).toBe(true);
+    expect(b.filter('up', relayFrame(6, 4, 4), true)).toEqual({ ok: false, reason: 'relay_protocol' });
+    expect(b.filter('up', '2', false).ok).toBe(true);
+  });
+
+  test('relay frames downstream pass through unchanged', () => {
+    const ctx = makeCtx('view');
+    const auth = ctx.handles.remember('auth', 'REALAUTH');
+    const url = u(`/meshrelay.ashx?browser=1&p=2&nodeid=${encodeURIComponent(NODE)}&id=abc&auth=${auth}`);
+    const verdict = routeViewerWs(url, ctx);
+    if (!verdict.ok) throw new Error(verdict.reason);
+    expect(verdict.filter('down', 'c', false)).toEqual({ ok: true, data: 'c' });
+    const frame = Buffer.from([0x34, 0, 0, 4]);
+    expect(verdict.filter('down', frame, true)).toEqual({ ok: true, data: frame });
+  });
+
+  test('control.ashx connection filter applies the control rules and drops binary', () => {
+    const ctx = makeCtx('view');
+    const verdict = routeViewerWs(u('/control.ashx'), ctx);
+    if (!verdict.ok) throw new Error(verdict.reason);
+    const ping = '{"action":"ping"}';
+    expect(verdict.filter('up', ping, false)).toEqual({ ok: true, data: ping });
+    expect(verdict.filter('up', '{"action":"getcookie"}', false).ok).toBe(false);
+    expect(verdict.filter('up', Buffer.from(ping), true)).toEqual({ ok: false, reason: 'control_binary' });
+    ctx.handles.remember('auth', 'REALAUTH');
+    expect(verdict.filter('down', '{"x":"REALAUTH"}', false)).toEqual({ ok: false, reason: 'credential_leak' });
+  });
+});
+
+describe('relay frames after protocol 2', () => {
+  test('every view-only input command is dropped in view mode only', () => {
     expect([...VIEW_ONLY_INPUT_COMMANDS].sort((a, b) => a - b)).toEqual([1, 2, 10, 12, 85, 87]);
     for (const cmd of VIEW_ONLY_INPUT_COMMANDS) {
       const frame = relayFrame(cmd);
-      expect(filterRelayUp(frame, true, 'view').ok).toBe(false);
-      expect(filterRelayUp(frame, true, 'control')).toEqual({ ok: true, data: frame });
+      expect(desktopFilter('view')(frame, true)).toEqual({ ok: false, reason: 'relay_input' });
+      expect(desktopFilter('control')(frame, true)).toEqual({ ok: true, data: frame });
     }
   });
 
-  test('filterRelayUp passes non-input desktop commands in view mode', () => {
+  test('non-input desktop commands pass in view mode', () => {
     for (const cmd of [6, 5]) {
       const frame = relayFrame(cmd);
-      expect(filterRelayUp(frame, true, 'view')).toEqual({ ok: true, data: frame });
+      expect(desktopFilter('view')(frame, true)).toEqual({ ok: true, data: frame });
     }
   });
 
-  test('filterRelayUp drops malformed binary frames in view mode', () => {
-    expect(filterRelayUp(relayFrame(6, 3, 3), true, 'view').ok).toBe(false);
-    expect(filterRelayUp(Buffer.alloc(0), true, 'view').ok).toBe(false);
-    expect(filterRelayUp(relayFrame(6, 9, 8), true, 'view').ok).toBe(false);
-    expect(filterRelayUp(relayFrame(6, 7, 8), true, 'view').ok).toBe(false);
-    expect(filterRelayUp('binary as string', true, 'view').ok).toBe(false);
-  });
-
-  test('filterRelayUp allows the protocol number and options text frames', () => {
-    for (const mode of ['view', 'control'] as const) {
-      expect(filterRelayUp('2', false, mode)).toEqual({ ok: true, data: '2' });
-      expect(filterRelayUp(Buffer.from('2'), false, mode)).toEqual({ ok: true, data: Buffer.from('2') });
+  test('options pass before and after 2', () => {
+    for (const mode of MODES) {
       const opts = JSON.stringify({ type: 'options', consent: 0 });
-      expect(filterRelayUp(opts, false, mode)).toEqual({ ok: true, data: opts });
+      expect(relayFilter(mode)(opts, false)).toEqual({ ok: true, data: opts });
+      expect(desktopFilter(mode)(opts, false)).toEqual({ ok: true, data: opts });
     }
   });
 
-  test('filterRelayUp strips autolock from options in view mode', () => {
+  test('autolock is stripped from options in view mode', () => {
     const inputs = [
       { type: 'options', autolock: true, x: 1 },
       { ctrlChannel: '102938', type: 'options', autolock: true },
     ];
     for (const input of inputs) {
-      const verdict = filterRelayUp(JSON.stringify(input), false, 'view');
+      const verdict = relayFilter('view')(JSON.stringify(input), false);
       expect(verdict.ok).toBe(true);
       if (!verdict.ok) continue;
       const { autolock: _removed, ...rest } = input;
@@ -551,26 +681,28 @@ describe('filterRelayUp', () => {
       expect(Object.hasOwn(JSON.parse(String(verdict.data)), 'autolock')).toBe(false);
     }
     const plain = JSON.stringify({ type: 'options', consent: 0 });
-    expect(filterRelayUp(plain, false, 'view')).toEqual({ ok: true, data: plain });
+    expect(relayFilter('view')(plain, false)).toEqual({ ok: true, data: plain });
   });
 
-  test('filterRelayUp keeps options unchanged in control mode', () => {
+  test('options are kept unchanged in control mode', () => {
     for (const input of [
       { type: 'options', autolock: true, x: 1 },
       { ctrlChannel: '102938', type: 'options', autolock: true },
     ]) {
       const text = JSON.stringify(input);
-      expect(filterRelayUp(text, false, 'control')).toEqual({ ok: true, data: text });
+      expect(relayFilter('control')(text, false)).toEqual({ ok: true, data: text });
     }
   });
 
-  test('filterRelayUp drops other text frames', () => {
-    for (const text of ['', '1', '3', '2 ', ' 2', 'c', '{', '[]', 'null', '"2"', '{"type":"unknown"}', '{"a":1}']) {
-      expect(filterRelayUp(text, false, 'control').ok).toBe(false);
+  test('other text frames are dropped before and after 2', () => {
+    const texts = ['', '1', '3', 'c', '{', '[]', 'null', '"2"', '{"type":"unknown"}', '{"a":1}', ' {"type":"options"}'];
+    for (const text of texts) {
+      expect(relayFilter('control')(text, false).ok, text).toBe(false);
+      expect(desktopFilter('control')(text, false).ok, text).toBe(false);
     }
   });
 
-  test('filterRelayUp drops WebRTC negotiation in both modes', () => {
+  test('WebRTC negotiation is dropped in both modes', () => {
     const frames = [
       JSON.stringify({ type: 'offer', sdp: 'x' }),
       JSON.stringify({ type: 'answer', sdp: 'x' }),
@@ -578,21 +710,26 @@ describe('filterRelayUp', () => {
       JSON.stringify({ ctrlChannel: '102938', type: 'webrtc1' }),
       JSON.stringify({ ctrlChannel: '102938', type: 'webrtc2' }),
     ];
-    for (const mode of ['view', 'control'] as const) {
-      for (const f of frames) expect(filterRelayUp(f, false, mode).ok).toBe(false);
+    for (const mode of MODES) {
+      for (const f of frames) {
+        expect(relayFilter(mode)(f, false).ok).toBe(false);
+        expect(desktopFilter(mode)(f, false).ok).toBe(false);
+      }
     }
   });
 
-  test('filterRelayUp allows lock only for control', () => {
+  test('lock is allowed only for control, before and after 2', () => {
     for (const type of ['lock', 'autolock']) {
       const f = JSON.stringify({ ctrlChannel: '102938', type });
-      expect(filterRelayUp(f, false, 'control')).toEqual({ ok: true, data: f });
-      expect(filterRelayUp(f, false, 'view').ok).toBe(false);
+      expect(relayFilter('control')(f, false)).toEqual({ ok: true, data: f });
+      expect(desktopFilter('control')(f, false)).toEqual({ ok: true, data: f });
+      expect(relayFilter('view')(f, false).ok).toBe(false);
+      expect(desktopFilter('view')(f, false).ok).toBe(false);
     }
     const wrongChannel = JSON.stringify({ ctrlChannel: '1', type: 'lock' });
-    expect(filterRelayUp(wrongChannel, false, 'control').ok).toBe(false);
+    expect(desktopFilter('control')(wrongChannel, false).ok).toBe(false);
     const noChannel = JSON.stringify({ type: 'lock' });
-    expect(filterRelayUp(noChannel, false, 'control').ok).toBe(false);
+    expect(desktopFilter('control')(noChannel, false).ok).toBe(false);
   });
 });
 

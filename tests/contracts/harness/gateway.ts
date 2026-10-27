@@ -134,7 +134,19 @@ class RecordingSession implements UpstreamViewerSession {
   }
 
   routeHttp: UpstreamViewerSession['routeHttp'] = (method, url) => this.#inner.routeHttp(method, url);
-  routeWs: UpstreamViewerSession['routeWs'] = (url) => this.#inner.routeWs(url);
+  // control.ashx ulanishining pastga kadrlari (real cookie'lar) solishtirish uchun yozib olinadi.
+  routeWs: UpstreamViewerSession['routeWs'] = (url) => {
+    const verdict = this.#inner.routeWs(url);
+    if (!verdict.ok || url.pathname !== '/control.ashx') return verdict;
+    const inner = verdict.filter;
+    return {
+      ...verdict,
+      filter: (direction, data, isBinary) => {
+        if (direction === 'down' && !isBinary) this.rawControlDown.push(data.toString());
+        return inner(direction, data, isBinary);
+      },
+    };
+  };
   requestHeaders: UpstreamViewerSession['requestHeaders'] = () => this.#inner.requestHeaders();
   absorbSetCookie: UpstreamViewerSession['absorbSetCookie'] = (values) => this.#inner.absorbSetCookie(values);
 
@@ -142,11 +154,6 @@ class RecordingSession implements UpstreamViewerSession {
     if (url.pathname === '/') this.rawPages.push(html);
     return this.#inner.rewriteHtml(url, html);
   }
-
-  filterFrame: UpstreamViewerSession['filterFrame'] = (channel, direction, data, isBinary) => {
-    if (channel === 'control' && direction === 'down' && !isBinary) this.rawControlDown.push(data.toString());
-    return this.#inner.filterFrame(channel, direction, data, isBinary);
-  };
 
   revoke(): Promise<void> {
     return this.#inner.revoke();

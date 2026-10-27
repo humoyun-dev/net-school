@@ -4,6 +4,9 @@ import type { CredentialHandles } from './credential-handles.ts';
 
 export type RouteVerdict = { ok: true; upstreamPath: string } | { ok: false; reason: string };
 export type FrameVerdict = { ok: true; data: string | Buffer } | { ok: false; reason: string };
+// Bitta WS ulanishiga bog'langan kadr filtri (holat closure ichida).
+export type FrameFilter = (direction: 'up' | 'down', data: string | Buffer, isBinary: boolean) => FrameVerdict;
+export type WsRouteVerdict = { ok: true; upstreamPath: string; filter: FrameFilter } | { ok: false; reason: string };
 
 export interface ViewerContext {
   nodeId: string;
@@ -73,12 +76,13 @@ export function routeViewerHttp(method: string, url: URL, ctx: ViewerContext): R
   return { ok: true, upstreamPath: `${pathname}${search}` };
 }
 
-export function routeViewerWs(url: URL, ctx: ViewerContext): RouteVerdict {
+export function routeViewerWs(url: URL, ctx: ViewerContext): WsRouteVerdict {
   const { pathname, search, searchParams } = url;
   if (hasUnsafePath(pathname)) return deny('path');
 
   if (pathname === '/control.ashx') {
-    return search === '' ? { ok: true, upstreamPath: '/control.ashx' } : deny('control_query');
+    if (search !== '') return deny('control_query');
+    return { ok: true, upstreamPath: '/control.ashx', filter: controlFilter(ctx) };
   }
   if (pathname !== '/meshrelay.ashx') return deny('route');
 
@@ -91,7 +95,35 @@ export function routeViewerWs(url: URL, ctx: ViewerContext): RouteVerdict {
   const real = ctx.handles.resolve('auth', searchParams.get('auth') ?? '');
   if (real === undefined) return deny('relay_auth');
   const query = `browser=1&p=2&nodeid=${encodeURIComponent(ctx.nodeId)}&id=${id}&auth=${encodeURIComponent(real)}`;
-  return { ok: true, upstreamPath: `/meshrelay.ashx?${query}` };
+  return { ok: true, upstreamPath: `/meshrelay.ashx?${query}`, filter: relayFilter(ctx.mode) };
+}
+
+function controlFilter(ctx: ViewerContext): FrameFilter {
+  return (direction, data, isBinary) => {
+    if (isBinary) return deny('control_binary');
+    const text = typeof data === 'string' ? data : data.toString('utf8');
+    return direction === 'up' ? filterControlUp(text, ctx) : filterControlDown(text, ctx);
+  };
+}
+
+// Relay ulanishi: agent protokolni birinchi ma'lumot kadridan tanlaydi (meshcore.js parseInt),
+// shuning uchun '2' dan oldin faqat options/lock va aynan '2' o'tadi. Pastga: o'zgarishsiz.
+function relayFilter(mode: RemoteMode): FrameFilter {
+  let desktop = false;
+  return (direction, data, isBinary) => {
+    if (direction === 'down') return { ok: true, data };
+    if (isBinary) {
+      if (typeof data === 'string') return deny('binary_string');
+      return desktop ? filterDesktopBinary(data, mode) : deny('relay_protocol');
+    }
+    const text = typeof data === 'string' ? data : data.toString('utf8');
+    if (text === '2') {
+      if (desktop) return deny('relay_protocol');
+      desktop = true;
+      return { ok: true, data };
+    }
+    return filterRelayText(text, data, mode, desktop);
+  };
 }
 
 type Frame = Record<string, unknown>;
@@ -210,18 +242,14 @@ export const VIEW_ONLY_INPUT_COMMANDS: ReadonlySet<number> = new Set([1, 2, 10, 
 const LOCK_CHANNEL = '102938';
 const LOCK_TYPES = new Set(['lock', 'autolock']);
 const HEADER_BYTES = 4;
+const MAX_DESKTOP_COMMAND = 0xff;
 
-// Relay'ga yuqoriga: aniq ruxsat etilganlardan boshqasi rad (WebRTC ham yopiq).
-export function filterRelayUp(data: string | Buffer, isBinary: boolean, mode: RemoteMode): FrameVerdict {
-  if (isBinary) {
-    if (typeof data === 'string') return deny('binary_string');
-    return mode === 'control' ? { ok: true, data } : filterViewBinary(data);
-  }
-  const text = typeof data === 'string' ? data : data.toString('utf8');
-  if (text === '2') return { ok: true, data };
-
+// Relay matn kadrlari: '{' bilan boshlanuvchi options yoki (faqat control) lock/autolock; qolgani rad.
+function filterRelayText(text: string, data: string | Buffer, mode: RemoteMode, desktop: boolean): FrameVerdict {
+  // '{' bilan boshlanmagan matnni agent protokol raqami deb o'qiydi.
+  if (!text.startsWith('{')) return deny('relay_protocol');
   const frame = parseObject(text);
-  if (!frame) return deny('relay_text');
+  if (!frame) return deny(desktop ? 'relay_text' : 'relay_protocol');
   if (frame.type === 'options') {
     if (mode === 'control' || !Object.hasOwn(frame, 'autolock')) return { ok: true, data };
     // Ko'rish rejimida agentda autolock yoqilmasligi uchun kalit olib tashlanadi.
@@ -234,9 +262,12 @@ export function filterRelayUp(data: string | Buffer, isBinary: boolean, mode: Re
   return deny('relay_text');
 }
 
-function filterViewBinary(data: Buffer): FrameVerdict {
+// Desktop buyrug'i: to'g'ri sarlavha (uzunlik mos, buyruq < 256, ya'ni birinchi bayt 0); view'da kiritish rad.
+function filterDesktopBinary(data: Buffer, mode: RemoteMode): FrameVerdict {
   if (data.length < HEADER_BYTES || data.readUInt16BE(2) !== data.length) return deny('relay_malformed');
-  if (VIEW_ONLY_INPUT_COMMANDS.has(data.readUInt16BE(0))) return deny('relay_input');
+  const cmd = data.readUInt16BE(0);
+  if (cmd > MAX_DESKTOP_COMMAND) return deny('relay_malformed');
+  if (mode === 'view' && VIEW_ONLY_INPUT_COMMANDS.has(cmd)) return deny('relay_input');
   return { ok: true, data };
 }
 

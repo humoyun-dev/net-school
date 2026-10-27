@@ -6,16 +6,13 @@ import type { CookieJar } from './cookie-jar.ts';
 import { CredentialHandles } from './credential-handles.ts';
 import { loginPrincipal, type UpstreamEndpoint } from './upstream-login.ts';
 import {
-  type FrameVerdict,
-  filterControlDown,
-  filterControlUp,
-  filterRelayUp,
   type RouteVerdict,
   rewriteViewerHtml,
   routeViewerHttp,
   routeViewerWs,
   type ViewerContext,
   viewerEntryPath,
+  type WsRouteVerdict,
 } from './viewer-policy.ts';
 
 export interface MeshCentralViewerUpstreamOptions {
@@ -103,8 +100,16 @@ export class MeshCentralViewerSession {
     return this.#closed ? CLOSED : routeViewerHttp(method, url, this.#ctx);
   }
 
-  routeWs(url: URL): RouteVerdict {
-    return this.#closed ? CLOSED : routeViewerWs(url, this.#ctx);
+  // Filtr shu ulanishga bog'liq; sessiya yopilgach har kadr session_closed bilan rad etiladi.
+  routeWs(url: URL): WsRouteVerdict {
+    if (this.#closed) return CLOSED;
+    const verdict = routeViewerWs(url, this.#ctx);
+    if (!verdict.ok) return verdict;
+    const inner = verdict.filter;
+    return {
+      ...verdict,
+      filter: (direction, data, isBinary) => (this.#closed ? CLOSED : inner(direction, data, isBinary)),
+    };
   }
 
   requestHeaders(): Record<string, string> {
@@ -124,21 +129,6 @@ export class MeshCentralViewerSession {
   rewriteHtml(url: URL, html: string): string {
     this.#assertOpen();
     return url.pathname === '/' ? rewriteViewerHtml(html, this.#ctx, this.#publicHost) : html;
-  }
-
-  filterFrame(
-    channel: 'control' | 'relay',
-    direction: 'up' | 'down',
-    data: string | Buffer,
-    isBinary: boolean,
-  ): FrameVerdict {
-    if (this.#closed) return CLOSED;
-    if (channel === 'relay') {
-      return direction === 'up' ? filterRelayUp(data, isBinary, this.#ctx.mode) : { ok: true, data };
-    }
-    if (isBinary) return { ok: false, reason: 'control_binary' };
-    const text = typeof data === 'string' ? data : data.toString('utf8');
-    return direction === 'up' ? filterControlUp(text, this.#ctx) : filterControlDown(text, this.#ctx);
   }
 
   // Birinchi chaqiruvdanoq sessiya butunlay yopiladi (deleteuser xato bersa ham); faqat deleteuser qayta uriniladi.
