@@ -8,11 +8,16 @@ Arxitektura: [docs/architecture/NETSCHOOL_ARCHITECTURE_v1.md](docs/architecture/
 
 | Yo'l | Mazmun |
 |---|---|
+| `packages/domain/` | Transportdan mustaqil tiplar va portlar (`DeviceManagementPort`) |
+| `packages/contracts/` | Versiyalangan schema'lar (capability report) |
+| `packages/meshcentral-adapter/` | MeshCentral bilan gaplashadigan yagona kod: `control.ashx` klienti, inventory, eventlar, sessiya principal'lari |
+| `tests/contracts/` | Pin qilingan real MeshCentral'ga qarshi contract testlar |
 | `infra/meshcentral/` | MeshCentral pin (`upstream.lock.json`) va `upstream/` submodule |
 | `docs/architecture/` | Arxitektura hujjatlari |
 | `docs/adr/` | Qarorlar va sabablar |
+| `docs/superpowers/plans/` | Yo'l xaritasi va sub-plan rejalari |
 
-Qolgan yo'llar (`apps/`, `packages/`, `native/`...) arxitektura hujjati §12 bo'yicha kerak bo'lganda qo'shiladi.
+Qolgan yo'llar (`apps/`, `native/`...) arxitektura hujjati §12 bo'yicha kerak bo'lganda qo'shiladi.
 
 ## Klon qilish
 
@@ -23,3 +28,15 @@ git submodule update --init
 ```
 
 `infra/meshcentral/upstream` MeshCentral'ning aniq commit'iga pin qilingan, uni to'g'ridan-to'g'ri tahrirlamang. Yangilash tartibi: [infra/meshcentral/README.md](infra/meshcentral/README.md).
+
+## Ishlab chiqish
+
+Node 24+ va pnpm 11 kerak.
+
+```bash
+pnpm install
+pnpm meshcentral:install   # submodule'dagi MeshCentral bog'liqliklari (contract testlar uchun)
+pnpm test                  # unit testlar
+pnpm test:contract         # vaqtinchalik real MeshCentral ishga tushirib, adapterni tekshiradi (~2 daqiqa)
+pnpm typecheck && pnpm lint
+```
