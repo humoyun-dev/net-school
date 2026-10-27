@@ -1,3 +1,4 @@
+import { createHash, createPublicKey } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import { request } from 'node:https';
 import type { AuthorizedDesktopRequest, UpstreamDeviceRef } from '@netschool/domain';
@@ -155,6 +156,7 @@ class RecordingSession implements UpstreamViewerSession {
 export interface GatewayStack {
   gatewayOrigin: string;
   ca: string;
+  spki: string; // gateway sertifikati public key'ining SHA-256 base64 qiymati (Chromium SPKI pin)
   broker: RemoteSessionBroker;
   registry: SessionRegistry;
   events: GatewayEvent[];
@@ -176,6 +178,12 @@ const cookieValues = (header: string, names: string[]): string[] =>
       const eq = part.indexOf('=');
       return eq > 0 && names.includes(part.slice(0, eq)) ? [part.slice(eq + 1)] : [];
     });
+
+// Chromium `--ignore-certificate-errors-spki-list` uchun: faqat shu public key'ga ishonadi.
+export function spkiSha256Base64(certPem: string): string {
+  const der = createPublicKey(certPem).export({ type: 'spki', format: 'der' });
+  return createHash('sha256').update(der).digest('base64');
+}
 
 export async function startGatewayStack(
   mc: MeshCentralInstance,
@@ -256,6 +264,7 @@ export async function startGatewayStack(
   return {
     gatewayOrigin,
     ca: tls.cert,
+    spki: spkiSha256Base64(tls.cert),
     broker,
     registry,
     events,

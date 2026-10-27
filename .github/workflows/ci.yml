@@ -39,4 +39,5 @@ jobs:
           key: npm-meshcentral-${{ hashFiles('infra/meshcentral/upstream/package-lock.json') }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm meshcentral:install
+      - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:contract
