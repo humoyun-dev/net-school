@@ -17,7 +17,7 @@ describe('MeshCentralPrincipals', () => {
     expect(client.sent).toEqual([
       {
         action: 'adduser',
-        payload: { username: principal.username, pass: principal.password, randomPassword: true, siteadmin: 0 },
+        payload: { username: principal.username, pass: principal.password, siteadmin: 0 },
       },
       { action: 'adddeviceuser', payload: { userids: [principal.userId], nodeid: 'node//abc', rights: 3848 } },
     ]);

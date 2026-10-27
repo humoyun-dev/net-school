@@ -57,7 +57,14 @@ importers:
         specifier: ^5.5.0
         version: 5.5.0
 
-  tests/contracts: {}
+  tests/contracts:
+    dependencies:
+      '@netschool/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@netschool/meshcentral-adapter':
+        specifier: workspace:*
+        version: link:../../packages/meshcentral-adapter
 
 packages:
 

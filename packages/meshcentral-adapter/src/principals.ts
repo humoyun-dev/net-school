@@ -28,7 +28,8 @@ export class MeshCentralPrincipals {
     const nodeId = formatNodeId(device);
     const rights = rightsFor(mode);
 
-    await this.#client.request('adduser', { username, pass: password, randomPassword: true, siteadmin: 0 });
+    // randomPassword yuborilmaydi: server unda parolni o'zinikiga almashtiradi (meshuser.js serverCommandAddUser).
+    await this.#client.request('adduser', { username, pass: password, siteadmin: 0 });
     try {
       await this.#client.request('adddeviceuser', { userids: [userId], nodeid: nodeId, rights });
     } catch (err) {
