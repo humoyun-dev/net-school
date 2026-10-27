@@ -61,11 +61,14 @@ describe('SessionRegistry', () => {
     const { registry, upstream, session } = setup();
     const socket = new FakeSocket();
     session.sockets.add(socket);
+    const cookie = registry.bindCookie('s1');
+    expect(registry.byCookie(cookie)).toBe(session);
     upstream.revokeError = new Error('deleteuser failed');
     await expect(registry.close('s1', 'revoked')).rejects.toThrow('deleteuser failed');
     expect(socket.codes).toEqual([1008]);
     expect(session.closed).toBe(true);
-    expect(registry.byCookie(undefined)).toBeUndefined();
+    expect(registry.get('s1')?.closed).toBe(true);
+    expect(registry.byCookie(cookie)).toBeUndefined();
   });
 
   test('a throwing socket does not stop the others or the revoke', async () => {

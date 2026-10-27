@@ -33,7 +33,10 @@ export class RemoteSessionBroker {
       registry.add(req.sessionId, session);
     } catch (err) {
       // Ro'yxatga olinmagan upstream sessiya yetim qolmasin.
-      await session.revoke().catch(() => {});
+      await session.revoke().catch((revokeErr: unknown) => {
+        // Yetim principal upstream'da qolishi mumkin: jim yutilmaydi, hodisa bilan xabar qilinadi.
+        onEvent?.({ type: 'upstream_error', sessionId: req.sessionId, message: messageOf(revokeErr) });
+      });
       throw err;
     }
     const { ticket, expiresAt } = tickets.issue(req.sessionId);

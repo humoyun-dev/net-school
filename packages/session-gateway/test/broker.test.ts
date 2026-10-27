@@ -57,6 +57,15 @@ describe('RemoteSessionBroker', () => {
     expect(upstream.sessions[1]?.revokeCalls).toBe(1);
   });
 
+  test('broker reports a failed orphan revoke', async () => {
+    const { upstream, events, broker } = setup();
+    await broker.open(req);
+    upstream.nextRevokeError = new Error('deleteuser failed');
+    await expect(broker.open(req)).rejects.toThrow('already registered');
+    expect(events).toContainEqual({ type: 'upstream_error', sessionId: 'rs-1', message: 'deleteuser failed' });
+    expect(upstream.sessions[1]?.revokeCalls).toBe(1);
+  });
+
   test('close delegates to registry with reason revoked', async () => {
     const { upstream, registry, events, broker } = setup();
     await broker.open(req);

@@ -37,11 +37,14 @@ export class FakeViewerUpstream implements ViewerUpstream {
   openError: Error | undefined;
   readonly opened: AuthorizedDesktopRequest[] = [];
   readonly sessions: FakeUpstreamSession[] = [];
+  nextRevokeError: Error | undefined; // keyingi ochiladigan sessiyaning revoke'i shu xato bilan tushadi
 
   async open(req: AuthorizedDesktopRequest): Promise<FakeUpstreamSession> {
     this.opened.push(req);
     if (this.openError) throw this.openError;
     const session = new FakeUpstreamSession();
+    session.revokeError = this.nextRevokeError;
+    this.nextRevokeError = undefined;
     this.sessions.push(session);
     return session;
   }
