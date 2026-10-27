@@ -6,6 +6,7 @@ import { sanitizeRequestHeaders, sanitizeResponseHeaders } from './headers.ts';
 import type { GatewaySession, SessionRegistry } from './registry.ts';
 import type { TicketStore } from './tickets.ts';
 import type { GatewayEvent } from './types.ts';
+import { createWsProxy, rejectUpgrade } from './ws-proxy.ts';
 
 export const GATEWAY_COOKIE = '__Host-ns_rs';
 
@@ -18,7 +19,7 @@ export interface GatewayOptions {
   broker: RemoteSessionBroker;
   tickets: TicketStore;
   registry: SessionRegistry;
-  publicOrigin: string; // brauzer ko'radigan origin; WS Origin tekshiruvi (Task 7) shuni ishlatadi
+  publicOrigin: string; // brauzer ko'radigan origin; WS Origin tekshiruvi shunga teng bo'lishi shart
   maxHtmlBytes?: number;
   upstreamTimeoutMs?: number; // upstream soketi shuncha jim tursa 504 (default 30 s)
   onEvent?: (e: GatewayEvent) => void;
@@ -40,6 +41,18 @@ function readCookie(header: string | undefined, name: string): string | undefine
     if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
   }
   return undefined;
+}
+
+// So'rov nishoni aynan bitta '/' bilan boshlanuvchi yo'l bo'lishi shart: '//host', '/\\host' va
+// absolyut shakl URL'ni boshqa hostga burib yuboradi.
+function parseTarget(target: string | undefined, publicOrigin: string): URL | undefined {
+  if (!target || !/^\/(?![/\\])/.test(target)) return undefined;
+  try {
+    const url = new URL(target, publicOrigin);
+    return url.origin === new URL(publicOrigin).origin ? url : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // Ichki xato matni va upstream tafsilotlari brauzerga chiqmaydi.
@@ -280,7 +293,8 @@ export function createGateway(opts: GatewayOptions): Gateway {
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? '/', opts.publicOrigin);
+    const url = parseTarget(req.url, opts.publicOrigin);
+    if (!url) return reply(res, 400, 'Bad Request', true);
     if (req.method === 'GET' && url.pathname === '/rs/redeem') return redeem(req, res, url);
 
     const session = registry.byCookie(readCookie(req.headers.cookie, GATEWAY_COOKIE));
@@ -291,7 +305,25 @@ export function createGateway(opts: GatewayOptions): Gateway {
   const server = https.createServer({ key: opts.tls.key, cert: opts.tls.cert }, (req, res) => {
     handle(req, res).catch(() => reply(res, 500, 'Internal Server Error'));
   });
-  // WebSocket upgrade (Task 7): server.on('upgrade', ...) shu yerda ulanadi.
+
+  const wsProxy = createWsProxy({
+    publicOrigin: opts.publicOrigin,
+    upstream: opts.upstream,
+    upstreamTimeoutMs,
+    emit,
+  });
+  server.on('upgrade', (req, socket, head) => {
+    socket.on('error', () => {}); // upgrade'dan keyin http xato tinglovchisi yo'q
+    try {
+      const url = parseTarget(req.url, opts.publicOrigin);
+      if (!url) return rejectUpgrade(socket, 400);
+      const session = registry.byCookie(readCookie(req.headers.cookie, GATEWAY_COOKIE));
+      if (!session) return rejectUpgrade(socket, 401);
+      wsProxy.upgrade(req, socket, head, url, session);
+    } catch {
+      rejectUpgrade(socket, 500);
+    }
+  });
 
   return {
     server,
@@ -308,6 +340,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
       new Promise((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
         server.closeAllConnections();
+        wsProxy.closeAll(); // upgrade qilingan soketlar http ro'yxatida emas
         agent.destroy();
       }),
   };

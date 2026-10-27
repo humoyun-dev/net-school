@@ -7,9 +7,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@netschool/domain": "workspace:*"
+    "@netschool/domain": "workspace:*",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@netschool/test-support": "workspace:*"
+    "@netschool/test-support": "workspace:*",
+    "@types/ws": "^8.18.2"
   }
 }

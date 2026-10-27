@@ -62,10 +62,16 @@ importers:
       '@netschool/domain':
         specifier: workspace:*
         version: link:../domain
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0
     devDependencies:
       '@netschool/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@types/ws':
+        specifier: ^8.18.2
+        version: 8.18.2
 
   packages/test-support:
     dependencies:

@@ -10,6 +10,22 @@ export class FakeUpstreamSession implements UpstreamViewerSession {
   readonly attached: string[] = []; // attach(clientIp) chaqiruvlari
   httpVerdict: RouteVerdict = { ok: true, upstreamPath: '/' };
   routedHttp: Array<{ method: string; url: string }> = [];
+  wsVerdict: RouteVerdict = { ok: true, upstreamPath: '/' };
+  readonly routedWs: string[] = [];
+  readonly frames: Array<{
+    channel: 'control' | 'relay';
+    direction: 'up' | 'down';
+    data: string | Buffer;
+    isBinary: boolean;
+  }> = [];
+  frameFilter:
+    | ((
+        channel: 'control' | 'relay',
+        direction: 'up' | 'down',
+        data: string | Buffer,
+        isBinary: boolean,
+      ) => FrameVerdict)
+    | undefined;
   headers: Record<string, string> = {};
   headersError: Error | undefined;
   readonly absorbed: string[][] = [];
@@ -26,8 +42,9 @@ export class FakeUpstreamSession implements UpstreamViewerSession {
     this.routedHttp.push({ method, url: url.pathname + url.search });
     return this.httpVerdict;
   }
-  routeWs(): RouteVerdict {
-    return { ok: true, upstreamPath: '/' };
+  routeWs(url: URL): RouteVerdict {
+    this.routedWs.push(url.pathname + url.search);
+    return this.wsVerdict;
   }
   requestHeaders(): Record<string, string> {
     if (this.headersError) throw this.headersError;
@@ -39,8 +56,14 @@ export class FakeUpstreamSession implements UpstreamViewerSession {
   rewriteHtml(url: URL, html: string): string {
     return this.rewrite ? this.rewrite(url, html) : html;
   }
-  filterFrame(_c: 'control' | 'relay', _d: 'up' | 'down', data: string | Buffer): FrameVerdict {
-    return { ok: true, data };
+  filterFrame(
+    channel: 'control' | 'relay',
+    direction: 'up' | 'down',
+    data: string | Buffer,
+    isBinary: boolean,
+  ): FrameVerdict {
+    this.frames.push({ channel, direction, data, isBinary });
+    return this.frameFilter ? this.frameFilter(channel, direction, data, isBinary) : { ok: true, data };
   }
   async revoke(): Promise<void> {
     this.revokeCalls++;
