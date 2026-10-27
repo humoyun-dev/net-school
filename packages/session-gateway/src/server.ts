@@ -10,6 +10,7 @@ import type { GatewayEvent } from './types.ts';
 export const GATEWAY_COOKIE = '__Host-ns_rs';
 
 const DEFAULT_MAX_HTML_BYTES = 5 * 1024 * 1024;
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000;
 
 export interface GatewayOptions {
   tls: { key: string; cert: string };
@@ -19,6 +20,7 @@ export interface GatewayOptions {
   registry: SessionRegistry;
   publicOrigin: string; // brauzer ko'radigan origin; WS Origin tekshiruvi (Task 7) shuni ishlatadi
   maxHtmlBytes?: number;
+  upstreamTimeoutMs?: number; // upstream soketi shuncha jim tursa 504 (default 30 s)
   onEvent?: (e: GatewayEvent) => void;
 }
 
@@ -41,7 +43,7 @@ function readCookie(header: string | undefined, name: string): string | undefine
 }
 
 // Ichki xato matni va upstream tafsilotlari brauzerga chiqmaydi.
-function reply(res: ServerResponse, status: number, text: string): void {
+function reply(res: ServerResponse, status: number, text: string, closeConnection = false): void {
   if (res.headersSent) {
     res.destroy();
     return;
@@ -52,6 +54,8 @@ function reply(res: ServerResponse, status: number, text: string): void {
     'content-length': body.length,
     'cache-control': 'no-store',
     'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+    ...(closeConnection ? { connection: 'close' } : {}),
   });
   res.end(body);
 }
@@ -59,6 +63,7 @@ function reply(res: ServerResponse, status: number, text: string): void {
 export function createGateway(opts: GatewayOptions): Gateway {
   const { tickets, registry, onEvent } = opts;
   const maxHtmlBytes = opts.maxHtmlBytes ?? DEFAULT_MAX_HTML_BYTES;
+  const upstreamTimeoutMs = opts.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
   const upstreamUrl = new URL(opts.upstream.origin);
   const agent = new https.Agent({
     ca: opts.upstream.ca,
@@ -127,13 +132,27 @@ export function createGateway(opts: GatewayOptions): Gateway {
   }
 
   function proxy(req: IncomingMessage, res: ServerResponse, url: URL, session: GatewaySession): void {
-    const fail = (message: string): void => {
+    let failedOnce = false;
+    const fail = (message: string, status = 502): void => {
+      if (failedOnce) return;
+      failedOnce = true;
       emit({ type: 'upstream_error', sessionId: session.id, message });
-      reply(res, 502, 'Bad Gateway');
+      reply(res, status, status === 504 ? 'Gateway Timeout' : 'Bad Gateway');
     };
     const clientIp = req.socket.remoteAddress;
     if (!clientIp) {
       reply(res, 400, 'Bad Request');
+      return;
+    }
+
+    // Upstream'ga hech qachon so'rov tanasi yuborilmaydi: aks holda tana keep-alive ulanishda
+    // ikkinchi so'rov bo'lib o'qilib, routeHttp'dan o'tib ketadi (request smuggling).
+    const contentLength = req.headers['content-length'];
+    if (
+      req.headers['transfer-encoding'] !== undefined ||
+      (contentLength !== undefined && contentLength.trim() !== '0')
+    ) {
+      reply(res, 400, 'Bad Request', true);
       return;
     }
 
@@ -155,9 +174,16 @@ export function createGateway(opts: GatewayOptions): Gateway {
       fail(messageOf(err));
       return;
     }
+    delete headers['content-length'];
+    delete headers['transfer-encoding'];
     headers.host = upstreamUrl.host;
     headers['x-forwarded-for'] = clientIp; // faqat gateway soketidan
     headers['accept-encoding'] = 'identity'; // HTML qayta yozish uchun siqilmagan tana kerak
+
+    // Kirish sahifasi content-type'dan qat'i nazar qayta yoziladi (credential tozalash fail-open bo'lmasin).
+    const isEntryPage =
+      (method === 'GET' || method === 'HEAD') &&
+      url.pathname === new URL(session.upstream.entryPath, opts.publicOrigin).pathname;
 
     const upReq = https.request(
       {
@@ -181,13 +207,15 @@ export function createGateway(opts: GatewayOptions): Gateway {
         }
         const status = upRes.statusCode ?? 502;
         const outHeaders = sanitizeResponseHeaders(upRes.headers);
+        outHeaders['x-content-type-options'] = 'nosniff';
         const isHtml = String(upRes.headers['content-type'] ?? '')
           .trim()
           .toLowerCase()
           .startsWith('text/html');
         const hasBody = method !== 'HEAD' && status !== 204 && status !== 304;
 
-        if (!(isHtml && hasBody)) {
+        if (isEntryPage && !hasBody) delete outHeaders['content-length']; // HEAD: tana yo'q, upstream uzunligi yo'naltirilmaydi
+        if (!((isHtml || isEntryPage) && hasBody)) {
           res.writeHead(status, outHeaders);
           pipeline(upRes, res, (err) => {
             if (err) res.destroy();
@@ -239,11 +267,16 @@ export function createGateway(opts: GatewayOptions): Gateway {
       },
     );
     upReq.on('error', (err) => fail(err.message));
+    upReq.setTimeout(upstreamTimeoutMs, () => {
+      fail('Upstream timed out', 504); // javob boshlangan bo'lsa brauzer javobi uziladi
+      upReq.destroy();
+    });
     // Brauzer uzilsa upstream so'rovi ham to'xtaydi.
     res.on('close', () => {
       if (!res.writableFinished) upReq.destroy();
     });
-    pipeline(req, upReq, () => {});
+    req.resume();
+    upReq.end();
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {

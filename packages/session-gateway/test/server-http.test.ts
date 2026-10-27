@@ -1,12 +1,13 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import https, { createServer as createHttps, type Server } from 'node:https';
 import type { AddressInfo, Socket } from 'node:net';
+import tls from 'node:tls';
 import { makeCert, until } from '@netschool/test-support';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { RemoteSessionBroker } from '../src/broker.ts';
 import { sanitizeRequestHeaders } from '../src/headers.ts';
 import { SessionRegistry } from '../src/registry.ts';
-import { createGateway, GATEWAY_COOKIE, type Gateway } from '../src/server.ts';
+import { createGateway, GATEWAY_COOKIE, type Gateway, type GatewayOptions } from '../src/server.ts';
 import { TicketStore } from '../src/tickets.ts';
 import type { GatewayEvent } from '../src/types.ts';
 import { FakeViewerUpstream } from './support/fake-upstream.ts';
@@ -44,7 +45,7 @@ const sockets = new Set<Socket>();
 
 const bigHtml = 'x'.repeat(2048);
 
-async function start(maxHtmlBytes?: number): Promise<void> {
+async function start(extra: Partial<GatewayOptions> = {}): Promise<void> {
   cert = await makeCert('localhost');
   seen = [];
   events = [];
@@ -60,6 +61,14 @@ async function start(maxHtmlBytes?: number): Promise<void> {
     } else if (rq.url === '/big') {
       rs.writeHead(200, { 'content-type': 'text/html' }); // chunked, content-length yo'q
       rs.end(bigHtml);
+    } else if (rq.url === '/hang') {
+      // hech qachon javob bermaydi
+    } else if (rq.url === '/plain') {
+      rs.writeHead(200, { 'content-type': 'text/plain', 'content-length': '12' });
+      rs.end('entry-secret');
+    } else if (rq.url === '/notype') {
+      rs.writeHead(200);
+      rs.end('entry-secret');
     } else if (rq.url === '/stream') {
       rs.writeHead(200, { 'content-type': 'application/octet-stream' });
       rs.write('part1-');
@@ -85,7 +94,7 @@ async function start(maxHtmlBytes?: number): Promise<void> {
     tickets,
     registry,
     publicOrigin: 'https://localhost:9443',
-    ...(maxHtmlBytes === undefined ? {} : { maxHtmlBytes }),
+    ...extra,
     onEvent,
   });
   port = await gateway.listen(0, '127.0.0.1');
@@ -341,11 +350,129 @@ describe('gateway HTTP: proxy', () => {
   });
 });
 
+// Xom TLS soket: Node http klienti noqonuniy so'rovni yubormaydi.
+function raw(payload: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const sock = tls.connect({ host: '127.0.0.1', port, servername: 'localhost', ca: cert.cert }, () =>
+      sock.write(payload),
+    );
+    let data = '';
+    sock.on('data', (c) => {
+      data += c.toString('utf8');
+    });
+    sock.on('end', () => resolve(data));
+    sock.on('close', () => resolve(data));
+    sock.on('error', reject);
+  });
+}
+
+describe('gateway HTTP: request bodies', () => {
+  test('request with a body is rejected and never reaches upstream', async () => {
+    const c = await login(1);
+    const smuggled = 'GET /admin HTTP/1.1\r\nHost: up\r\nX-Forwarded-For: 6.6.6.6\r\n\r\n';
+    const head = (extra: string) =>
+      `GET /x HTTP/1.1\r\nHost: localhost\r\nCookie: ${GATEWAY_COOKIE}=${c}\r\nConnection: close\r\n${extra}\r\n`;
+
+    const chunked = await raw(
+      `${head('Transfer-Encoding: chunked\r\n')}${smuggled.length.toString(16)}\r\n${smuggled}\r\n0\r\n\r\n`,
+    );
+    expect(chunked).toMatch(/^HTTP\/1\.1 400 /);
+
+    const withLength = await raw(`${head('Content-Length: 5\r\n')}hello`);
+    expect(withLength).toMatch(/^HTTP\/1\.1 400 /);
+
+    expect(seen).toEqual([]);
+    expect(fake.sessions[0]?.routedHttp).toEqual([]);
+  });
+
+  test('content-length 0 and bodyless requests are still proxied', async () => {
+    const c = await login(1);
+    const res = await raw(
+      `GET /x HTTP/1.1\r\nHost: localhost\r\nCookie: ${GATEWAY_COOKIE}=${c}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`,
+    );
+    expect(res).toMatch(/^HTTP\/1\.1 200 /);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.headers['transfer-encoding']).toBeUndefined();
+  });
+});
+
+describe('gateway HTTP: upstream timeout', () => {
+  beforeEach(async () => {
+    await gateway.close();
+    await new Promise<void>((r) => upstreamServer.close(() => r()));
+    await start({ upstreamTimeoutMs: 200 });
+  });
+
+  test('hung upstream times out with 504', async () => {
+    const c = await login(1);
+    sess(0).httpVerdict = { ok: true, upstreamPath: '/hang' };
+    const started = Date.now();
+    const res = await call('/x', cookie(c));
+    expect(res.status).toBe(504);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(res.body).not.toContain('hang');
+    expect(events.filter((e) => e.type === 'upstream_error')).toHaveLength(1);
+  });
+});
+
+describe('gateway HTTP: entry page', () => {
+  test.each(['/plain', '/notype'])('entry page is rewritten even without text/html content-type (%s)', async (path) => {
+    const c = await login(1);
+    const s = sess(0);
+    s.httpVerdict = { ok: true, upstreamPath: path };
+    s.rewrite = (_url, html) => html.replace('entry-secret', 'scrubbed');
+    const res = await call('/fake', cookie(c));
+    expect(res.status).toBe(200);
+    expect(res.body).toBe('scrubbed');
+    expect(res.headers['content-length']).toBe('8');
+  });
+
+  test('entry page rewrite failure returns 502 instead of leaking the body', async () => {
+    const c = await login(1);
+    const s = sess(0);
+    s.httpVerdict = { ok: true, upstreamPath: '/plain' };
+    s.rewrite = () => {
+      throw new Error('bad page');
+    };
+    const res = await call('/fake', cookie(c));
+    expect(res.status).toBe(502);
+    expect(res.body).not.toContain('entry-secret');
+  });
+
+  test('HEAD on the entry path does not forward the upstream content-length', async () => {
+    const c = await login(1);
+    sess(0).httpVerdict = { ok: true, upstreamPath: '/plain' };
+    const res = await call('/fake', cookie(c), 'HEAD');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-length']).toBeUndefined();
+    expect(res.body).toBe('');
+  });
+
+  test('non-entry non-html responses are not rewritten', async () => {
+    const c = await login(1);
+    const s = sess(0);
+    s.httpVerdict = { ok: true, upstreamPath: '/plain' };
+    s.rewrite = () => 'REWRITTEN';
+    expect((await call('/other.js', cookie(c))).body).toBe('entry-secret');
+  });
+
+  test('proxied responses carry nosniff', async () => {
+    const c = await login(1);
+    const s = sess(0);
+    s.httpVerdict = { ok: true, upstreamPath: '/stream' };
+    expect((await call('/a', cookie(c))).headers['x-content-type-options']).toBe('nosniff');
+    s.httpVerdict = { ok: true, upstreamPath: '/page' };
+    expect((await call('/b', cookie(c))).headers['x-content-type-options']).toBe('nosniff');
+    s.httpVerdict = { ok: true, upstreamPath: '/plain' };
+    expect((await call('/fake', cookie(c))).headers['x-content-type-options']).toBe('nosniff');
+  });
+});
+
 describe('gateway HTTP: html size cap', () => {
   beforeEach(async () => {
     await gateway.close();
     await new Promise<void>((r) => upstreamServer.close(() => r()));
-    await start(1024);
+    await start({ maxHtmlBytes: 1024 });
   });
 
   test('oversized html returns 502', async () => {
