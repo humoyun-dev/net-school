@@ -619,6 +619,29 @@ describe('gateway WS: disconnect', () => {
     expect(browser.closeCode()).toBe(1008);
   });
 
+  test('close() closes both sockets with 1008 within 1 s while upstream revoke hangs', async () => {
+    fake.nextRevokeHang = true;
+    const value = await login(1);
+    const control = await openBrowser(value);
+    await until(() => conns.length === 1);
+    const relay = await openBrowser(value, '/meshrelay.ashx');
+    await until(() => conns.length === 2);
+
+    let settled = false;
+    void registry.close('rs-1', 'revoked').finally(() => {
+      settled = true;
+    });
+    const started = Date.now();
+    await until(
+      () => control.closeCode() !== undefined && relay.closeCode() !== undefined && conn(0).closed && conn(1).closed,
+      1_000,
+    );
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect([control.closeCode(), relay.closeCode()]).toEqual([1008, 1008]);
+    expect(sess(0).revokeCalls).toBe(1);
+    expect(settled).toBe(false);
+  });
+
   test('a browser that never acknowledges the close frame is terminated after 1 s', async () => {
     const value = await login(1);
     const browser = await openBrowser(value);

@@ -1,3 +1,4 @@
+import { until } from '@netschool/test-support';
 import { describe, expect, test } from 'vitest';
 import { SessionRegistry } from '../src/registry.ts';
 import { FakeSocket, FakeUpstreamSession } from './support/fake-upstream.ts';
@@ -69,6 +70,27 @@ describe('SessionRegistry', () => {
     expect(session.closed).toBe(true);
     expect(registry.get('s1')?.closed).toBe(true);
     expect(registry.byCookie(cookie)).toBeUndefined();
+  });
+
+  test('close() closes sockets with 1008 within 1 s even when upstream revoke never settles', async () => {
+    const { registry, upstream, session } = setup();
+    const a = new FakeSocket();
+    const b = new FakeSocket();
+    session.sockets.add(a);
+    session.sockets.add(b);
+    const cookie = registry.bindCookie('s1');
+    upstream.revokeHang = true;
+
+    let settled = false;
+    void registry.close('s1', 'revoked').finally(() => {
+      settled = true;
+    });
+    await until(() => a.codes.length === 1 && b.codes.length === 1, 1_000);
+    expect([a.codes, b.codes]).toEqual([[1008], [1008]]);
+    expect(upstream.revokeCalls).toBe(1);
+    expect(session.closed).toBe(true);
+    expect(registry.byCookie(cookie)).toBeUndefined();
+    expect(settled).toBe(false);
   });
 
   test('a throwing socket does not stop the others or the revoke', async () => {

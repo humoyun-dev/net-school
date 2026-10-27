@@ -11,6 +11,7 @@ import type {
 export class FakeUpstreamSession implements UpstreamViewerSession {
   entryPath = '/fake';
   revokeError: Error | undefined;
+  revokeHang = false; // true: revoke() hech qachon tugamaydi
   revokeCalls = 0;
   attachError: Error | undefined;
   readonly attached: string[] = []; // attach(clientIp) chaqiruvlari
@@ -76,6 +77,7 @@ export class FakeUpstreamSession implements UpstreamViewerSession {
     this.revokeCalls++;
     this.closed = true;
     this.log.push('revoke');
+    if (this.revokeHang) await new Promise<never>(() => {});
     if (this.revokeError) throw this.revokeError;
   }
 }
@@ -85,13 +87,16 @@ export class FakeViewerUpstream implements ViewerUpstream {
   readonly opened: AuthorizedDesktopRequest[] = [];
   readonly sessions: FakeUpstreamSession[] = [];
   nextRevokeError: Error | undefined; // keyingi ochiladigan sessiyaning revoke'i shu xato bilan tushadi
+  nextRevokeHang = false; // keyingi ochiladigan sessiyaning revoke'i hech qachon tugamaydi
 
   async open(req: AuthorizedDesktopRequest): Promise<FakeUpstreamSession> {
     this.opened.push(req);
     if (this.openError) throw this.openError;
     const session = new FakeUpstreamSession();
     session.revokeError = this.nextRevokeError;
+    session.revokeHang = this.nextRevokeHang;
     this.nextRevokeError = undefined;
+    this.nextRevokeHang = false;
     this.sessions.push(session);
     return session;
   }
