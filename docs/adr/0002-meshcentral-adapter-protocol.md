@@ -21,13 +21,15 @@ Contract testlar (`tests/contracts/adapter.test.ts`) yuqoridagilarni real pin qi
 
 ## Ma'lum cheklovlar (release'dan oldin yopilishi shart)
 
-- **View-only to'liq read-only emas.** Upstream `routeCommandToNode` REMOTEVIEWONLY bilan ham `msg` subbuyruqlarini (`pskill`, `serviceStop`, `openUrl`, `setclip` va boshq.) agentga uzatadi, agent esa rights tekshirmaydi (`meshuser.js:288`, `agents/meshcore.js`). Spec §5.2 talabi bajarilishi uchun principal credential brauzerga yetguncha gateway bu buyruqlarni bloklashi yoki kichik fork patch kerak (P0b qaror nuqtasi).
+- **View-only to'liq read-only emas.** Upstream `routeCommandToNode` REMOTEVIEWONLY bilan ham `msg` subbuyruqlarini (`pskill`, `serviceStop`, `openUrl`, `setclip` va boshq.) agentga uzatadi, agent esa rights tekshirmaydi (`meshuser.js:288`, `agents/meshcore.js`). Spec §5.2 talabi uchun gateway bu buyruqlarni bloklaydi (P0b, [ADR 0003](0003-session-gateway.md); fork patch shart emas, defence-in-depth nomzodlari u yerda). Agentga haqiqatan yetmasligi real agent bilan P0c'da isbotlanadi.
 - **Server konfiguratsiyasi.** `domains.*.newAccountsUserGroups` va `newAccountsRights` bo'sh bo'lishi shart: aks holda yangi principal avtomatik guruhlarga qo'shilib, butun mesh'larga ruxsat oladi (`meshuser.js` serverCommandAddUser). Bu `infra/meshcentral` config shablonida qat'iy belgilanadi (P1a).
 
-## P0b uchun ochiq savollar
+## P0b uchun ochiq savollar: javoblar
 
-1. `deleteuser` principal'ning **ochiq** desktop/relay WebSocket'larini uzadimi, yoki gateway ularni o'zi yopishi shartmi?
-2. Iframe'dagi upstream desktop viewer'ga principal qanday kiritiladi: login token (`createLoginToken`) yoki gateway cookie orqali proksi'da `x-meshauth`? Token muddati ochiq sessiyani uzmaydi (spec §5.2).
-3. Remote desktop relay'ni majburiy qilish (P2P/WebRTC o'chirish) qaysi sozlama bilan va qanday tekshiriladi?
-4. IP ban: principal login xatolari hub IP'sidan kelganda adapter admin'i ham bloklanishi mumkin — hub IP'sini ban'dan chiqarish yoki principal login'larini boshqa yo'ldan o'tkazish.
-5. `domain.passwordrequirements` yoqilgan serverda base64url principal paroli talabga mos keladimi.
+Batafsil: [ADR 0003](0003-session-gateway.md).
+
+1. **`deleteuser` ochiq relay'larni uzadimi?** Yo'q: faqat `control.ashx` sessiyalarini yopadi, relay'larni emas (`meshrelay.js:175-180`), haqiqiy relay soketlari close'ni ~30 s kech tasdiqlaydi. Gateway soketlarni o'zi yopadi (1008) va upstream tasdig'ini kutmaydi.
+2. **Principal viewer'ga qanday kiradi?** Gateway server tomonida principal bilan `POST /login` qiladi va `xid`/`xid.sig`ni o'z cookie jar'ida saqlaydi; login token ishlatilmaydi (`allowLoginToken:false`), brauzerga faqat gateway cookie'si va opaque handle'lar yetadi.
+3. **Relay majburiyligi.** `settings.webRTC=false` faqat brauzerga feature bit beradi (`webserver.js:3555`), server WebRTC'ni majburlamaydi. Majburlash gateway relay filtrida (WebRTC signalizatsiyasi matn kadrlari rad etiladi); haqiqiy agent bilan tekshiruv P0c'da.
+4. **IP ban.** `trustedProxy: 127.0.0.1` va `maxInvalidLogin` `blocking:'ip'`, `exclude: 127.0.0.1,::1` (`infra/meshcentral/config.template.json`).
+5. **Parol talablari.** `generateMeshPassword()` (`base64url(32 bayt) + "-Aa1"`): `_` nonalpha emas, `-Aa1` qo'shimchasi har sinfdan belgini kafolatlaydi.

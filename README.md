@@ -11,6 +11,8 @@ Arxitektura: [docs/architecture/NETSCHOOL_ARCHITECTURE_v1.md](docs/architecture/
 | `packages/domain/` | Transportdan mustaqil tiplar va portlar (`DeviceManagementPort`) |
 | `packages/contracts/` | Versiyalangan schema'lar (capability report) |
 | `packages/meshcentral-adapter/` | MeshCentral bilan gaplashadigan yagona kod: `control.ashx` klienti, inventory, eventlar, sessiya principal'lari |
+| `packages/session-gateway/` | Remote session gateway: bir martalik ticket, gateway cookie, filtrlangan HTTP/WebSocket reverse proxy, revoke (MeshCentral'ni bilmaydi) |
+| `packages/test-support/` | Testlar uchun umumiy yordamchilar (self-signed sertifikat va b.) |
 | `tests/contracts/` | Pin qilingan real MeshCentral'ga qarshi contract testlar |
 | `infra/meshcentral/` | MeshCentral pin (`upstream.lock.json`) va `upstream/` submodule |
 | `docs/architecture/` | Arxitektura hujjatlari |

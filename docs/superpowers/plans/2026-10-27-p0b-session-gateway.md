@@ -138,6 +138,7 @@ export function filterControlDown(text: string, ctx: ViewerContext): FrameVerdic
 
 Qoidalar (aniq qiymatlar):
 - **HTTP:** faqat `GET`/`HEAD`. Yo'l normalizatsiyasi: `..`, `//`, `\`, `%2e`, `%2f`, `%5c` (katta-kichik harf farqsiz) bo'lsa rad. `/` — query kalitlari aynan `{gotonode, viewmode, hide}`, har biri bir marta, `gotonode === ctx.nodeId`, `viewmode === '11'`, `hide` `^\d{1,4}$`. Prefikslar `/scripts/`, `/styles/`, `/images/`, `/sounds/` va aniq `/favicon.ico`, `/manifest.json`, `/logo.png` — query'siz yoki `?<raqam/hex>` cache-buster bilan. Qolgan hamma narsa rad.
+  - > **Eslatma (Task 9 natijasi):** kirish URL'i shu yerda yozilganidek emas. `gotonode` yalang'och node id (`node//` prefiksisiz, `$`/`@` kodlanmagan), chunki upstream `'node/'+domain+'/'+gotonode` qiladi va `%` bor qiymatni tashlaydi; pastki qatlam `entryPath`ni qayta yasamaydi. Tafsilot: [ADR 0003](../../adr/0003-session-gateway.md).
 - **WS:** `/control.ashx` — query'siz. `/meshrelay.ashx` — kalitlar aynan `{browser, p, nodeid, id, auth}`, har biri bir marta; `browser='1'`, `p='2'`, `nodeid === ctx.nodeId`, `id` `^[0-9a-z]{1,16}$`, `auth` = `handles.resolve('auth', …)` topilishi shart → `upstreamPath`da real qiymat bilan. `tcpport`/`udpport`/boshqa kalit bo'lsa rad.
 - **control.ashx up (brauzer → server):** JSON obyekt bo'lmasa rad. Ruxsatli action'lar va kalit to'plamlari (`responseid` ixtiyoriy):
   - `{action}`: `ping`, `pong`, `authcookie`, `usergroups`, `meshes`, `nodes`, `loginTokens`, `files`;
