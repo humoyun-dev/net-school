@@ -1,14 +1,15 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { get } from 'node:https';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { generateMeshPassword } from '@netschool/meshcentral-adapter';
 
 const run = promisify(execFile);
 const upstreamDir = resolve(import.meta.dirname, '../../../infra/meshcentral/upstream');
+const templatePath = resolve(import.meta.dirname, '../../../infra/meshcentral/config.template.json');
 const READY_TIMEOUT_MS = 150_000;
 
 export interface MeshCentralInstance {
@@ -71,22 +72,21 @@ function exited(child: ChildProcess): Promise<void> {
 export async function startMeshCentral(): Promise<MeshCentralInstance> {
   const datapath = await mkdtemp(join(tmpdir(), 'ns-mc-'));
   const port = await freePort();
-  const config = {
-    settings: {
-      cert: 'localhost',
-      port,
-      redirPort: 0,
-      exactPorts: true,
-      selfUpdate: false,
-      lanOnly: true,
-      autoBackup: false,
-      filesPath: join(datapath, 'files'),
-    },
-    domains: { '': { newAccounts: false } },
-  };
+  // Shablon asos; faqat test muhitiga xos maydonlar ustiga yoziladi.
+  const config = JSON.parse(await readFile(templatePath, 'utf8'));
+  Object.assign(config.settings, {
+    cert: 'localhost',
+    port,
+    redirPort: 0,
+    exactPorts: true,
+    selfUpdate: false,
+    lanOnly: true,
+    autoBackup: false,
+    filesPath: join(datapath, 'files'),
+  });
   await writeFile(join(datapath, 'config.json'), JSON.stringify(config, null, 2));
 
-  const admin = { username: 'admin', password: randomBytes(18).toString('base64url') };
+  const admin = { username: 'admin', password: generateMeshPassword() };
   await meshcentral(
     datapath,
     '--createaccount',

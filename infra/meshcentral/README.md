@@ -13,6 +13,24 @@ node meshcentral --datapath ../../../meshcentral-data --port 8443 --redirport 80
 
 `meshcentral-data/` sertifikat va kalitlarni saqlaydi, u `.gitignore` da. Commit qilmang.
 
+## Config shabloni
+
+[config.template.json](config.template.json) — qattiqlashtirilgan asos. Contract harness uni o'qiydi va faqat muhitga xos `settings.{cert, port, redirPort, exactPorts, selfUpdate, lanOnly, autoBackup, filesPath}` ni ustiga yozadi; production `config.json` ham shundan boshlanadi.
+
+| Sozlama | Qiymat | Sabab |
+| --- | --- | --- |
+| `trustedProxy` | `127.0.0.1` | Gateway oldinda turadi: X-Forwarded-For faqat shu manbadan ishoniladi, TLS saqlanadi (webserver.js:7353-7372). |
+| `desktopMultiplex` | `false` | Multiplex'da view-only'ni server tekshiradi; oddiy relay'da agent (rights bo'yicha). Bitta ma'lum yo'l qoldiriladi. |
+| `webRTC` | `false` | WebRTC brauzer-agent oqimini gateway'dan chetlab o'tadi. |
+| `allowLoginToken` | `false` | Login token brauzerga upstream credential beradi (taqiqlangan). |
+| `allowFraming` | `false` | `X-Frame-Options` default `sameorigin`; framing yoqilmaydi. |
+| `cookieIpCheck` | `strict` | Sessiya cookie'si IP'ga bog'lanadi (webserver.js:11184). |
+| `maxInvalidLogin` | `10 / 10 / 10`, `blocking: ip`, `exclude: 127.0.0.1,::1` | Default `iprange` (/24) o'rniga aniq IP; gateway loopback'dan keladi, shuning uchun istisno (webserver.js:10892-10971). |
+| `domains[''].newAccounts` | `false` | Ro'yxatdan o'tish yopiq; `newAccountsUserGroups`/`newAccountsRights` berilmaydi. |
+| `domains[''].passwordRequirements` | `min 16, max 128`, har sinfdan 1, `loginTokens: false` | `adduser` bu talablarni siteadmin uchun ham tekshiradi (meshuser.js:6376). |
+
+Parollar `generateMeshPassword()` dan (`@netschool/meshcentral-adapter`): `base64url(32 bayt) + "-Aa1"`. `_` nonalpha hisoblanmaydi, shuning uchun `-Aa1` qo'shimchasi har sinfdan belgini kafolatlaydi.
+
 ## Yangilash tartibi
 
 Arxitektura §5.3: upstream review → alohida branch → adapter contract testlari → OS integratsiya testlari → bitta sinf canary.

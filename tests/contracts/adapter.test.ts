@@ -97,6 +97,13 @@ describe('MeshCentral adapter against pinned upstream', () => {
     }
   });
 
+  test('principal is created under strict password requirements', async () => {
+    const principal = await new MeshCentralPrincipals(admin).create(await deviceNamed('pc-01'), 'view');
+    await expect(
+      client({ username: principal.username, password: principal.password }).connect(),
+    ).resolves.toBeUndefined();
+  });
+
   test('principal sees only the granted node', async () => {
     const principal = await new MeshCentralPrincipals(admin).create(await deviceNamed('pc-01'), 'view');
     const asPrincipal = client({ username: principal.username, password: principal.password });

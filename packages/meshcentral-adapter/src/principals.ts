@@ -1,8 +1,9 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { UpstreamDeviceRef } from '@netschool/domain';
 import type { MeshRequester } from './control-client.ts';
 import { AdapterError } from './errors.ts';
 import { formatNodeId } from './node-id.ts';
+import { generateMeshPassword } from './password.ts';
 import { PRINCIPAL_SITE_RIGHTS, rightsFor } from './rights.ts';
 
 export interface SessionPrincipal {
@@ -23,7 +24,7 @@ export class MeshCentralPrincipals {
 
   async create(device: UpstreamDeviceRef, mode: 'view' | 'control'): Promise<SessionPrincipal> {
     const username = `ns-sess-${randomUUID()}`;
-    const password = randomBytes(32).toString('base64url');
+    const password = generateMeshPassword();
     const userId = `user/${device.meshDomainId}/${username}`;
     const nodeId = formatNodeId(device);
     const rights = rightsFor(mode);
