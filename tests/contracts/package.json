@@ -6,5 +6,8 @@
   "dependencies": {
     "@netschool/domain": "workspace:*",
     "@netschool/meshcentral-adapter": "workspace:*"
+  },
+  "devDependencies": {
+    "@netschool/test-support": "workspace:*"
   }
 }

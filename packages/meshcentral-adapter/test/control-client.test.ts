@@ -1,7 +1,8 @@
+import { makeCert, tick, until } from '@netschool/test-support';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { MeshControlClient, type MeshControlClientOptions } from '../src/control-client.ts';
 import { AdapterError } from '../src/errors.ts';
-import { FakeMeshServer, makeCert, tick, until } from './support/fake-mesh-server.ts';
+import { FakeMeshServer } from './support/fake-mesh-server.ts';
 
 let server: FakeMeshServer;
 let client: MeshControlClient | undefined;

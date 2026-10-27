@@ -13,6 +13,6 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.2",
-    "selfsigned": "^5.5.0"
+    "@netschool/test-support": "workspace:*"
   }
 }

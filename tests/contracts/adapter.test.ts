@@ -7,8 +7,8 @@ import {
   type MeshControlClientOptions,
   type SiteMeshScope,
 } from '@netschool/meshcentral-adapter';
+import { makeCert } from '@netschool/test-support';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { makeCert } from '../../packages/meshcentral-adapter/test/support/fake-mesh-server.ts';
 import { type MeshCentralInstance, startMeshCentral } from './harness/meshcentral.ts';
 
 const scope: SiteMeshScope = { meshInstanceId: 'mc-test', meshDomainId: '' };
