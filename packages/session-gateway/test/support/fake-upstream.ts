@@ -3,31 +3,48 @@ import type { FrameVerdict, RouteVerdict, UpstreamViewerSession, ViewerUpstream 
 
 // Chaqiruvlar tartibini yozib boruvchi soxta upstream sessiya.
 export class FakeUpstreamSession implements UpstreamViewerSession {
-  readonly entryPath = '/fake';
+  entryPath = '/fake';
   revokeError: Error | undefined;
   revokeCalls = 0;
+  attachError: Error | undefined;
+  readonly attached: string[] = []; // attach(clientIp) chaqiruvlari
+  httpVerdict: RouteVerdict = { ok: true, upstreamPath: '/' };
+  routedHttp: Array<{ method: string; url: string }> = [];
+  headers: Record<string, string> = {};
+  headersError: Error | undefined;
+  readonly absorbed: string[][] = [];
+  rewrite: ((url: URL, html: string) => string) | undefined;
+  closed = false; // revoke'dan keyin requestHeaders() bo'sh (haqiqiy adapterdagidek)
 
   constructor(readonly log: string[] = []) {}
 
-  async attach(): Promise<void> {}
-  routeHttp(): RouteVerdict {
-    return { ok: true, upstreamPath: '/' };
+  async attach(clientIp: string): Promise<void> {
+    this.attached.push(clientIp);
+    if (this.attachError) throw this.attachError;
+  }
+  routeHttp(method: string, url: URL): RouteVerdict {
+    this.routedHttp.push({ method, url: url.pathname + url.search });
+    return this.httpVerdict;
   }
   routeWs(): RouteVerdict {
     return { ok: true, upstreamPath: '/' };
   }
   requestHeaders(): Record<string, string> {
-    return {};
+    if (this.headersError) throw this.headersError;
+    return this.closed ? {} : this.headers;
   }
-  absorbSetCookie(): void {}
-  rewriteHtml(_url: URL, html: string): string {
-    return html;
+  absorbSetCookie(values: readonly string[]): void {
+    this.absorbed.push([...values]);
+  }
+  rewriteHtml(url: URL, html: string): string {
+    return this.rewrite ? this.rewrite(url, html) : html;
   }
   filterFrame(_c: 'control' | 'relay', _d: 'up' | 'down', data: string | Buffer): FrameVerdict {
     return { ok: true, data };
   }
   async revoke(): Promise<void> {
     this.revokeCalls++;
+    this.closed = true;
     this.log.push('revoke');
     if (this.revokeError) throw this.revokeError;
   }

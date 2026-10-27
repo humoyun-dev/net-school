@@ -62,6 +62,10 @@ importers:
       '@netschool/domain':
         specifier: workspace:*
         version: link:../domain
+    devDependencies:
+      '@netschool/test-support':
+        specifier: workspace:*
+        version: link:../test-support
 
   packages/test-support:
     dependencies:

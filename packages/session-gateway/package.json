@@ -8,5 +8,8 @@
   },
   "dependencies": {
     "@netschool/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@netschool/test-support": "workspace:*"
   }
 }
