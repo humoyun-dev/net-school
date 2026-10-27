@@ -117,6 +117,15 @@ describe('MeshCentral adapter against pinned upstream', () => {
     expect((err as AdapterError).detail).toBe('Permission denied');
   });
 
+  test('principal cannot create device groups', async () => {
+    const principal = await new MeshCentralPrincipals(admin).create(await deviceNamed('pc-01'), 'view');
+    const asPrincipal = client({ username: principal.username, password: principal.password });
+    await asPrincipal.connect();
+    const err = await asPrincipal.request('createmesh', { meshname: 'escape', meshtype: 2 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AdapterError);
+    expect((err as AdapterError).detail).toBe('Permission denied');
+  });
+
   test('revoked principal can no longer authenticate', async () => {
     const principals = new MeshCentralPrincipals(admin);
     const principal = await principals.create(await deviceNamed('pc-01'), 'view');

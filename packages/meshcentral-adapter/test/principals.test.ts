@@ -6,26 +6,26 @@ import { FakeRequester } from './support/fake-requester.ts';
 const device = { meshInstanceId: 'mc1', meshDomainId: '', meshNodeId: 'abc' };
 
 describe('MeshCentralPrincipals', () => {
-  test('create sends adduser then adddeviceuser with view rights 3848', async () => {
+  test('create sends adduser with locked site rights then adddeviceuser with view rights', async () => {
     const client = new FakeRequester();
     const principal = await new MeshCentralPrincipals(client).create(device, 'view');
 
     expect(principal.username).toMatch(/^ns-sess-[0-9a-f-]{36}$/);
     expect(principal.userId).toBe(`user//${principal.username}`);
     expect(principal.password.length).toBeGreaterThanOrEqual(40);
-    expect(principal).toMatchObject({ nodeId: 'node//abc', rights: 3848 });
+    expect(principal).toMatchObject({ nodeId: 'node//abc', rights: 12586760 });
     expect(client.sent).toEqual([
       {
         action: 'adduser',
-        payload: { username: principal.username, pass: principal.password, siteadmin: 0 },
+        payload: { username: principal.username, pass: principal.password, siteadmin: 5184 },
       },
-      { action: 'adddeviceuser', payload: { userids: [principal.userId], nodeid: 'node//abc', rights: 3848 } },
+      { action: 'adddeviceuser', payload: { userids: [principal.userId], nodeid: 'node//abc', rights: 12586760 } },
     ]);
   });
 
-  test('create uses control rights 3592 in control mode', async () => {
+  test('create uses control rights in control mode', async () => {
     const client = new FakeRequester();
-    expect((await new MeshCentralPrincipals(client).create(device, 'control')).rights).toBe(3592);
+    expect((await new MeshCentralPrincipals(client).create(device, 'control')).rights).toBe(12586504);
   });
 
   test('create compensates with deleteuser when the grant fails', async () => {

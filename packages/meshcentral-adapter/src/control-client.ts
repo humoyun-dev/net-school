@@ -12,6 +12,8 @@ export interface MeshControlClientOptions {
   requestTimeoutMs?: number;
   maxMessageBytes?: number;
   reconnect?: { minDelayMs: number; maxDelayMs: number };
+  connectTimeoutMs?: number; // TLS handshake + serverinfo kelguncha
+  heartbeatIntervalMs?: number; // ping oralig'i; ikki oraliqda pong yo'q → ulanish o'lik
 }
 
 export interface MeshRequester {
@@ -49,6 +51,8 @@ export class MeshControlClient implements MeshRequester {
       requestTimeoutMs: 10_000,
       maxMessageBytes: 4 * 1024 * 1024,
       reconnect: { minDelayMs: 1_000, maxDelayMs: 30_000 },
+      connectTimeoutMs: 15_000,
+      heartbeatIntervalMs: 30_000,
       ...opts,
     };
   }
@@ -97,13 +101,15 @@ export class MeshControlClient implements MeshRequester {
   }
 
   #open(): Promise<void> {
-    const { url, username, password, ca, servername, maxMessageBytes } = this.#opts;
+    const { url, username, password, ca, servername, maxMessageBytes, connectTimeoutMs, heartbeatIntervalMs } =
+      this.#opts;
     const auth = `${Buffer.from(username).toString('base64')},${Buffer.from(password).toString('base64')}`;
     // servername ws tiplarida yo'q, lekin tls.connect'ga uzatiladi: SNI va hostname tekshiruvi shu nom bilan.
     const options: WebSocket.ClientOptions & { servername: string } = {
       ca,
       servername: servername ?? new URL(url).hostname,
       maxPayload: maxMessageBytes,
+      handshakeTimeout: connectTimeoutMs,
       headers: { 'x-meshauth': auth },
     };
     const ws = new WebSocket(url, options);
@@ -118,14 +124,26 @@ export class MeshControlClient implements MeshRequester {
         if (err) reject(err);
         else resolve();
       };
+      // Osilgan server (serverinfo yo'q) oddiy uzilish kabi yopiladi, shunda reconnect davom etadi.
+      const readyTimer = setTimeout(() => {
+        failure ??= new AdapterError('upstream_timeout', 'MeshCentral did not become ready');
+        ws.terminate();
+      }, connectTimeoutMs);
+      let heartbeat: NodeJS.Timeout | undefined;
+      let alive = true;
+      ws.on('pong', () => {
+        alive = true;
+      });
 
       ws.on('message', (data) => {
-        let msg: Message;
+        let parsed: unknown;
         try {
-          msg = JSON.parse(String(data)) as Message;
+          parsed = JSON.parse(String(data));
         } catch {
           return;
         }
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
+        const msg = parsed as Message;
         if (msg.action === 'close' && msg.cause === 'noauth') {
           failure = new AdapterError('upstream_auth_failed', 'MeshCentral rejected credentials', msg.msg);
           return;
@@ -134,8 +152,17 @@ export class MeshControlClient implements MeshRequester {
           const reconnected = this.#attempt > 0;
           this.#ready = true;
           this.#attempt = 0;
+          clearTimeout(readyTimer);
+          heartbeat = setInterval(() => {
+            if (!alive) {
+              ws.terminate();
+              return;
+            }
+            alive = false;
+            ws.ping();
+          }, heartbeatIntervalMs);
           settle();
-          if (reconnected) for (const h of this.#resyncHandlers) h();
+          if (reconnected) for (const h of this.#resyncHandlers) notify(h);
           return;
         }
         const id = msg.responseid;
@@ -147,7 +174,7 @@ export class MeshControlClient implements MeshRequester {
           else pending.reject(new AdapterError('upstream_rejected', `MeshCentral rejected ${msg.action}`, msg.result));
           return;
         }
-        for (const h of this.#messageHandlers) h(msg);
+        for (const h of this.#messageHandlers) notify(() => h(msg));
       });
 
       ws.on('error', (err: Error & { code?: string }) => {
@@ -158,6 +185,8 @@ export class MeshControlClient implements MeshRequester {
       });
 
       ws.on('close', () => {
+        clearTimeout(readyTimer);
+        clearInterval(heartbeat);
         const wasReady = this.#ready;
         this.#ready = false;
         this.#failPending('upstream_unavailable', 'Connection to MeshCentral lost');
@@ -190,5 +219,14 @@ export class MeshControlClient implements MeshRequester {
       pending.reject(new AdapterError(code, message));
       this.#pending.delete(id);
     }
+  }
+}
+
+// Subscriber xatosi transportni yiqitmaydi va qolgan subscriber'larni to'xtatmaydi; ogohlantirish sifatida chiqadi.
+function notify(handler: () => void) {
+  try {
+    handler();
+  } catch (err) {
+    process.emitWarning(err instanceof Error ? err : new Error(String(err)), 'MeshControlClientSubscriberError');
   }
 }

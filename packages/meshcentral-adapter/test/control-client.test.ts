@@ -147,4 +147,63 @@ describe('MeshControlClient', () => {
     expect(server.connectionCount).toBe(1);
     expect(await codeOf(c.request('nodes'))).toBe('upstream_unavailable');
   });
+
+  test('connect times out when serverinfo never arrives', async () => {
+    server.silent = true;
+    expect(await codeOf(makeClient({ connectTimeoutMs: 100 }).connect())).toBe('upstream_timeout');
+  });
+
+  test('reconnect recovers after a hung attempt', async () => {
+    const c = makeClient({ connectTimeoutMs: 100 });
+    let resyncs = 0;
+    c.onResync(() => resyncs++);
+    await c.connect();
+    server.silent = true;
+    server.dropAll();
+    await until(() => server.connectionCount >= 3, 3_000);
+    server.silent = false;
+    await until(() => resyncs === 1, 3_000);
+  });
+
+  test('heartbeat detects a dead connection and reconnects', async () => {
+    const c = makeClient({ heartbeatIntervalMs: 50 });
+    let resyncs = 0;
+    c.onResync(() => resyncs++);
+    await c.connect();
+    server.mute = true;
+    await until(() => server.connectionCount === 2, 3_000);
+    server.mute = false;
+    await until(() => resyncs >= 1, 3_000);
+  });
+
+  test('ignores non-object frames without crashing', async () => {
+    const c = makeClient();
+    const seen: unknown[] = [];
+    c.onMessage((m) => seen.push(m));
+    await c.connect();
+    for (const frame of ['null', '1', '[]', '"x"', 'not json']) server.send(frame);
+    server.send({ action: 'event', event: { action: 'addnode' } });
+    await until(() => seen.length === 1);
+    expect(seen[0]).toEqual({ action: 'event', event: { action: 'addnode' } });
+    expect(server.connectionCount).toBe(1);
+  });
+
+  test('isolates throwing subscribers', async () => {
+    const c = makeClient();
+    const seen: unknown[] = [];
+    let resyncs = 0;
+    c.onMessage(() => {
+      throw new Error('subscriber bug');
+    });
+    c.onMessage((m) => seen.push(m));
+    c.onResync(() => {
+      throw new Error('resync bug');
+    });
+    c.onResync(() => resyncs++);
+    await c.connect();
+    server.send({ action: 'event', event: { action: 'addnode' } });
+    await until(() => seen.length === 1);
+    server.dropAll();
+    await until(() => resyncs === 1);
+  });
 });

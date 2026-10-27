@@ -3,7 +3,7 @@ import type { UpstreamDeviceRef } from '@netschool/domain';
 import type { MeshRequester } from './control-client.ts';
 import { AdapterError } from './errors.ts';
 import { formatNodeId } from './node-id.ts';
-import { rightsFor } from './rights.ts';
+import { PRINCIPAL_SITE_RIGHTS, rightsFor } from './rights.ts';
 
 export interface SessionPrincipal {
   userId: string;
@@ -29,7 +29,7 @@ export class MeshCentralPrincipals {
     const rights = rightsFor(mode);
 
     // randomPassword yuborilmaydi: server unda parolni o'zinikiga almashtiradi (meshuser.js serverCommandAddUser).
-    await this.#client.request('adduser', { username, pass: password, siteadmin: 0 });
+    await this.#client.request('adduser', { username, pass: password, siteadmin: PRINCIPAL_SITE_RIGHTS });
     try {
       await this.#client.request('adddeviceuser', { userids: [userId], nodeid: nodeId, rights });
     } catch (err) {

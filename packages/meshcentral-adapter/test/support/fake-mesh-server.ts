@@ -25,6 +25,8 @@ export class FakeMeshServer {
   ca = '';
   credentials = { user: 'admin', pass: 'secret' };
   connectionCount = 0;
+  silent = false; // true: serverinfo yubormaydi (osilgan server)
+  mute = false; // true: ping'ga pong qaytarmaydi (o'lik ulanish)
   handle: Handler = () => {};
   readonly sockets = new Set<WebSocket>();
   #https!: Server;
@@ -36,7 +38,7 @@ export class FakeMeshServer {
     const cert = await makeCert();
     server.ca = cert.cert;
     server.#https = createServer({ key: cert.key, cert: cert.cert });
-    server.#wss = new WebSocketServer({ server: server.#https, path: '/control.ashx' });
+    server.#wss = new WebSocketServer({ server: server.#https, path: '/control.ashx', autoPong: false });
     server.#wss.on('connection', (socket, req) =>
       server.#onConnection(socket, String(req.headers['x-meshauth'] ?? '')),
     );
@@ -50,6 +52,9 @@ export class FakeMeshServer {
     this.connectionCount++;
     this.sockets.add(socket);
     socket.on('close', () => this.sockets.delete(socket));
+    socket.on('ping', (data) => {
+      if (!this.mute) socket.pong(data);
+    });
     const [user = '', pass = ''] = auth.split(',').map((p) => Buffer.from(p, 'base64').toString());
     if (user !== this.credentials.user || pass !== this.credentials.pass) {
       socket.send(JSON.stringify({ action: 'close', cause: 'noauth', msg: 'noauth-2d' }));
@@ -57,7 +62,7 @@ export class FakeMeshServer {
       return;
     }
     socket.on('message', (data) => this.handle(socket, JSON.parse(String(data))));
-    socket.send(JSON.stringify({ action: 'serverinfo', serverinfo: {} }));
+    if (!this.silent) socket.send(JSON.stringify({ action: 'serverinfo', serverinfo: {} }));
   }
 
   send(msg: unknown) {
