@@ -296,7 +296,7 @@ describe('session gateway against pinned MeshCentral', () => {
       control.ws.send(JSON.stringify({ action: 'msg', nodeid: s.nodeId, ...command }));
     }
     await until(() => droppedFor(s.sessionId).length >= commands.length, 3_000);
-    expect(droppedFor(s.sessionId).map((e) => e.reason)).toEqual(['msg:pskill', 'msg:serviceStop', 'msg:openUrl']);
+    expect(droppedFor(s.sessionId).map((e) => e.reason)).toEqual(['msg:<other>', 'msg:<other>', 'msg:<other>']);
     // Ulanish ochiq va ruxsat etilgan kadr ishlaydi: filtr kadrni tashlaydi, sessiyani emas.
     control.ws.send(JSON.stringify({ action: 'ping' }));
     await frameWhere(control, (f) => f.action === 'pong');

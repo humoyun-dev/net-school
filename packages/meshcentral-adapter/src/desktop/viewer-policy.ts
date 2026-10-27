@@ -14,7 +14,9 @@ export interface ViewerContext {
   handles: CredentialHandles;
 }
 
-const deny = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
+const MAX_REASON = 64;
+// Sabab audit hodisasiga tushadi: uzunligi doim cheklangan.
+const deny = (reason: string): { ok: false; reason: string } => ({ ok: false, reason: reason.slice(0, MAX_REASON) });
 
 const STATIC_PREFIXES = ['/scripts/', '/styles/', '/images/', '/sounds/'];
 const STATIC_FILES = new Set(['/favicon.ico', '/manifest.json', '/logo.png']);
@@ -147,6 +149,7 @@ function keysMatch(frame: Frame, required: readonly string[], optional: readonly
 
 const PLAIN_ACTIONS = new Set(['ping', 'pong', 'authcookie', 'usergroups', 'meshes', 'loginTokens', 'files']);
 const NODE_ACTIONS = new Set(['powertimeline', 'lastconnect', 'getsysinfo', 'getnetworkinfo', 'deviceShares']);
+const KNOWN_ACTIONS: ReadonlySet<string> = new Set([...PLAIN_ACTIONS, ...NODE_ACTIONS, 'nodes', 'getNotes']);
 
 function validResponseId(frame: Frame): boolean {
   if (!Object.hasOwn(frame, 'responseid')) return true;
@@ -171,7 +174,8 @@ export function filterControlUp(text: string, ctx: ViewerContext): FrameVerdict 
 
   if (action === 'msg') return filterMsg(frame, ctx);
 
-  const reason = deny(`action:${action}`);
+  // Sababda faqat ruxsat etilgan nom; boshqasi (hujumchi matni) `<other>`.
+  const reason = deny(`action:${KNOWN_ACTIONS.has(action) ? action : '<other>'}`);
   if (PLAIN_ACTIONS.has(action)) {
     return keysMatch(frame, ['action'], ['responseid']) && validResponseId(frame) ? { ok: true, data: text } : reason;
   }
@@ -190,7 +194,7 @@ export function filterControlUp(text: string, ctx: ViewerContext): FrameVerdict 
 // Faqat TCP/UDP'siz, node'ga bog'langan relay tunnel; rauth handle real qiymatga almashtiriladi.
 function filterMsg(frame: Frame, ctx: ViewerContext): FrameVerdict {
   const type = frame.type;
-  if (type !== 'tunnel') return deny(`msg:${typeof type === 'string' ? type : ''}`);
+  if (type !== 'tunnel') return deny('msg:<other>');
   const reason = deny('msg:tunnel');
   if (!keysMatch(frame, ['action', 'type', 'nodeid', 'value', 'usage'])) return reason;
   if (frame.nodeid !== ctx.nodeId || frame.usage !== 2) return reason;

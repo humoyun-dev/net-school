@@ -270,7 +270,7 @@ describe('filterControlUp', () => {
     const ctx = makeCtx('control');
     for (const type of ['pskill', 'serviceStop', 'openUrl', 'setclip', 'getclip', 'console', 'localapp']) {
       const v = filterControlUp(JSON.stringify({ action: 'msg', type, nodeid: NODE, value: 'x', usage: 2 }), ctx);
-      expect(v, type).toEqual({ ok: false, reason: `msg:${type}` });
+      expect(v, type).toEqual({ ok: false, reason: 'msg:<other>' });
     }
     expect(filterControlUp(JSON.stringify({ action: 'msg', nodeid: NODE }), ctx).ok).toBe(false);
   });
@@ -300,8 +300,34 @@ describe('filterControlUp', () => {
     }
     expect(filterControlUp(JSON.stringify({ action: 'getcookie' }), ctx)).toEqual({
       ok: false,
-      reason: 'action:getcookie',
+      reason: 'action:<other>',
     });
+  });
+
+  test('drop reasons carry only allowlisted names and stay within 64 characters', () => {
+    const ctx = makeCtx('control');
+    const huge = 'x'.repeat(10_000);
+    expect(filterControlUp(JSON.stringify({ action: huge }), ctx)).toEqual({ ok: false, reason: 'action:<other>' });
+    const msg = JSON.stringify({ action: 'msg', type: huge, nodeid: NODE, value: 'x', usage: 2 });
+    expect(filterControlUp(msg, ctx)).toEqual({ ok: false, reason: 'msg:<other>' });
+    // Ruxsat etilgan nom, lekin noto'g'ri shakl: nom saqlanadi.
+    expect(filterControlUp(JSON.stringify({ action: 'ping', extra: huge }), ctx)).toEqual({
+      ok: false,
+      reason: 'action:ping',
+    });
+    const frames = [
+      JSON.stringify({ action: huge }),
+      JSON.stringify({ action: `${'ping'.repeat(30)}` }),
+      JSON.stringify({ action: 'msg', type: huge }),
+      JSON.stringify({ action: 'msg', type: 'tunnel', value: huge }),
+      JSON.stringify({ action: 'nodes', id: huge }),
+      `{${huge}`,
+    ];
+    for (const text of frames) {
+      const verdict = filterControlUp(text, ctx);
+      expect(verdict.ok).toBe(false);
+      if (!verdict.ok) expect(verdict.reason.length).toBeLessThanOrEqual(64);
+    }
   });
 
   test('filterControlUp rejects non-object and malformed JSON', () => {
