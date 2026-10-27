@@ -10,13 +10,16 @@
     "test": "vitest run --project unit",
     "test:contract": "vitest run --project contract",
     "typecheck": "pnpm -r exec tsc --noEmit",
-    "lint": "biome check ."
+    "lint": "biome check .",
+    "meshcentral:install": "cd infra/meshcentral/upstream && npm ci --omit=optional --no-audit --no-fund"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.3",
     "@types/node": "^24.19.2",
+    "@types/ws": "^8.18.2",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "ws": "^8.22.0"
   }
 }

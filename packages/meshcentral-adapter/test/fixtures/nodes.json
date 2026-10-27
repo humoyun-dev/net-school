@@ -1,0 +1,21 @@
+{
+  "action": "nodes",
+  "responseid": "6caf42e2-b482-4546-89e2-ee2dd3bb2b43",
+  "nodes": {
+    "mesh//IrL4Iqw7lFbyeRtiOg7qnBteq1NL$svszKS@Wcl@lUDAggQ06oRVXjlo$xtNMSc6": [
+      {
+        "type": "node",
+        "_id": "node//QVK8kiP0gqG8JkAbgQ7zugnXaqz3r8R0At7hUf$49nbxbHHZdUIiJ5gm5ctpPXAS",
+        "mtype": 3,
+        "icon": 1,
+        "name": "pc-01",
+        "host": "pc-01.lan",
+        "domain": "",
+        "agent": {
+          "id": 4,
+          "caps": 0
+        }
+      }
+    ]
+  }
+}

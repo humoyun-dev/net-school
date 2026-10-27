@@ -1,0 +1,15 @@
+{
+  "action": "event",
+  "event": {
+    "etype": "node",
+    "userid": "user//admin",
+    "username": "admin",
+    "action": "removenode",
+    "nodeid": "node//QVK8kiP0gqG8JkAbgQ7zugnXaqz3r8R0At7hUf$49nbxbHHZdUIiJ5gm5ctpPXAS",
+    "msgid": 87,
+    "msgArgs": ["pc-01-renamed", "probe"],
+    "msg": "Removed device pc-01-renamed from device group probe",
+    "domain": "",
+    "time": "2026-10-27T09:25:53.505Z"
+  }
+}

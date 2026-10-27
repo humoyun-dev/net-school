@@ -1,0 +1,29 @@
+{
+  "action": "event",
+  "event": {
+    "etype": "node",
+    "userid": "user//admin",
+    "username": "admin",
+    "action": "changenode",
+    "nodeid": "node//QVK8kiP0gqG8JkAbgQ7zugnXaqz3r8R0At7hUf$49nbxbHHZdUIiJ5gm5ctpPXAS",
+    "domain": "",
+    "msg": "Changed device pc-01-renamed from group probe: name",
+    "node": {
+      "type": "node",
+      "_id": "node//QVK8kiP0gqG8JkAbgQ7zugnXaqz3r8R0At7hUf$49nbxbHHZdUIiJ5gm5ctpPXAS",
+      "meshid": "mesh//IrL4Iqw7lFbyeRtiOg7qnBteq1NL$svszKS@Wcl@lUDAggQ06oRVXjlo$xtNMSc6",
+      "mtype": 3,
+      "icon": 1,
+      "name": "pc-01-renamed",
+      "host": "pc-01.lan",
+      "domain": "",
+      "agent": {
+        "id": 4,
+        "caps": 0
+      }
+    },
+    "msgid": 140,
+    "msgArgs": ["pc-01-renamed", "probe", "name"],
+    "time": "2026-10-27T09:25:53.505Z"
+  }
+}
