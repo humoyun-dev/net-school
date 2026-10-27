@@ -179,7 +179,8 @@ describe('MeshCentralViewerUpstream against pinned upstream', () => {
       session.rewriteHtml(new URL(session.entryPath, `https://${PUBLIC_HOST}`), page.html),
     )?.[1];
     expect(handle).toBeDefined();
-    const nodeId = new URL(session.entryPath, `https://${PUBLIC_HOST}`).searchParams.get('gotonode') ?? '';
+    // Entry URL'da node id prefiksiz; test domeni bo'sh: node//<kalit>.
+    const nodeId = `node//${new URL(session.entryPath, `https://${PUBLIC_HOST}`).searchParams.get('gotonode') ?? ''}`;
     const relay = (auth: string) =>
       `/meshrelay.ashx?browser=1&p=2&nodeid=${encodeURIComponent(nodeId)}&id=abc&auth=${encodeURIComponent(auth)}`;
     const xff = { 'x-forwarded-for': CLIENT_IP };

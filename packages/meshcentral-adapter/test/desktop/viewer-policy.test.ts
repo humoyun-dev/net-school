@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { CredentialHandles } from '../../src/desktop/credential-handles.ts';
 import {
+  entryNodeKey,
   filterControlDown,
   filterControlUp,
   filterRelayUp,
@@ -39,9 +40,25 @@ describe('routeViewerHttp', () => {
     expect(routeViewerHttp('GET', u('/'), ctx).ok).toBe(false);
   });
 
+  test('entry page passes gotonode without the node// prefix, as the upstream page expects', () => {
+    expect(entryNodeKey('node//abc')).toBe('abc');
+    expect(entryNodeKey('node/dom1/a@b$c')).toBe('a@b$c');
+    expect(viewerEntryPath(NODE)).toBe('/?gotonode=abc&viewmode=11&hide=31');
+    // '$' va '@' kodlanmaydi: upstream parseUriArgs '%' bor qiymatni tashlaydi.
+    const odd = 'node//a@b$c';
+    expect(viewerEntryPath(odd)).toBe('/?gotonode=a@b$c&viewmode=11&hide=31');
+    const ctx = { ...makeCtx(), nodeId: odd };
+    expect(routeViewerHttp('GET', u(viewerEntryPath(odd)), ctx)).toEqual({
+      ok: true,
+      upstreamPath: viewerEntryPath(odd),
+    });
+    // To'liq node id (prefiks bilan) endi rad etiladi.
+    expect(routeViewerHttp('GET', u('/?gotonode=node%2F%2Fabc&viewmode=11&hide=31'), makeCtx()).ok).toBe(false);
+  });
+
   test('entry page rejects wrong viewmode, bad hide, duplicates, missing keys', () => {
     const ctx = makeCtx();
-    const g = encodeURIComponent(NODE);
+    const g = encodeURIComponent(entryNodeKey(NODE));
     expect(routeViewerHttp('GET', u(`/?gotonode=${g}&viewmode=1&hide=31`), ctx).ok).toBe(false);
     expect(routeViewerHttp('GET', u(`/?gotonode=${g}&viewmode=11&hide=abc`), ctx).ok).toBe(false);
     expect(routeViewerHttp('GET', u(`/?gotonode=${g}&viewmode=11&hide=12345`), ctx).ok).toBe(false);

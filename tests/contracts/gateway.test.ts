@@ -36,7 +36,7 @@ async function start(mode: 'view' | 'control' = 'view', name = 'pc-01'): Promise
   const redeemed = await browser.redeem(ticket);
   expect(redeemed.status).toBe(303);
   const entryPath = String(redeemed.headers.location);
-  const nodeId = new URL(entryPath, stack.gatewayOrigin).searchParams.get('gotonode') ?? '';
+  const nodeId = stack.nodeIdOf(device);
   return { sessionId, ticket, browser, nodeId, entryPath };
 }
 
@@ -260,7 +260,8 @@ describe('session gateway against pinned MeshCentral', () => {
     const page = await s.browser.get(s.entryPath);
     const handle = pageValue(page.body, 'authCookie');
 
-    const swapped = await s.browser.get(`/?gotonode=${encodeURIComponent(other)}&viewmode=11&hide=31`);
+    const otherKey = other.replace(/^node\/[^/]*\//, '');
+    const swapped = await s.browser.get(`/?gotonode=${encodeURIComponent(otherKey)}&viewmode=11&hide=31`);
     expect(swapped.status).toBe(403);
     expect(await upgrade(s.browser.socket(relayPath(other, handle)))).toBe(403);
 

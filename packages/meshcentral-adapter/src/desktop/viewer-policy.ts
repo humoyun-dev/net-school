@@ -23,8 +23,18 @@ const TUNNEL_PREFIX = '*/meshrelay.ashx?';
 const MAX_RESPONSE_ID = 128;
 const MAX_NODES_FILTER = 256;
 
+// Upstream sahifa `gotonode` ni 'node/' + domain + '/' + qiymat deb qidiradi: "node//" prefiksisiz qism kerak.
+export function entryNodeKey(nodeId: string): string {
+  return /^node\/[^/]*\/(.+)$/.exec(nodeId)?.[1] ?? nodeId;
+}
+
+// Sahifaning parseUriArgs'i '%' bor qiymatni tashlab yuboradi: node id'dagi '$' va '@' kodlanmaydi.
+function encodeNodeKey(nodeId: string): string {
+  return encodeURIComponent(entryNodeKey(nodeId)).replaceAll('%24', '$').replaceAll('%40', '@');
+}
+
 export function viewerEntryPath(nodeId: string): string {
-  return `/?gotonode=${encodeURIComponent(nodeId)}&viewmode=11&hide=31`;
+  return `/?gotonode=${encodeNodeKey(nodeId)}&viewmode=11&hide=31`;
 }
 
 // Yo'lda ".." , "//", "\" yoki kodlangan nuqta/slash/backslash bo'lsa rad.
@@ -47,10 +57,13 @@ export function routeViewerHttp(method: string, url: URL, ctx: ViewerContext): R
   if (pathname === '/') {
     if (!hasExactKeys(url.searchParams, ['gotonode', 'viewmode', 'hide'])) return deny('entry_query');
     const hide = url.searchParams.get('hide') ?? '';
-    if (url.searchParams.get('gotonode') !== ctx.nodeId) return deny('entry_node');
+    if (url.searchParams.get('gotonode') !== entryNodeKey(ctx.nodeId)) return deny('entry_node');
     if (url.searchParams.get('viewmode') !== '11') return deny('entry_viewmode');
     if (!HIDE.test(hide)) return deny('entry_hide');
-    return { ok: true, upstreamPath: `/?gotonode=${encodeURIComponent(ctx.nodeId)}&viewmode=11&hide=${hide}` };
+    return {
+      ok: true,
+      upstreamPath: `/?gotonode=${encodeNodeKey(ctx.nodeId)}&viewmode=11&hide=${hide}`,
+    };
   }
 
   const isStatic =
