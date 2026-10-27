@@ -1,4 +1,15 @@
 export { MeshControlClient, type MeshControlClientOptions, type MeshRequester } from './control-client.ts';
+export { CredentialHandles, type CredentialKind } from './desktop/credential-handles.ts';
+export {
+  type FrameVerdict,
+  filterControlDown,
+  filterControlUp,
+  type RouteVerdict,
+  routeViewerHttp,
+  routeViewerWs,
+  type ViewerContext,
+  viewerEntryPath,
+} from './desktop/viewer-policy.ts';
 export { MeshCentralDeviceManagement } from './device-management.ts';
 export { AdapterError, type AdapterErrorCode } from './errors.ts';
 export type { SiteMeshScope } from './node-id.ts';
