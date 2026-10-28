@@ -13,7 +13,8 @@ export function renderConfig(template, { dbPassword, certName }) {
     redirPort: 0,
     selfUpdate: false,
     autoBackup: false,
-    postgres: { host: 'postgres', port: 5432, user: 'meshcentral', password: dbPassword, database: 'meshcentral' },
+    // createdatabase: false — database init skriptda yaratilgan; MeshCentral `postgres` DB'ga ulanmaydi (db.js:945).
+    postgres: { host: 'postgres', port: 5432, user: 'meshcentral', password: dbPassword, database: 'meshcentral', createdatabase: false },
   };
   return config;
 }

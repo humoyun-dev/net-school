@@ -54,6 +54,20 @@ describe('compose topology', () => {
   });
 });
 
+describe('startup ordering', () => {
+  test('postgres healthcheck uses TCP and migrations retry on failure', () => {
+    const health = (compose.services.postgres.healthcheck.test as string[]).join(' ');
+    expect(health).toContain('-h 127.0.0.1');
+    expect(compose.services['api-migrate'].restart).toBe('on-failure');
+  });
+
+  test('README secret recipe produces URL-safe database passwords', () => {
+    const readme = readFileSync(join(here, '..', 'README.md'), 'utf8');
+    expect(readme).not.toMatch(/openssl rand -base64/);
+    expect(readme).toMatch(/openssl rand -hex 32/);
+  });
+});
+
 describe('meshcentral config rendering', () => {
   test('postgres settings use the meshcentral user and keep the hardened template', () => {
     const config = renderConfig(template, { dbPassword: 's3cret', certName: 'hub.school.lan' });
@@ -63,6 +77,8 @@ describe('meshcentral config rendering', () => {
       user: 'meshcentral',
       password: 's3cret',
       database: 'meshcentral',
+      // Database init skriptda yaratiladi; aks holda MeshCentral `postgres` DB'ga ulanmoqchi bo'ladi (db.js:961).
+      createdatabase: false,
     });
     for (const key of [
       'trustedProxy',

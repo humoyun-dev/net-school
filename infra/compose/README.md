@@ -12,7 +12,7 @@ Tashqariga faqat `api` chiqadi (`443 → 8443`). MeshCentral web/admin paneli va
 cd infra/compose
 mkdir -p secrets && chmod 700 secrets
 for s in postgres_superuser_password netschool_db_password meshcentral_db_password; do
-  openssl rand -base64 32 | tr -d '\n' > "secrets/$s"
+  openssl rand -hex 32 | tr -d '\n' > "secrets/$s"   # hex: DB URL'da kodlash talab qilmaydi
 done
 printf 'postgres://netschool:%s@postgres:5432/netschool' "$(cat secrets/netschool_db_password)" > secrets/netschool_database_url
 # TLS: maktab CA yoki admin tarqatgan lokal CA bilan imzolangan sertifikat (spec §13)
