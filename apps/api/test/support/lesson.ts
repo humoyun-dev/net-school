@@ -10,3 +10,7 @@ export function startLesson(app: TestApp, cookie: string, roomId: string, body: 
 export function endLesson(app: TestApp, cookie: string, lessonId: string, key = idem()) {
   return app.request('POST', `/api/v1/lessons/${lessonId}/end`, { body: {}, cookie, headers: key });
 }
+
+export function issueCommand(app: TestApp, cookie: string, lessonId: string, body: unknown, key = idem()) {
+  return app.request('POST', `/api/v1/lessons/${lessonId}/commands`, { body, cookie, headers: key });
+}

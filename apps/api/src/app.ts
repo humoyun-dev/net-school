@@ -10,6 +10,7 @@ import { OriginGuard } from './common/origin-guard.ts';
 import { API_CONFIG, type ApiConfig } from './config/config.ts';
 import { DB, type Db } from './db/client.ts';
 import { AuditModule } from './modules/audit/audit.module.ts';
+import { CommandsModule } from './modules/commands/commands.module.ts';
 import { DevicesModule } from './modules/devices/devices.module.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory } from './modules/devices/mesh.ts';
 import { EventsModule } from './modules/events/events.module.ts';
@@ -43,7 +44,16 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
   class CoreModule {}
 
   @Module({
-    imports: [CoreModule, AuditModule, EventsModule, IdentityModule, OrganizationModule, DevicesModule, LessonsModule],
+    imports: [
+      CoreModule,
+      AuditModule,
+      EventsModule,
+      IdentityModule,
+      OrganizationModule,
+      DevicesModule,
+      LessonsModule,
+      CommandsModule,
+    ],
     controllers: [HealthController, ...(opts.controllers ?? [])],
     providers: [
       { provide: APP_FILTER, useClass: ErrorFilter },

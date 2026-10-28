@@ -8,6 +8,7 @@ export type ApiErrorCode =
   | 'capability_unavailable'
   | 'rate_limited'
   | 'upstream_unavailable'
+  | 'device_offline'
   | 'internal';
 
 export const ERROR_STATUS: Record<ApiErrorCode, number> = {
@@ -20,6 +21,7 @@ export const ERROR_STATUS: Record<ApiErrorCode, number> = {
   capability_unavailable: 409,
   rate_limited: 429,
   upstream_unavailable: 503,
+  device_offline: 503,
   internal: 500,
 };
 
@@ -33,6 +35,7 @@ const DEFAULT_MESSAGE: Record<ApiErrorCode, string> = {
   capability_unavailable: 'Capability unavailable',
   rate_limited: 'Too many requests',
   upstream_unavailable: 'Upstream service unavailable',
+  device_offline: 'Device is offline',
   internal: 'Internal error',
 };
 
