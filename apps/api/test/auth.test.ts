@@ -90,6 +90,18 @@ describe('login', () => {
     expect((await login('teacher1', PASSWORD)).status).toBe(401);
   });
 
+  test('a correct password whose check overlaps a lockout does not clear the lock', async () => {
+    const pending = login('teacher1', PASSWORD); // SELECT qulfsiz holatni ko'radi, keyin scrypt ishlaydi
+    await new Promise((r) => setTimeout(r, 5));
+    await t.db
+      .update(users)
+      .set({ failedLoginCount: 10, lockedUntil: new Date(now + 15 * MIN) })
+      .where(eq(users.username, 'teacher1'));
+    expect((await pending).status).toBe(401);
+    const [row] = await t.db.select().from(users).where(eq(users.username, 'teacher1'));
+    expect(row?.lockedUntil?.getTime()).toBe(now + 15 * MIN);
+  });
+
   test('ip limit returns 429 after 30 attempts per minute', async () => {
     for (let i = 0; i < 30; i++) expect((await login('ghost', 'x-x-x-x-x-x')).status).toBe(401);
     const limited = await login('teacher1', PASSWORD);
@@ -153,6 +165,25 @@ describe('sessions', () => {
 });
 
 describe('password', () => {
+  test('wrong current passwords count toward the lockout and are audited', async () => {
+    const cookie = await session();
+    for (let i = 0; i < 10; i++) {
+      const res = await app.request('POST', '/api/v1/auth/password', {
+        cookie,
+        body: { currentPassword: `guess-${i}-xxxxxx`, newPassword: 'Yangi-uzun-parol-1' },
+      });
+      expect(res.status).toBe(401);
+    }
+    const right = await app.request('POST', '/api/v1/auth/password', {
+      cookie,
+      body: { currentPassword: PASSWORD, newPassword: 'Yangi-uzun-parol-1' },
+    });
+    expect(right.status).toBe(401); // hisob qulflangan
+    expect((await login('teacher1', PASSWORD)).status).toBe(401);
+    const failed = await t.db.select().from(auditEvents).where(eq(auditEvents.action, 'auth.password_changed'));
+    expect(failed.filter((r) => r.result === 'failed')).toHaveLength(11);
+  });
+
   test('must-change-password restricts routes until the password is changed', async () => {
     await seedUser(t.db, orgId, 'newadmin', [{ role: 'school_admin', siteId: null }], { mustChangePassword: true });
     const res = await login('newadmin', PASSWORD);

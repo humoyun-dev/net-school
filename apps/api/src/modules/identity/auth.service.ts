@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, lte, or, sql } from 'drizzle-orm';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { ApiError } from '../../common/errors.ts';
 import { DB, type Db } from '../../db/client.ts';
@@ -13,6 +13,10 @@ import { SessionService } from './sessions.ts';
 export const LOCK_THRESHOLD = 10;
 export const LOCK_MS = 15 * 60 * 1000;
 export const LOGIN_THROTTLE = Symbol('LOGIN_THROTTLE');
+
+type FailureReason = 'bad_credentials' | 'locked' | 'disabled';
+// Parol tekshiruvi bo'ladigan ikki joy; ikkalasi bir xil qulf hisoblagichini ishlatadi.
+type CredentialCheck = 'auth.login' | 'auth.password_changed';
 
 @Injectable()
 export class AuthService {
@@ -34,53 +38,20 @@ export class AuthService {
 
     if (!user || user.disabledAt) {
       await verifyPassword(password, DUMMY_HASH);
-      await this.#failed(this.db, user ?? null, user ? 'disabled' : 'bad_credentials', correlationId);
+      await this.#failed(this.db, 'auth.login', user ?? null, user ? 'disabled' : 'bad_credentials', correlationId);
       throw new ApiError('unauthenticated');
     }
-    if (user.lockedUntil && user.lockedUntil.getTime() > now) {
-      await verifyPassword(password, DUMMY_HASH);
-      await this.#failed(this.db, user, 'locked', correlationId);
-      throw new ApiError('unauthenticated');
-    }
-    if (!(await verifyPassword(password, user.passwordHash))) {
-      await this.db.transaction(async (tx) => {
-        const lockedNow = await this.#countFailure(tx, user.id, now);
-        await this.#failed(tx, user, 'bad_credentials', correlationId);
-        if (lockedNow) {
-          await this.audit.write(
-            tx,
-            {
-              organizationId: user.organizationId,
-              actorUserId: null,
-              action: 'auth.lockout',
-              targetType: 'user',
-              targetId: user.id,
-              result: 'succeeded',
-            },
-            correlationId,
-          );
-        }
-      });
-      throw new ApiError('unauthenticated');
-    }
+    await this.#verify('auth.login', user, password, now, correlationId);
 
-    return this.db.transaction(async (tx) => {
-      await tx.update(users).set({ failedLoginCount: 0, lockedUntil: null }).where(eq(users.id, user.id));
+    const result = await this.db.transaction(async (tx) => {
+      // scrypt davomida boshqa urinish hisobni qulflagan bo'lsa, muvaffaqiyat qulfni yecha olmaydi.
+      if (!(await this.#clearFailures(tx, user.id, now))) return null;
       const session = await this.sessions.create(tx, user.id);
-      await this.audit.write(
-        tx,
-        {
-          organizationId: user.organizationId,
-          actorUserId: user.id,
-          action: 'auth.login',
-          targetType: 'user',
-          targetId: user.id,
-          result: 'succeeded',
-        },
-        correlationId,
-      );
+      await this.#succeeded(tx, 'auth.login', user, correlationId);
       return { token: session.token, user: userSummary(user) };
     });
+    if (!result) return this.#reject(this.db, 'auth.login', user, 'locked', correlationId);
+    return result;
   }
 
   async logout(user: UserRow, sessionId: string, correlationId: string): Promise<void> {
@@ -101,25 +72,47 @@ export class AuthService {
     });
   }
 
+  // Joriy parol login bilan bir xil qulf hisoblagichidan o'tadi: ochiq sessiyadan parolni taxmin qilib bo'lmaydi.
   async changePassword(user: UserRow, sessionId: string, current: string, next: string, correlationId: string) {
-    if (!(await verifyPassword(current, user.passwordHash))) throw new ApiError('unauthenticated');
+    const now = this.now();
+    await this.#verify('auth.password_changed', user, current, now, correlationId);
     const passwordHash = await hashPassword(next);
-    await this.db.transaction(async (tx) => {
+    const changed = await this.db.transaction(async (tx) => {
+      if (!(await this.#clearFailures(tx, user.id, now))) return false;
       await tx.update(users).set({ passwordHash, mustChangePassword: false }).where(eq(users.id, user.id));
       await this.sessions.revokeAllForUser(tx, user.id, sessionId);
-      await this.audit.write(
-        tx,
-        {
-          organizationId: user.organizationId,
-          actorUserId: user.id,
-          action: 'auth.password_changed',
-          targetType: 'user',
-          targetId: user.id,
-          result: 'succeeded',
-        },
-        correlationId,
-      );
+      await this.#succeeded(tx, 'auth.password_changed', user, correlationId);
+      return true;
     });
+    if (!changed) await this.#reject(this.db, 'auth.password_changed', user, 'locked', correlationId);
+  }
+
+  // Qulf va parolni tekshiradi; xato bo'lsa hisoblaydi, audit qiladi va 401 otadi.
+  async #verify(check: CredentialCheck, user: UserRow, password: string, now: number, correlationId: string) {
+    if (user.lockedUntil && user.lockedUntil.getTime() > now) {
+      await verifyPassword(password, DUMMY_HASH);
+      await this.#reject(this.db, check, user, 'locked', correlationId);
+    }
+    if (await verifyPassword(password, user.passwordHash)) return;
+    await this.db.transaction(async (tx) => {
+      const lockedNow = await this.#countFailure(tx, user.id, now);
+      await this.#failed(tx, check, user, 'bad_credentials', correlationId);
+      if (lockedNow) {
+        await this.audit.write(
+          tx,
+          {
+            organizationId: user.organizationId,
+            actorUserId: null,
+            action: 'auth.lockout',
+            targetType: 'user',
+            targetId: user.id,
+            result: 'succeeded',
+          },
+          correlationId,
+        );
+      }
+    });
+    throw new ApiError('unauthenticated');
   }
 
   // Atomik hisoblagich: qulf aniq 10-xatoda bir marta qo'yiladi; eskirgan qulf yangi hisob boshlaydi.
@@ -138,13 +131,49 @@ export class AuthService {
     return row?.count === LOCK_THRESHOLD && row.lockedUntil !== null;
   }
 
-  #failed(tx: Db, user: UserRow | null, reason: 'bad_credentials' | 'locked' | 'disabled', correlationId: string) {
+  // Faqat qulf yo'q (yoki muddati o'tgan) va hisob faol bo'lsa nolga tushiradi; aks holda false.
+  async #clearFailures(tx: Db, userId: string, now: number): Promise<boolean> {
+    const rows = await tx
+      .update(users)
+      .set({ failedLoginCount: 0, lockedUntil: null })
+      .where(
+        and(
+          eq(users.id, userId),
+          isNull(users.disabledAt),
+          or(isNull(users.lockedUntil), lte(users.lockedUntil, new Date(now))),
+        ),
+      )
+      .returning({ id: users.id });
+    return rows.length === 1;
+  }
+
+  async #reject(tx: Db, check: CredentialCheck, user: UserRow, reason: FailureReason, correlationId: string) {
+    await this.#failed(tx, check, user, reason, correlationId);
+    throw new ApiError('unauthenticated');
+  }
+
+  #succeeded(tx: Db, check: CredentialCheck, user: UserRow, correlationId: string) {
+    return this.audit.write(
+      tx,
+      {
+        organizationId: user.organizationId,
+        actorUserId: user.id,
+        action: check,
+        targetType: 'user',
+        targetId: user.id,
+        result: 'succeeded',
+      },
+      correlationId,
+    );
+  }
+
+  #failed(tx: Db, check: CredentialCheck, user: UserRow | null, reason: FailureReason, correlationId: string) {
     return this.audit.write(
       tx,
       {
         organizationId: user?.organizationId ?? null,
-        actorUserId: null,
-        action: 'auth.login',
+        actorUserId: check === 'auth.login' ? null : (user?.id ?? null),
+        action: check,
         targetType: user ? 'user' : undefined,
         targetId: user?.id,
         result: 'failed',
