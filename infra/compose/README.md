@@ -36,5 +36,6 @@ Parolni tiklash (oflayn): `docker compose run --rm api-migrate node dist/cli.mjs
 ## Cheklovlar (P1a)
 
 - Remote-session gateway servisi P1d'da qo'shiladi.
+- API'ning MeshCentral ulanishi (`MESHCENTRAL_URL`, `MESHCENTRAL_USERNAME`, `MESHCENTRAL_PASSWORD_FILE`, `MESHCENTRAL_CA_FILE`, `MESH_INSTANCE_ID`) va uning service account'i ham P1d'da; ungacha qurilmani MeshAgent'ga bog'lash 409 `capability_unavailable` qaytaradi (ADR 0005).
 - MeshCentral `autoBackup` o'chiq: backup rejasi (NetSchool DB + MeshCentral DB + MeshCentral data/sertifikatlar) alohida vazifa (spec §13).
 - `trustedProxy: 127.0.0.1` shablonda: gateway alohida konteynerda bo'lganda (P1d) uning tarmoq manzili bilan almashtiriladi.
