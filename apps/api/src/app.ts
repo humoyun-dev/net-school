@@ -46,6 +46,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     httpsOptions: { cert: config.tls.cert, key: config.tls.key },
     bodyParser: false,
+    rawBody: true, // qurilma imzosi aynan kelgan baytlar ustida tekshiriladi
     logger: opts.logger ?? ['log', 'warn', 'error'],
   });
   app.disable('x-powered-by');
