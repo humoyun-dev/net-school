@@ -9,7 +9,7 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const external = Object.keys(pkg.dependencies ?? {}).filter((name) => !name.startsWith('@netschool/'));
 
 await build({
-  entryPoints: { main: join(root, 'src/main.ts') },
+  entryPoints: { main: join(root, 'src/main.ts'), cli: join(root, 'src/cli/main.ts') },
   outdir: join(root, 'dist'),
   outExtension: { '.js': '.mjs' },
   bundle: true,
