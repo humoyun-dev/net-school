@@ -14,7 +14,8 @@ export interface TestDb {
   close(): Promise<void>;
 }
 
-const TABLES = 'audit_events, auth_sessions, room_memberships, role_assignments, rooms, users, sites, organizations';
+const TABLES =
+  'device_capabilities, mesh_bindings, devices, enrollments, audit_events, auth_sessions, room_memberships, role_assignments, rooms, users, sites, organizations';
 
 // TEST_DATABASE_URL bo'lsa (CI) real PostgreSQL'da yangi database, aks holda in-process PGlite.
 export async function createTestDb(): Promise<TestDb> {

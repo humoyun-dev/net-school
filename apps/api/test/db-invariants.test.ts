@@ -1,7 +1,17 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { migrateDb } from '../src/db/migrate.ts';
-import { auditEvents, organizations, roleAssignments, rooms, sites, users } from '../src/db/schema.ts';
+import {
+  auditEvents,
+  devices,
+  enrollments,
+  meshBindings,
+  organizations,
+  roleAssignments,
+  rooms,
+  sites,
+  users,
+} from '../src/db/schema.ts';
 import { createTestDb, type TestDb } from './support/db.ts';
 
 let t: TestDb;
@@ -97,5 +107,125 @@ describe('tenant invariants', () => {
     await migrateDb(t.db, t.driver);
     const a = await org('after-migrate');
     expect(a.orgId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
+
+describe('device invariants', () => {
+  async function twoSites() {
+    const a = await org('a');
+    const [site2] = await t.db.insert(sites).values({ organizationId: a.orgId, name: 'a-site-2' }).returning();
+    if (!site2) throw new Error('no site');
+    const [room1] = await t.db
+      .insert(rooms)
+      .values({ organizationId: a.orgId, siteId: a.siteId, name: 'r1' })
+      .returning();
+    const [room2] = await t.db
+      .insert(rooms)
+      .values({ organizationId: a.orgId, siteId: site2.id, name: 'r2' })
+      .returning();
+    if (!room1 || !room2) throw new Error('no room');
+    return { ...a, site2Id: site2.id, room1Id: room1.id, room2Id: room2.id };
+  }
+
+  let fp = 0;
+  function device(orgId: string, siteId: string, roomId: string | null = null) {
+    fp += 1;
+    return t.db
+      .insert(devices)
+      .values({
+        organizationId: orgId,
+        siteId,
+        roomId,
+        hostname: `pc-${fp}`,
+        publicKey: Buffer.from(`key-${fp}`),
+        keyFingerprint: `fp-${fp}`,
+      })
+      .returning()
+      .then(([row]) => {
+        if (!row) throw new Error('no device');
+        return row;
+      });
+  }
+
+  test('device room must belong to device site', async () => {
+    const s = await twoSites();
+    await rejects(device(s.orgId, s.siteId, s.room2Id));
+    await expect(device(s.orgId, s.siteId, s.room1Id)).resolves.toMatchObject({ roomId: s.room1Id });
+    await expect(device(s.orgId, s.siteId, null)).resolves.toMatchObject({ roomId: null });
+    const [admin] = await t.db
+      .insert(users)
+      .values({ organizationId: s.orgId, username: 'admin1', displayName: 'A', passwordHash: 'x' })
+      .returning();
+    if (!admin) throw new Error('no user');
+    const enrollment = (roomId: string) =>
+      t.db.insert(enrollments).values({
+        organizationId: s.orgId,
+        siteId: s.siteId,
+        roomId,
+        tokenHash: Buffer.from(roomId),
+        createdBy: admin.id,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+    await rejects(enrollment(s.room2Id));
+    await expect(enrollment(s.room1Id)).resolves.toBeDefined();
+  });
+
+  function binding(d: { id: string; organizationId: string; siteId: string }, node: string, siteId = d.siteId) {
+    return t.db.insert(meshBindings).values({
+      deviceId: d.id,
+      organizationId: d.organizationId,
+      siteId,
+      meshInstanceId: 'local',
+      meshDomainId: '',
+      meshNodeId: node,
+      boundBy: d.id,
+    });
+  }
+
+  test('mesh node binds to one device', async () => {
+    const s = await twoSites();
+    const d1 = await device(s.orgId, s.siteId);
+    const d2 = await device(s.orgId, s.siteId);
+    await binding(d1, 'node-1');
+    await rejects(binding(d2, 'node-1'));
+    await rejects(binding(d1, 'node-2'));
+    await expect(binding(d2, 'node-2')).resolves.toBeDefined();
+  });
+
+  test('binding site must match device site', async () => {
+    const s = await twoSites();
+    const d = await device(s.orgId, s.siteId);
+    await rejects(binding(d, 'node-1', s.site2Id));
+  });
+
+  test('key fingerprint is unique', async () => {
+    const s = await twoSites();
+    const d = await device(s.orgId, s.siteId);
+    await rejects(
+      t.db.insert(devices).values({
+        organizationId: s.orgId,
+        siteId: s.site2Id,
+        hostname: 'dup',
+        publicKey: Buffer.from('other'),
+        keyFingerprint: d.keyFingerprint,
+      }),
+    );
+  });
+
+  test('configured mesh domains are unique but many sites may be unconfigured', async () => {
+    const s = await twoSites();
+    await t.db.insert(sites).values({ organizationId: s.orgId, name: 'a-site-3' });
+    await t.db.update(sites).set({ meshDomainId: '' }).where(sql`${sites.id} = ${s.siteId}`);
+    await rejects(t.db.update(sites).set({ meshDomainId: '' }).where(sql`${sites.id} = ${s.site2Id}`));
+    await expect(
+      t.db.update(sites).set({ meshDomainId: 'b' }).where(sql`${sites.id} = ${s.site2Id}`),
+    ).resolves.toBeDefined();
+  });
+
+  test('failed device claim may be audited without an organization', async () => {
+    await expect(
+      t.db.insert(auditEvents).values({ action: 'device.claim', result: 'failed', correlationId: 'c-1' }).returning(),
+    ).resolves.toHaveLength(1);
+    await rejects(t.db.insert(auditEvents).values({ action: 'device.bind', result: 'failed', correlationId: 'c-2' }));
   });
 });
