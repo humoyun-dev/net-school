@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import { auditEvents, meshBindings, sites } from '../src/db/schema.ts';
+import { auditEvents, devices, meshBindings, sites } from '../src/db/schema.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { makeDeviceKey, seedDevice } from './support/device.ts';
 import { loginAs } from './support/login.ts';
@@ -184,5 +184,54 @@ describe('mesh binding', () => {
     expect(await agentOf(d)).toBe('offline');
     mesh.nodes.delete('node-A');
     expect(await agentOf(d)).toBe('offline');
+  });
+
+  test('retiring a device while it is being bound leaves no binding', async () => {
+    await setDomain(siteId, '');
+    const d = await device();
+    mesh.nodes.set('node-A', { domain: '', name: 'pc-a', online: true });
+    const held = mesh.hold();
+    const binding = bind(d, 'node-A');
+    await held.reached;
+    expect((await app.request('DELETE', `/api/v1/devices/${d}`, { cookie: admin })).status).toBe(204);
+    held.release();
+    expect((await binding).status).toBe(409);
+    expect(await app.db.db.select().from(meshBindings)).toHaveLength(0);
+    const [row] = await app.db.db.select().from(devices).where(eq(devices.id, d));
+    expect(row?.retiredAt).not.toBeNull();
+  });
+
+  test('changing the site domain while a device is being bound keeps them consistent', async () => {
+    await setDomain(siteId, 'dom-a');
+    const d = await device();
+    mesh.nodes.set('node-A', { domain: 'dom-a', name: 'pc-a', online: true });
+    const held = mesh.hold();
+    const binding = bind(d, 'node-A');
+    await held.reached;
+    expect((await setDomain(siteId, 'dom-b')).status).toBe(200);
+    held.release();
+    expect((await binding).status).toBe(409);
+    expect(await app.db.db.select().from(meshBindings)).toHaveLength(0);
+  });
+
+  test('database refuses a binding whose domain differs from its site', async () => {
+    await setDomain(siteId, 'dom-a');
+    const d = await device();
+    const [row] = await app.db.db.select().from(devices).where(eq(devices.id, d));
+    if (!row) throw new Error('device');
+    const insert = (meshDomainId: string) =>
+      app.db.db.insert(meshBindings).values({
+        deviceId: d,
+        organizationId: orgId,
+        siteId,
+        meshInstanceId: 'local',
+        meshDomainId,
+        meshNodeId: 'node-A',
+        boundBy: d,
+      });
+    await expect(insert('dom-b')).rejects.toThrow();
+    await insert('dom-a');
+    // Bog'langan site domain'ini DB ham o'zgartirtirmaydi.
+    await expect(app.db.db.update(sites).set({ meshDomainId: 'dom-c' }).where(eq(sites.id, siteId))).rejects.toThrow();
   });
 });

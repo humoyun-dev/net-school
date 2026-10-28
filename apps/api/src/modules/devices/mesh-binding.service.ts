@@ -1,13 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { CapabilityReport, Device, MeshNode } from '@netschool/contracts';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { Access } from '../../common/access.ts';
-import { isUniqueViolation, isUuid } from '../../common/db-errors.ts';
+import { isForeignKeyViolation, isUniqueViolation, isUuid } from '../../common/db-errors.ts';
 import { ApiError } from '../../common/errors.ts';
 import type { RequestContext } from '../../common/request-context.ts';
 import { API_CONFIG, type ApiConfig } from '../../config/config.ts';
 import { DB, type Db } from '../../db/client.ts';
-import { deviceCapabilities, meshBindings, sites } from '../../db/schema.ts';
+import { deviceCapabilities, devices, meshBindings, sites } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import { DevicesService } from './devices.service.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort, upstream } from './mesh.ts';
@@ -64,6 +64,8 @@ export class MeshBindingService {
       });
     } catch (err) {
       if (isUniqueViolation(err)) throw new ApiError('conflict', 'Mesh domain is used by another site');
+      // Parallel bog'lash commit bo'lgan: FK (site_id, mesh_domain_id) domain almashtirishni to'xtatdi.
+      if (isForeignKeyViolation(err)) throw new ApiError('conflict', 'Site has bound devices');
       throw err;
     }
   }
@@ -115,6 +117,14 @@ export class MeshBindingService {
 
     try {
       await this.db.transaction(async (tx) => {
+        // MeshCentral so'rovi davomida qurilma retire qilingan bo'lishi mumkin: qayta tekshirib, retire'ni
+        // commit'gacha ushlab turamiz. Site domain'i esa FK (site_id, mesh_domain_id) bilan himoyalangan.
+        const [live] = await tx
+          .select({ id: devices.id })
+          .from(devices)
+          .where(and(eq(devices.id, device.id), isNull(devices.retiredAt)))
+          .for('share');
+        if (!live) throw new ApiError('conflict', 'Device was retired');
         await tx.insert(meshBindings).values({
           deviceId: device.id,
           organizationId: device.organizationId,
@@ -128,6 +138,7 @@ export class MeshBindingService {
       });
     } catch (err) {
       if (isUniqueViolation(err)) throw new ApiError('conflict', 'Mesh node or device is already bound');
+      if (isForeignKeyViolation(err)) throw new ApiError('conflict', 'Site mesh domain changed');
       throw err;
     }
     return view;

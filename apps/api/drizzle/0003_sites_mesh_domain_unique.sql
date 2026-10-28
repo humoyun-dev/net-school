@@ -1,0 +1,1 @@
+ALTER TABLE "sites" ADD CONSTRAINT "sites_id_mesh_domain" UNIQUE("id","mesh_domain_id");

@@ -22,6 +22,20 @@
       "when": 1793191589490,
       "tag": "0002_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793193052170,
+      "tag": "0003_sites_mesh_domain_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793193052625,
+      "tag": "0004_mesh_binding_domain_fk",
+      "breakpoints": true
     }
   ]
 }

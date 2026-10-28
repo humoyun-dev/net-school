@@ -43,6 +43,8 @@ export const sites = pgTable(
     unique('sites_org_id').on(t.organizationId, t.id),
     unique('sites_org_name').on(t.organizationId, t.name),
     uniqueIndex('sites_mesh_domain').on(t.meshDomainId).where(sql`${t.meshDomainId} is not null`),
+    // mesh_bindings shu juftlikka bog'lanadi: bog'langan site domain'ini o'zgartirib bo'lmaydi.
+    unique('sites_id_mesh_domain').on(t.id, t.meshDomainId),
   ],
 );
 
@@ -263,6 +265,11 @@ export const meshBindings = pgTable(
       columns: [t.siteId, t.deviceId],
       foreignColumns: [devices.siteId, devices.id],
     }).onDelete('cascade'),
+    foreignKey({
+      name: 'mesh_bindings_site_domain_fk',
+      columns: [t.siteId, t.meshDomainId],
+      foreignColumns: [sites.id, sites.meshDomainId],
+    }),
     foreignKey({
       name: 'mesh_bindings_org_fk',
       columns: [t.organizationId, t.deviceId],

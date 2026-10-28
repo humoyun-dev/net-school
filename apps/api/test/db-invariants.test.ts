@@ -170,13 +170,24 @@ describe('device invariants', () => {
     await expect(enrollment(s.room1Id)).resolves.toBeDefined();
   });
 
-  function binding(d: { id: string; organizationId: string; siteId: string }, node: string, siteId = d.siteId) {
+  // Binding domain'i site domain'iga teng bo'lishi shart (mesh_bindings_site_domain_fk).
+  async function withDomains(s: { siteId: string; site2Id: string }) {
+    await t.db.update(sites).set({ meshDomainId: '' }).where(sql`${sites.id} = ${s.siteId}`);
+    await t.db.update(sites).set({ meshDomainId: 'b' }).where(sql`${sites.id} = ${s.site2Id}`);
+  }
+
+  function binding(
+    d: { id: string; organizationId: string; siteId: string },
+    node: string,
+    siteId = d.siteId,
+    meshDomainId = '',
+  ) {
     return t.db.insert(meshBindings).values({
       deviceId: d.id,
       organizationId: d.organizationId,
       siteId,
       meshInstanceId: 'local',
-      meshDomainId: '',
+      meshDomainId,
       meshNodeId: node,
       boundBy: d.id,
     });
@@ -184,6 +195,7 @@ describe('device invariants', () => {
 
   test('mesh node binds to one device', async () => {
     const s = await twoSites();
+    await withDomains(s);
     const d1 = await device(s.orgId, s.siteId);
     const d2 = await device(s.orgId, s.siteId);
     await binding(d1, 'node-1');
@@ -194,8 +206,20 @@ describe('device invariants', () => {
 
   test('binding site must match device site', async () => {
     const s = await twoSites();
+    await withDomains(s);
     const d = await device(s.orgId, s.siteId);
-    await rejects(binding(d, 'node-1', s.site2Id));
+    // Domain site2 bilan mos: rad etilishi faqat qurilma site'i farqidan.
+    await rejects(binding(d, 'node-1', s.site2Id, 'b'));
+    await expect(binding(d, 'node-1')).resolves.toBeDefined();
+  });
+
+  test('binding domain must match its site domain', async () => {
+    const s = await twoSites();
+    await withDomains(s);
+    const d = await device(s.orgId, s.siteId);
+    await rejects(binding(d, 'node-1', s.siteId, 'b'));
+    await binding(d, 'node-1');
+    await rejects(t.db.update(sites).set({ meshDomainId: 'c' }).where(sql`${sites.id} = ${s.siteId}`));
   });
 
   test('key fingerprint is unique', async () => {

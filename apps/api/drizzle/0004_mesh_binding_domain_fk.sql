@@ -1,0 +1,1 @@
+ALTER TABLE "mesh_bindings" ADD CONSTRAINT "mesh_bindings_site_domain_fk" FOREIGN KEY ("site_id","mesh_domain_id") REFERENCES "public"."sites"("id","mesh_domain_id") ON DELETE no action ON UPDATE no action;

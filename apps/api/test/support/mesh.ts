@@ -11,6 +11,21 @@ export interface FakeNode {
 export class FakeMesh {
   readonly nodes = new Map<string, FakeNode>();
   failing = false;
+  // Berilsa reconcileEnrollment shu va'da bajarilguncha kutadi (poyga testlari uchun).
+  #held: { reached: () => void; gate: Promise<void> } | null = null;
+
+  hold(): { reached: Promise<void>; release: () => void } {
+    let reached!: () => void;
+    let release!: () => void;
+    const reachedP = new Promise<void>((r) => {
+      reached = r;
+    });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    this.#held = { reached, gate };
+    return { reached: reachedP, release };
+  }
 
   readonly factory: DeviceManagementFactory = (scopes) => this.#port(scopes);
 
@@ -30,9 +45,15 @@ export class FakeMesh {
           powerState: n.online ? 'on' : 'unknown',
         }));
     };
+    const held = () => this.#held;
     return {
       listDevices: list,
       async reconcileEnrollment(binding) {
+        const h = held();
+        if (h) {
+          h.reached();
+          await h.gate;
+        }
         const scope = scopes.get(binding.siteId);
         if (!scope || scope.meshDomainId !== binding.upstream.meshDomainId) throw new Error('scope_denied');
         const snapshot = (await list(binding.siteId)).find(
