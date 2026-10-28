@@ -46,7 +46,7 @@ describe('device presence', () => {
   test('heartbeat updates last seen', async () => {
     const res = await send('POST', '/api/v1/device/heartbeat', {});
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ heartbeatIntervalSeconds: 10 });
+    expect(res.json).toEqual({ heartbeatIntervalSeconds: 10, lesson: null });
     const [row] = await app.db.db.select().from(devices).where(eq(devices.id, deviceId));
     expect(row?.lastHeartbeatAt?.getTime()).toBe(now);
     expect((await send('POST', '/api/v1/device/heartbeat', { extra: 1 })).status).toBe(400);

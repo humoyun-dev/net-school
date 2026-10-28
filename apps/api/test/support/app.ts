@@ -22,6 +22,8 @@ export interface TestApp {
     path: string,
     init?: { body?: unknown; cookie?: string; headers?: Record<string, string>; origin?: string | null },
   ): Promise<TestResponse>;
+  // Nest provider'iga to'g'ridan-to'g'ri kirish (workerlar, notifier).
+  get<T>(token: unknown): T;
   close(): Promise<void>;
 }
 
@@ -107,6 +109,9 @@ export async function startTestApp(
         req.on('error', reject);
         req.end(body);
       });
+    },
+    get<T>(token: unknown): T {
+      return app.get(token as never, { strict: false }) as T;
     },
     async close() {
       await app.close();

@@ -1,11 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { CapabilityReport } from '@netschool/contracts';
 import { HEARTBEAT_INTERVAL_MS } from '@netschool/domain';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { canonical } from '../../common/canonical-json.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { DB, type Db } from '../../db/client.ts';
-import { deviceCapabilities, devices } from '../../db/schema.ts';
+import { deviceCapabilities, devices, lessonDevices, lessons } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import type { AuthenticatedDevice } from './device-auth.guard.ts';
 
@@ -21,6 +21,8 @@ function changedKeys(before: CapabilityReport | null, after: CapabilityReport): 
   return [...changed].sort();
 }
 
+export const OVERLAY_LEASE_MS = 120_000;
+
 @Injectable()
 export class PresenceService {
   constructor(
@@ -29,12 +31,33 @@ export class PresenceService {
     @Inject(AuditWriter) private readonly audit: AuditWriter,
   ) {}
 
+  // Javob qurilmaning faol darsini va overlay lease'ini beradi: lease yangilanmasa overlay o'zi tushadi (spec §10).
   async heartbeat(device: AuthenticatedDevice) {
+    const now = this.now();
     await this.db
       .update(devices)
-      .set({ lastHeartbeatAt: new Date(this.now()) })
+      .set({ lastHeartbeatAt: new Date(now) })
       .where(eq(devices.id, device.id));
-    return { heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_MS / 1000 };
+    const [joined] = await this.db
+      .select({ lessonId: lessonDevices.lessonId, locked: lessonDevices.overlayLocked, seq: lessonDevices.overlaySeq })
+      .from(lessonDevices)
+      .innerJoin(lessons, eq(lessons.id, lessonDevices.lessonId))
+      .where(
+        and(eq(lessonDevices.deviceId, device.id), isNull(lessonDevices.releasedAt), eq(lessons.status, 'active')),
+      );
+    return {
+      heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_MS / 1000,
+      lesson: joined
+        ? {
+            id: joined.lessonId,
+            overlay: {
+              locked: joined.locked,
+              sequence: joined.seq === null ? null : String(joined.seq),
+              leaseExpiresAt: new Date(now + OVERLAY_LEASE_MS).toISOString(),
+            },
+          }
+        : null,
+    };
   }
 
   // Har hisobot saqlanadi; audit faqat haqiqiy o'zgarishda (heartbeat shovqini yo'q).
