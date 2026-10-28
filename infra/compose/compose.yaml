@@ -1,0 +1,88 @@
+# NetSchool school hub (pilot). Sirlar ./secrets/ da (gitignored) — README'ga qarang.
+name: netschool
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+      NETSCHOOL_DB_PASSWORD_FILE: /run/secrets/netschool_db_password
+      MESHCENTRAL_DB_PASSWORD_FILE: /run/secrets/meshcentral_db_password
+    secrets: [postgres_superuser_password, netschool_db_password, meshcentral_db_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  meshcentral:
+    build:
+      context: ../..
+      dockerfile: infra/meshcentral/Dockerfile
+    environment:
+      MESHCENTRAL_DB_PASSWORD_FILE: /run/secrets/meshcentral_db_password
+      MESHCENTRAL_CERT_NAME: ${MESHCENTRAL_CERT_NAME:-meshcentral}
+    secrets: [meshcentral_db_password]
+    volumes:
+      - meshcentral-data:/opt/meshcentral/meshcentral-data
+      - meshcentral-files:/opt/meshcentral/meshcentral-files
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api-migrate:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "dist/cli.mjs", "migrate"]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/netschool_database_url
+    secrets: [netschool_database_url]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required, e.g. https://hub.school.lan}
+      API_PORT: "8443"
+      TLS_CERT_FILE: /run/secrets/api_tls_cert
+      TLS_KEY_FILE: /run/secrets/api_tls_key
+      DATABASE_URL_FILE: /run/secrets/netschool_database_url
+    secrets: [api_tls_cert, api_tls_key, netschool_database_url]
+    ports:
+      - "443:8443"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+secrets:
+  postgres_superuser_password:
+    file: ./secrets/postgres_superuser_password
+  netschool_db_password:
+    file: ./secrets/netschool_db_password
+  meshcentral_db_password:
+    file: ./secrets/meshcentral_db_password
+  netschool_database_url:
+    file: ./secrets/netschool_database_url
+  api_tls_cert:
+    file: ./secrets/api_tls_cert
+  api_tls_key:
+    file: ./secrets/api_tls_key
+
+volumes:
+  pgdata:
+  meshcentral-data:
+  meshcentral-files:

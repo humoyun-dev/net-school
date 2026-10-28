@@ -56,3 +56,58 @@ jobs:
       - run: pnpm meshcentral:install
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:contract
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/compose
+    env:
+      PUBLIC_ORIGIN: https://localhost
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Generate throwaway secrets and TLS cert
+        run: |
+          mkdir -p secrets && chmod 700 secrets
+          for s in postgres_superuser_password netschool_db_password meshcentral_db_password; do
+            openssl rand -hex 24 > "secrets/$s"
+          done
+          printf 'postgres://netschool:%s@postgres:5432/netschool' "$(cat secrets/netschool_db_password)" > secrets/netschool_database_url
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost" -keyout secrets/api_tls_key -out secrets/api_tls_cert
+          chmod 644 secrets/*
+      # --wait bir martalik api-migrate tugaganini xato deb hisoblashi mumkin, shuning uchun healthz kutiladi.
+      - run: docker compose up -d --build
+      - name: API is healthy over TLS with the database
+        run: |
+          for i in $(seq 1 90); do
+            curl --fail --silent --cacert secrets/api_tls_cert https://localhost/api/v1/healthz > health.json && break
+            sleep 2
+          done
+          cat health.json || docker compose logs api api-migrate
+          grep -q '"db":"ok"' health.json
+      - name: MeshCentral DB user cannot reach the NetSchool database
+        run: |
+          if docker compose exec -T postgres psql -U meshcentral -d netschool -c 'select 1'; then
+            echo "meshcentral user reached the netschool database" && exit 1
+          fi
+      - name: MeshCentral starts on its own PostgreSQL database
+        run: |
+          for i in $(seq 1 60); do
+            docker compose logs meshcentral | grep -q "MeshCentral HTTPS server running" && break
+            sleep 2
+          done
+          docker compose logs meshcentral | tail -20
+          docker compose logs meshcentral | grep -q "MeshCentral HTTPS server running"
+          docker compose exec -T postgres psql -U postgres -d meshcentral -Atc "select count(*) from information_schema.tables where table_schema='public'" | grep -qv '^0$'
+      - name: Bootstrap an admin and log in
+        run: |
+          out=$(docker compose run --rm -T api-migrate node dist/cli.mjs bootstrap --org Smoke --site Main --admin admin)
+          pw=$(printf '%s\n' "$out" | sed -n 's/^password: //p')
+          test -n "$pw"
+          curl --fail --silent --cacert secrets/api_tls_cert -H 'content-type: application/json' -H "origin: $PUBLIC_ORIGIN" \
+            -d "{\"username\":\"admin\",\"password\":\"$pw\"}" https://localhost/api/v1/auth/login | grep -q '"mustChangePassword":true'
+      - if: always()
+        run: docker compose down -v

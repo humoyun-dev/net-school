@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+.git
+.superpowers
+.playwright-mcp
+meshcentral-data
+infra/compose/secrets
+infra/meshcentral/meshcentral-backups
+infra/meshcentral/meshcentral-files
+infra/meshcentral/upstream/node_modules

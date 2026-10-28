@@ -15,3 +15,5 @@ meshcentral-web/
 # superpowers visual companion
 .superpowers/
 dist/
+infra/compose/secrets/
+infra/compose/.env
