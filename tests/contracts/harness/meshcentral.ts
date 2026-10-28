@@ -69,7 +69,8 @@ function exited(child: ChildProcess): Promise<void> {
   return new Promise((r) => child.once('exit', () => r()));
 }
 
-export async function startMeshCentral(): Promise<MeshCentralInstance> {
+// adminPassword faqat harness regressiya testi uchun; odatda tasodifiy parol.
+export async function startMeshCentral(opts: { adminPassword?: string } = {}): Promise<MeshCentralInstance> {
   const datapath = await mkdtemp(join(tmpdir(), 'ns-mc-'));
   const port = await freePort();
   // Shablon asos; faqat test muhitiga xos maydonlar ustiga yoziladi.
@@ -86,13 +87,13 @@ export async function startMeshCentral(): Promise<MeshCentralInstance> {
   });
   await writeFile(join(datapath, 'config.json'), JSON.stringify(config, null, 2));
 
-  const admin = { username: 'admin', password: generateMeshPassword() };
+  const admin = { username: 'admin', password: opts.adminPassword ?? generateMeshPassword() };
   await meshcentral(
     datapath,
     '--createaccount',
     admin.username,
-    '--pass',
-    admin.password,
+    // `--pass=` shakli: base64url parol '-' bilan boshlanishi mumkin, minimist esa `--pass -…`ni flag deb o'qiydi.
+    `--pass=${admin.password}`,
     '--email',
     'admin@netschool.test',
   );
