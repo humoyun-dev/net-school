@@ -43,6 +43,13 @@
       "when": 1793196909439,
       "tag": "0005_lessons_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793198863433,
+      "tag": "0006_maintenance_indexes",
+      "breakpoints": true
     }
   ]
 }

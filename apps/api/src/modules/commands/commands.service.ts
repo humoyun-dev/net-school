@@ -7,7 +7,7 @@ import {
   gateTarget,
   type TargetStatus,
 } from '@netschool/domain';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { Access } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isUuid } from '../../common/db-errors.ts';
@@ -56,6 +56,10 @@ export class CommandsService {
       },
       { targetType: 'lesson', targetId: lesson.id },
     );
+    // Takroriy so'rov (masalan dars tugagach tarmoq qayta urinishi) a'zolik tekshiruvidan oldin saqlangan javobni oladi.
+    const scope = `POST /lessons/${lesson.id}/commands`;
+    const stored = await this.idempotency.replay<Command>(ctx, scope, key, input);
+    if (stored) return stored;
     if (input.targetDeviceIds) {
       // Faqat shu darsdagi qurilmalar; tekshiruv tranzaksiyadan oldin, chunki rad etish auditi alohida yoziladi.
       const members = await this.#members(this.db, lesson.id);
@@ -64,7 +68,7 @@ export class CommandsService {
         return this.access.deny(ctx, 'command.issue', { targetType: 'device', targetId: outside }, lesson.siteId);
     }
 
-    return this.idempotency.run(ctx, `POST /lessons/${lesson.id}/commands`, key, input, 202, async (tx) => {
+    return this.idempotency.run(ctx, scope, key, input, 202, async (tx) => {
       const [live] = await tx
         .select({ status: lessons.status })
         .from(lessons)
@@ -76,8 +80,10 @@ export class CommandsService {
       const now = this.now();
       const gates = await this.#gate(tx, input.type, targetIds, now);
       const pending = gates.filter((g) => g.status === 'pending');
-      if (pending.length === 0) throw new ApiError('capability_unavailable');
-      if (pending.every((g) => !g.online)) throw new ApiError('device_offline');
+      // Unlock xavfsiz yo'nalish: offline yoki qodir bo'lmagan sinf uchun ham istalgan holat yoziladi.
+      const unlock = input.type === 'overlay.unlock';
+      if (!unlock && pending.length === 0) throw new ApiError('capability_unavailable');
+      if (!unlock && pending.every((g) => !g.online)) throw new ApiError('device_offline');
 
       const [command] = await tx
         .insert(commands)
@@ -105,13 +111,8 @@ export class CommandsService {
         })),
       );
       const pendingIds = pending.map((g) => g.deviceId).sort();
-      if (input.type === 'overlay.lock' || input.type === 'overlay.unlock') {
-        // Istalgan overlay holati: heartbeat lease'i shu qiymatni qaytaradi (spec §10).
-        await tx
-          .update(lessonDevices)
-          .set({ overlayLocked: input.type === 'overlay.lock', overlaySeq: command.seq })
-          .where(and(eq(lessonDevices.lessonId, lesson.id), inArray(lessonDevices.deviceId, pendingIds)));
-      }
+      if (input.type === 'overlay.lock') await applyOverlay(tx, lesson.id, pendingIds, true, command.seq);
+      if (unlock) await applyOverlay(tx, lesson.id, targetIds, false, command.seq);
       await this.events.append(tx, {
         organizationId: lesson.organizationId,
         siteId: lesson.siteId,
@@ -202,4 +203,20 @@ export class CommandsService {
       return { deviceId: r.id, online, ...gateTarget(type, caps) };
     });
   }
+}
+
+// Istalgan overlay holati (heartbeat lease shu qiymatni qaytaradi, spec §10). Faqat yangiroq seq yozadi:
+// parallel lock/unlock tranzaksiyalari tartibsiz commit bo'lsa ham eski buyruq yangisini bosib ketmaydi.
+export async function applyOverlay(tx: Db, lessonId: string, deviceIds: string[], locked: boolean, seq: number) {
+  if (deviceIds.length === 0) return;
+  await tx
+    .update(lessonDevices)
+    .set({ overlayLocked: locked, overlaySeq: seq })
+    .where(
+      and(
+        eq(lessonDevices.lessonId, lessonId),
+        inArray(lessonDevices.deviceId, deviceIds),
+        or(isNull(lessonDevices.overlaySeq), lt(lessonDevices.overlaySeq, seq)),
+      ),
+    );
 }

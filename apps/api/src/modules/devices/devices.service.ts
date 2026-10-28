@@ -1,15 +1,26 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { CapabilityReport, Device } from '@netschool/contracts';
 import { companionPresence } from '@netschool/domain';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { Access } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isUuid } from '../../common/db-errors.ts';
 import type { RequestContext } from '../../common/request-context.ts';
 import { API_CONFIG, type ApiConfig } from '../../config/config.ts';
 import { DB, type Db } from '../../db/client.ts';
-import { deviceCapabilities, devices, meshBindings, rooms, sites } from '../../db/schema.ts';
+import {
+  commands,
+  commandTargets,
+  deviceCapabilities,
+  devices,
+  lessonDevices,
+  lessons,
+  meshBindings,
+  rooms,
+  sites,
+} from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
+import { EventLog, Outbox } from '../events/event-log.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort } from './mesh.ts';
 
 export type DeviceRow = typeof devices.$inferSelect;
@@ -24,6 +35,8 @@ export class DevicesService {
     @Inject(AuditWriter) private readonly audit: AuditWriter,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(DEVICE_MANAGEMENT) private readonly factory: DeviceManagementFactory | null,
+    @Inject(EventLog) private readonly events: EventLog,
+    @Inject(Outbox) private readonly outbox: Outbox,
   ) {}
 
   async list(ctx: RequestContext, scope: DeviceListScope): Promise<Device[]> {
@@ -111,6 +124,7 @@ export class DevicesService {
     return this.db.transaction(async (tx) => {
       const [row] = await tx.update(devices).set({ roomId }).where(eq(devices.id, device.id)).returning();
       if (!row) throw new Error('device update failed');
+      if (roomId !== device.roomId) await this.#leaveLesson(tx, device.id);
       await this.ok(tx, ctx, 'device.assign_room', row, { roomId, previousRoomId: device.roomId });
       const [caps] = await tx.select().from(deviceCapabilities).where(eq(deviceCapabilities.deviceId, row.id));
       const [binding] = await tx.select().from(meshBindings).where(eq(meshBindings.deviceId, row.id));
@@ -127,6 +141,7 @@ export class DevicesService {
         .set({ retiredAt: new Date(this.now()) })
         .where(eq(devices.id, device.id));
       await tx.delete(meshBindings).where(eq(meshBindings.deviceId, device.id));
+      await this.#leaveLesson(tx, device.id);
       await this.ok(tx, ctx, 'device.retire', device);
     });
   }
@@ -150,6 +165,44 @@ export class DevicesService {
       { targetType: 'device', targetId: row.id },
     );
     return row;
+  }
+
+  // Xonadan chiqqan yoki retire qilingan qurilma eski xona darsida qolmaydi: a'zolik tugaydi, ochiq target'lar bekor.
+  async #leaveLesson(tx: Db, deviceId: string): Promise<void> {
+    const at = new Date(this.now());
+    const left = await tx
+      .update(lessonDevices)
+      .set({ releasedAt: at })
+      .where(and(eq(lessonDevices.deviceId, deviceId), isNull(lessonDevices.releasedAt)))
+      .returning({ lessonId: lessonDevices.lessonId });
+    for (const { lessonId } of left) {
+      const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId));
+      if (!lesson) continue;
+      const lessonCommands = tx.select({ id: commands.id }).from(commands).where(eq(commands.lessonId, lessonId));
+      const cancelled = await tx
+        .update(commandTargets)
+        .set({ status: 'cancelled', updatedAt: at, finishedAt: at })
+        .where(
+          and(
+            eq(commandTargets.deviceId, deviceId),
+            inArray(commandTargets.commandId, lessonCommands),
+            inArray(commandTargets.status, ['pending', 'sent', 'acknowledged']),
+          ),
+        )
+        .returning({ commandId: commandTargets.commandId });
+      for (const c of cancelled) {
+        await this.events.append(tx, {
+          organizationId: lesson.organizationId,
+          siteId: lesson.siteId,
+          roomId: lesson.roomId,
+          lessonId,
+          type: 'command.target_updated',
+          data: { commandId: c.commandId, deviceId, status: 'cancelled' },
+        });
+      }
+      await this.outbox.enqueue(tx, lesson.organizationId, 'notify.rooms', { roomIds: [lesson.roomId] });
+      await this.outbox.enqueue(tx, lesson.organizationId, 'notify.devices', { deviceIds: [deviceId] });
+    }
   }
 
   present(row: DeviceRow, report: CapabilityReport | null, agent: Device['agent']): Device {

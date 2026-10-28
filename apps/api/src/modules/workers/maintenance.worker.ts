@@ -12,6 +12,7 @@ import { WORKERS_ENABLED } from './outbox.worker.ts';
 const DAY = 24 * 60 * 60 * 1000;
 export const RETENTION = { idempotencyMs: DAY, outboxMs: DAY, eventsMs: 7 * DAY } as const;
 const INTERVAL_MS = 1_000;
+const PURGE_EVERY_MS = 60_000;
 const OPEN = ['pending', 'sent', 'acknowledged'];
 
 // Muddat va tozalash: eskirgan target'lar, vaqti tugagan darslar, eski yozuvlar.
@@ -20,6 +21,7 @@ export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestro
   readonly #log = new Logger('MaintenanceWorker');
   #timer: NodeJS.Timeout | undefined;
   #running = false;
+  #lastPurge: number | undefined;
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -42,7 +44,14 @@ export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestro
   async tick(now: number): Promise<{ expiredTargets: number; endedLessons: number; purged: number }> {
     const expiredTargets = await this.#expire(now);
     const endedLessons = await this.#endOverdue(now);
-    const purged = await this.#purge(now);
+    // Tozalash og'ir: daqiqada bir marta.
+    let purged = 0;
+    // Soat orqaga ketsa (now < oxirgi) ham tozalash to'xtab qolmaydi.
+    const last = this.#lastPurge;
+    if (last === undefined || now < last || now - last >= PURGE_EVERY_MS) {
+      purged = await this.#purge(now);
+      this.#lastPurge = now;
+    }
     return { expiredTargets, endedLessons, purged };
   }
 
@@ -50,11 +59,18 @@ export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestro
   async #expire(now: number): Promise<number> {
     const at = new Date(now);
     return this.db.transaction(async (tx) => {
-      const due = tx.select({ id: commands.id }).from(commands).where(lte(commands.expiresAt, at));
+      // Ochiq target'lar (partial indeks) → buyruq muddati; butun commands tarixi skanerlanmaydi.
       const expired = await tx
         .update(commandTargets)
         .set({ status: 'expired', updatedAt: at, finishedAt: at })
-        .where(and(inArray(commandTargets.commandId, due), inArray(commandTargets.status, OPEN)))
+        .from(commands)
+        .where(
+          and(
+            eq(commands.id, commandTargets.commandId),
+            inArray(commandTargets.status, OPEN),
+            lte(commands.expiresAt, at),
+          ),
+        )
         .returning({ commandId: commandTargets.commandId, deviceId: commandTargets.deviceId });
       if (expired.length === 0) return 0;
       const owners = await tx
@@ -68,6 +84,10 @@ export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestro
           ),
         );
       const byId = new Map(owners.map((o) => [o.command.id, o]));
+      await this.events.lockRooms(
+        tx,
+        owners.map((o) => o.roomId),
+      );
       const rooms = new Map<string, string>();
       for (const e of expired) {
         const owner = byId.get(e.commandId);

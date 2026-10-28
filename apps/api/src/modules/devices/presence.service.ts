@@ -54,6 +54,8 @@ export class PresenceService {
               locked: joined.locked,
               sequence: joined.seq === null ? null : String(joined.seq),
               leaseExpiresAt: new Date(now + OVERLAY_LEASE_MS).toISOString(),
+              // Qurilma lease'ni monoton taymer bilan hisoblaydi; absolyut vaqt faqat ma'lumot uchun (spec §10).
+              leaseSeconds: OVERLAY_LEASE_MS / 1000,
             },
           }
         : null,

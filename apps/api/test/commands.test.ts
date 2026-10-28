@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { auditEvents, commands, events, lessonDevices, outbox } from '../src/db/schema.ts';
+import { applyOverlay } from '../src/modules/commands/commands.service.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { setCapabilities, setHeartbeat } from './support/caps.ts';
 import { makeDeviceKey, seedDevice } from './support/device.ts';
@@ -182,5 +183,38 @@ describe('commands', () => {
     const outsider = await loginAs(app, 'teacher3');
     expect((await app.request('GET', `/api/v1/commands/${cmd.id}`, { cookie: outsider })).status).toBe(403);
     expect((await app.request('GET', '/api/v1/commands/not-a-uuid', { cookie: teacher })).status).toBe(403);
+  });
+
+  test('overlay unlock reaches an offline class', async () => {
+    const d = await device();
+    const lesson = await lessonIn();
+    await issueCommand(app, teacher, lesson.id, { type: 'overlay.lock', payload: {} });
+    await setHeartbeat(app.db.db, d, now - 31_000);
+    // Unlock xavfsiz yo'nalish: offline sinf uchun ham istalgan holat yoziladi (503 emas).
+    const res = await issueCommand(app, teacher, lesson.id, { type: 'overlay.unlock', payload: {} });
+    expect(res.status).toBe(202);
+    const [row] = await app.db.db.select().from(lessonDevices);
+    expect(row).toMatchObject({ overlayLocked: false, overlaySeq: Number(res.json.sequence) });
+  });
+
+  test('an older overlay command never overrides a newer one', async () => {
+    const d = await device();
+    const lesson = await lessonIn();
+    await app.db.db.transaction((tx) => applyOverlay(tx, lesson.id, [d], false, 6));
+    await app.db.db.transaction((tx) => applyOverlay(tx, lesson.id, [d], true, 5));
+    const [row] = await app.db.db.select().from(lessonDevices);
+    expect(row).toMatchObject({ overlayLocked: false, overlaySeq: 6 });
+  });
+
+  test('retry after the lesson ended replays the stored response', async () => {
+    const d = await device();
+    const lesson = await lessonIn();
+    const key = idem();
+    const body = { type: 'message.show', payload: { text: 'x' }, targetDeviceIds: [d] };
+    const first = await issueCommand(app, teacher, lesson.id, body, key);
+    await endLesson(app, teacher, lesson.id);
+    const retry = await issueCommand(app, teacher, lesson.id, body, key);
+    expect(retry.status).toBe(202);
+    expect(retry.json.id).toBe(first.json.id);
   });
 });

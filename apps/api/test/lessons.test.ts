@@ -182,4 +182,50 @@ describe('lessons', () => {
       .orderBy(auditEvents.at);
     expect(audit.map((a) => a.action).filter((a) => a.startsWith('lesson.'))).toEqual(['lesson.start', 'lesson.end']);
   });
+
+  test('moving or retiring a device releases it from its lesson', async () => {
+    const moved = await device();
+    const retired = await device();
+    const lesson = (await startLesson(app, teacher, roomId)).json;
+    const [cmd] = await app.db.db
+      .insert(commands)
+      .values({
+        organizationId: orgId,
+        siteId,
+        lessonId: lesson.id,
+        issuedBy: teacherId,
+        type: 'message.show',
+        payload: { text: 'x' },
+        issuedAt: new Date(now),
+        expiresAt: new Date(now + 60_000),
+      })
+      .returning();
+    if (!cmd) throw new Error('cmd');
+    await app.db.db.insert(commandTargets).values(
+      [moved, retired].map((deviceId) => ({
+        commandId: cmd.id,
+        deviceId,
+        organizationId: orgId,
+        status: 'pending',
+        updatedAt: new Date(now),
+      })),
+    );
+    await seedUser(app.db.db, orgId, 'admin1', [{ role: 'school_admin', siteId }]);
+    const admin = await loginAs(app, 'admin1');
+    const put = await app.request('PUT', `/api/v1/devices/${moved}/room`, {
+      body: { roomId: otherRoomId },
+      cookie: admin,
+    });
+    expect(put.status).toBe(200);
+    expect((await app.request('DELETE', `/api/v1/devices/${retired}`, { cookie: admin })).status).toBe(204);
+
+    const joined = await app.db.db.select().from(lessonDevices).where(eq(lessonDevices.lessonId, lesson.id));
+    expect(joined.every((j) => j.releasedAt !== null)).toBe(true);
+    const targets = await app.db.db.select().from(commandTargets);
+    expect(targets.map((t) => t.status)).toEqual(['cancelled', 'cancelled']);
+    // Ko'chirilgan qurilma yangi xonadagi darsga qo'shila oladi.
+    await seedUser(app.db.db, orgId, 'teacher2', [{ role: 'teacher', siteId }], { roomIds: [otherRoomId] });
+    const teacher2 = await loginAs(app, 'teacher2');
+    expect((await startLesson(app, teacher2, otherRoomId)).json.deviceIds).toEqual([moved]);
+  });
 });

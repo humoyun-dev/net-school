@@ -49,7 +49,12 @@ export const heartbeatRequestSchema = z.strictObject({});
 // Overlay faqat lease ichida turadi: server javob bermasa qurilma uni o'zi olib tashlaydi (spec §10).
 export const heartbeatLessonSchema = z.object({
   id: z.uuid(),
-  overlay: z.object({ locked: z.boolean(), sequence: z.string().nullable(), leaseExpiresAt: timestamp }),
+  overlay: z.object({
+    locked: z.boolean(),
+    sequence: z.string().nullable(),
+    leaseExpiresAt: timestamp,
+    leaseSeconds: z.int().positive(),
+  }),
 });
 export const heartbeatResponseSchema = z.object({
   heartbeatIntervalSeconds: z.literal(10),

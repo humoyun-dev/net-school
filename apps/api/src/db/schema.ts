@@ -394,6 +394,7 @@ export const commands = pgTable(
     }),
     check('commands_type', sql`${t.type} in ('message.show', 'overlay.lock', 'overlay.unlock')`),
     index('commands_lesson_issued').on(t.lessonId, t.issuedAt.desc()),
+    index('commands_expires_at').on(t.expiresAt),
   ],
 );
 
@@ -429,6 +430,8 @@ export const commandTargets = pgTable(
       sql`(${t.status} = 'failed') = (${t.reason} is not null) and (${t.reason} is null or ${t.reason} in ('unsupported', 'permission_required', 'error'))`,
     ),
     index('command_targets_device_status').on(t.deviceId, t.status),
+    // Maintenance expiry faqat ochiq target'larni ko'radi (kichik partial indeks).
+    index('command_targets_open').on(t.commandId).where(sql`${t.status} in ('pending', 'sent', 'acknowledged')`),
   ],
 );
 
@@ -463,7 +466,7 @@ export const events = pgTable(
     data: jsonb('data').notNull().default({}),
     at: timestamp('at', { withTimezone: true }).notNull(),
   },
-  (t) => [index('events_room_seq').on(t.roomId, t.seq)],
+  (t) => [index('events_room_seq').on(t.roomId, t.seq), index('events_at').on(t.at)],
 );
 
 export const outbox = pgTable(
@@ -479,7 +482,11 @@ export const outbox = pgTable(
     processedAt: timestamp('processed_at', { withTimezone: true }),
     lastError: text('last_error'),
   },
-  (t) => [index('outbox_due').on(t.nextAttemptAt).where(sql`${t.processedAt} is null`)],
+  (t) => [
+    // Parked (10 urinish) qatorlar due indeksiga kirmaydi.
+    index('outbox_due').on(t.nextAttemptAt).where(sql`${t.processedAt} is null and ${t.attempts} < 10`),
+    index('outbox_processed_at').on(t.processedAt).where(sql`${t.processedAt} is not null`),
+  ],
 );
 
 export const idempotencyKeys = pgTable(
@@ -495,5 +502,8 @@ export const idempotencyKeys = pgTable(
     responseBody: jsonb('response_body'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   },
-  (t) => [primaryKey({ name: 'idempotency_keys_pk', columns: [t.actorUserId, t.scope, t.key] })],
+  (t) => [
+    primaryKey({ name: 'idempotency_keys_pk', columns: [t.actorUserId, t.scope, t.key] }),
+    index('idempotency_keys_created_at').on(t.createdAt),
+  ],
 );

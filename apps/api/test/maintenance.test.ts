@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { auditEvents, commandTargets, events, idempotencyKeys, lessons, outbox, users } from '../src/db/schema.ts';
 import { MaintenanceWorker } from '../src/modules/workers/maintenance.worker.ts';
@@ -139,5 +139,38 @@ describe('maintenance worker', () => {
     expect((await app.db.db.select().from(idempotencyKeys)).map((k) => k.key)).toEqual(['new-key-1']);
     expect(await app.db.db.select().from(outbox)).toHaveLength(2);
     expect(await app.db.db.select().from(events)).toHaveLength(1);
+  });
+
+  test('hot maintenance queries are indexed', async () => {
+    const result = (await app.db.db.execute(
+      sql`select indexname, indexdef from pg_indexes where schemaname = 'public'`,
+    )) as unknown as { rows: { indexname: string; indexdef: string }[] };
+    const byName = new Map(result.rows.map((r) => [r.indexname, r.indexdef]));
+    for (const name of [
+      'command_targets_open',
+      'commands_expires_at',
+      'events_at',
+      'outbox_processed_at',
+      'idempotency_keys_created_at',
+    ]) {
+      expect(byName.has(name), name).toBe(true);
+    }
+    // Parked qatorlar due indeksidan chiqadi.
+    expect(byName.get('outbox_due')).toMatch(/attempts/);
+  });
+
+  test('purge runs at most once a minute', async () => {
+    await worker.tick(now);
+    const [user] = await app.db.db.select().from(users);
+    if (!user) throw new Error('user');
+    await app.db.db.insert(idempotencyKeys).values({
+      actorUserId: user.id,
+      scope: 's',
+      key: 'old-key-2',
+      requestHash: 'h',
+      createdAt: new Date(now - 2 * DAY),
+    });
+    expect((await worker.tick(now + 30_000)).purged).toBe(0);
+    expect((await worker.tick(now + 60_000)).purged).toBe(1);
   });
 });

@@ -61,7 +61,7 @@ describe('command contracts', () => {
         heartbeatIntervalSeconds: 10,
         lesson: {
           id: id(1),
-          overlay: { locked: true, sequence: '42', leaseExpiresAt: '2026-10-28T10:00:00.000Z' },
+          overlay: { locked: true, sequence: '42', leaseExpiresAt: '2026-10-28T10:00:00.000Z', leaseSeconds: 120 },
         },
       }).success,
     ).toBe(true);

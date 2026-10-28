@@ -48,9 +48,15 @@ export class DeviceCommandsService {
             eq(lessons.status, 'active'),
           ),
         )
-        .orderBy(asc(commands.seq));
+        .orderBy(asc(commands.seq))
+        // Dars tugashi/expiry bilan poyga: lock'dan keyin shart qayta tekshiriladi, bekor qilingan target yetkazilmaydi.
+        .for('update', { of: commandTargets });
       const fresh = rows.filter((r) => r.target.status === 'pending');
       if (fresh.length > 0) {
+        await this.events.lockRooms(
+          tx,
+          fresh.map((r) => r.roomId),
+        );
         await tx
           .update(commandTargets)
           .set({ status: 'sent', sentAt: now, updatedAt: now })

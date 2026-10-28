@@ -144,7 +144,13 @@ describe('device command channel', () => {
       heartbeatIntervalSeconds: 10,
       lesson: {
         id: lessonId,
-        overlay: { locked: true, sequence: lock.sequence, leaseExpiresAt: new Date(now + 120_000).toISOString() },
+        overlay: {
+          locked: true,
+          sequence: lock.sequence,
+          leaseExpiresAt: new Date(now + 120_000).toISOString(),
+          // Qurilma monoton taymer bilan hisoblaydi: OS soati noto'g'ri bo'lsa ham lease uzaymaydi (spec §10).
+          leaseSeconds: 120,
+        },
       },
     });
   });
