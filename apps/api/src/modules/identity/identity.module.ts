@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { Access } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { AuthController } from './auth.controller.ts';
@@ -7,9 +8,11 @@ import { AuthGuard } from './auth.guard.ts';
 import { AuthService, LOGIN_THROTTLE } from './auth.service.ts';
 import { LoginThrottle } from './login-throttle.ts';
 import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS, SessionService } from './sessions.ts';
+import { UsersController } from './users.controller.ts';
+import { UsersService } from './users.service.ts';
 
 @Module({
-  controllers: [AuthController],
+  controllers: [AuthController, UsersController],
   providers: [
     {
       provide: SessionService,
@@ -19,6 +22,8 @@ import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS, SessionService } from './sessions
     },
     { provide: LOGIN_THROTTLE, useFactory: (now: Clock) => new LoginThrottle(now), inject: [CLOCK] },
     AuthService,
+    Access,
+    UsersService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
   exports: [SessionService],
