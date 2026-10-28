@@ -1,8 +1,10 @@
 import { Controller, Get, Inject, Res } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { Response } from 'express';
+import { Public } from '../../common/route-flags.ts';
 import { DB, type Db } from '../../db/client.ts';
 
+@Public()
 @Controller('api/v1/healthz')
 export class HealthController {
   constructor(@Inject(DB) private readonly db: Db) {}

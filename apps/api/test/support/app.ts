@@ -46,7 +46,7 @@ export async function startTestApp(
   const origin = `https://localhost:${port}`;
   const app: INestApplication = await createApp(
     { port, host: '127.0.0.1', publicOrigin: origin, tls: cert, databaseUrl: 'unused' },
-    { db: db.db, controllers: opts.controllers, logger: false },
+    { db: db.db, now: opts.now, controllers: opts.controllers, logger: false },
   );
   await app.listen(port, '127.0.0.1');
 

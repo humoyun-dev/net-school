@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import { Controller, Get, Post } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { ApiError } from '../src/common/errors.ts';
+import { Public } from '../src/common/route-flags.ts';
 import { loadConfig } from '../src/config/config.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 
+@Public()
 @Controller('api/v1/test')
 class ThrowingController {
   @Get('conflict')
