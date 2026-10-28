@@ -294,3 +294,206 @@ export const deviceCapabilities = pgTable(
     }).onDelete('cascade'),
   ],
 );
+
+export const lessons = pgTable(
+  'lessons',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id').notNull(),
+    roomId: uuid('room_id').notNull(),
+    teacherUserId: uuid('teacher_user_id').notNull(),
+    title: text('title'),
+    status: text('status').notNull().default('active'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    scheduledEndAt: timestamp('scheduled_end_at', { withTimezone: true }).notNull(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    endReason: text('end_reason'),
+    endedBy: uuid('ended_by'),
+  },
+  (t) => [
+    foreignKey({
+      name: 'lessons_site_fk',
+      columns: [t.organizationId, t.siteId],
+      foreignColumns: [sites.organizationId, sites.id],
+    }),
+    foreignKey({ name: 'lessons_room_fk', columns: [t.siteId, t.roomId], foreignColumns: [rooms.siteId, rooms.id] }),
+    foreignKey({
+      name: 'lessons_teacher_fk',
+      columns: [t.organizationId, t.teacherUserId],
+      foreignColumns: [users.organizationId, users.id],
+    }),
+    unique('lessons_org_id').on(t.organizationId, t.id),
+    unique('lessons_site_id').on(t.siteId, t.id),
+    // Spec §8: bitta xonada bitta faol dars.
+    uniqueIndex('lessons_room_active').on(t.roomId).where(sql`${t.status} = 'active'`),
+    check('lessons_status', sql`${t.status} in ('active', 'ended')`),
+    check('lessons_end_reason', sql`${t.endReason} in ('teacher', 'admin', 'timeout')`),
+    check(
+      'lessons_ended_consistent',
+      sql`(${t.status} = 'ended') = (${t.endedAt} is not null) and (${t.status} = 'ended') = (${t.endReason} is not null)`,
+    ),
+  ],
+);
+
+export const lessonDevices = pgTable(
+  'lesson_devices',
+  {
+    lessonId: uuid('lesson_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id').notNull(),
+    // Overlay istalgan holati; qurilma uni heartbeat lease'i bilan oladi (spec §10).
+    overlayLocked: boolean('overlay_locked').notNull().default(false),
+    overlaySeq: bigint('overlay_seq', { mode: 'number' }),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    releasedAt: timestamp('released_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ name: 'lesson_devices_pk', columns: [t.lessonId, t.deviceId] }),
+    foreignKey({
+      name: 'lesson_devices_lesson_fk',
+      columns: [t.siteId, t.lessonId],
+      foreignColumns: [lessons.siteId, lessons.id],
+    }),
+    foreignKey({
+      name: 'lesson_devices_device_fk',
+      columns: [t.siteId, t.deviceId],
+      foreignColumns: [devices.siteId, devices.id],
+    }),
+    // Spec §8: bitta qurilmada bitta faol dars biriktirmasi.
+    uniqueIndex('lesson_devices_active').on(t.deviceId).where(sql`${t.releasedAt} is null`),
+  ],
+);
+
+export const commands = pgTable(
+  'commands',
+  {
+    id: id(),
+    // Global monoton tartib: qurilma eskirgan buyruqni (kichik seq) qo'llamaydi.
+    seq: bigint('seq', { mode: 'number' }).notNull().generatedAlwaysAsIdentity().unique('commands_seq'),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id').notNull(),
+    lessonId: uuid('lesson_id').notNull(),
+    issuedBy: uuid('issued_by').notNull(),
+    type: text('type').notNull(),
+    payload: jsonb('payload').notNull(),
+    issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'commands_lesson_fk',
+      columns: [t.siteId, t.lessonId],
+      foreignColumns: [lessons.siteId, lessons.id],
+    }),
+    foreignKey({
+      name: 'commands_issuer_fk',
+      columns: [t.organizationId, t.issuedBy],
+      foreignColumns: [users.organizationId, users.id],
+    }),
+    check('commands_type', sql`${t.type} in ('message.show', 'overlay.lock', 'overlay.unlock')`),
+    index('commands_lesson_issued').on(t.lessonId, t.issuedAt.desc()),
+  ],
+);
+
+export const commandTargets = pgTable(
+  'command_targets',
+  {
+    commandId: uuid('command_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    organizationId: uuid('organization_id').notNull(),
+    status: text('status').notNull(),
+    reason: text('reason'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ name: 'command_targets_pk', columns: [t.commandId, t.deviceId] }),
+    foreignKey({ name: 'command_targets_command_fk', columns: [t.commandId], foreignColumns: [commands.id] }).onDelete(
+      'cascade',
+    ),
+    foreignKey({
+      name: 'command_targets_device_fk',
+      columns: [t.organizationId, t.deviceId],
+      foreignColumns: [devices.organizationId, devices.id],
+    }),
+    check(
+      'command_targets_status',
+      sql`${t.status} in ('pending', 'sent', 'acknowledged', 'succeeded', 'failed', 'expired', 'cancelled')`,
+    ),
+    check(
+      'command_targets_reason',
+      sql`(${t.status} = 'failed') = (${t.reason} is not null) and (${t.reason} is null or ${t.reason} in ('unsupported', 'permission_required', 'error'))`,
+    ),
+    index('command_targets_device_status').on(t.deviceId, t.status),
+  ],
+);
+
+export const commandReceipts = pgTable(
+  'command_receipts',
+  {
+    id: id(),
+    commandId: uuid('command_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    status: text('status').notNull(),
+    reason: text('reason'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'command_receipts_target_fk',
+      columns: [t.commandId, t.deviceId],
+      foreignColumns: [commandTargets.commandId, commandTargets.deviceId],
+    }).onDelete('cascade'),
+  ],
+);
+
+export const events = pgTable(
+  'events',
+  {
+    seq: bigint('seq', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id').notNull(),
+    roomId: uuid('room_id').notNull(),
+    lessonId: uuid('lesson_id'),
+    type: text('type').notNull(),
+    data: jsonb('data').notNull().default({}),
+    at: timestamp('at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('events_room_seq').on(t.roomId, t.seq)],
+);
+
+export const outbox = pgTable(
+  'outbox',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    organizationId: uuid('organization_id').notNull(),
+    topic: text('topic').notNull(),
+    payload: jsonb('payload').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+    lastError: text('last_error'),
+  },
+  (t) => [index('outbox_due').on(t.nextAttemptAt).where(sql`${t.processedAt} is null`)],
+);
+
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    actorUserId: uuid('actor_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    scope: text('scope').notNull(),
+    key: text('key').notNull(),
+    requestHash: text('request_hash').notNull(),
+    responseStatus: integer('response_status'),
+    responseBody: jsonb('response_body'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ name: 'idempotency_keys_pk', columns: [t.actorUserId, t.scope, t.key] })],
+);

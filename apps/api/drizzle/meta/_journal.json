@@ -36,6 +36,13 @@
       "when": 1793193052625,
       "tag": "0004_mesh_binding_domain_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793196909439,
+      "tag": "0005_lessons_commands",
+      "breakpoints": true
     }
   ]
 }

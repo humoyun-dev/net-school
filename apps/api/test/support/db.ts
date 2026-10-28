@@ -15,6 +15,7 @@ export interface TestDb {
 }
 
 const TABLES =
+  'idempotency_keys, outbox, events, command_receipts, command_targets, commands, lesson_devices, lessons, ' +
   'device_capabilities, mesh_bindings, devices, enrollments, audit_events, auth_sessions, room_memberships, role_assignments, rooms, users, sites, organizations';
 
 // TEST_DATABASE_URL bo'lsa (CI) real PostgreSQL'da yangi database, aks holda in-process PGlite.

@@ -3,8 +3,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { migrateDb } from '../src/db/migrate.ts';
 import {
   auditEvents,
+  commands,
+  commandTargets,
   devices,
   enrollments,
+  lessonDevices,
+  lessons,
   meshBindings,
   organizations,
   roleAssignments,
@@ -251,5 +255,157 @@ describe('device invariants', () => {
       t.db.insert(auditEvents).values({ action: 'device.claim', result: 'failed', correlationId: 'c-1' }).returning(),
     ).resolves.toHaveLength(1);
     await rejects(t.db.insert(auditEvents).values({ action: 'device.bind', result: 'failed', correlationId: 'c-2' }));
+  });
+});
+
+describe('lesson invariants', () => {
+  async function setup() {
+    const a = await org('a');
+    const [site2] = await t.db.insert(sites).values({ organizationId: a.orgId, name: 'a-site-2' }).returning();
+    const [room] = await t.db
+      .insert(rooms)
+      .values({ organizationId: a.orgId, siteId: a.siteId, name: 'r1' })
+      .returning();
+    const [room2] = await t.db
+      .insert(rooms)
+      .values({ organizationId: a.orgId, siteId: a.siteId, name: 'r2' })
+      .returning();
+    const [teacher] = await t.db
+      .insert(users)
+      .values({ organizationId: a.orgId, username: 'teacher1', displayName: 'T', passwordHash: 'x' })
+      .returning();
+    if (!site2 || !room || !room2 || !teacher) throw new Error('setup');
+    return { ...a, site2Id: site2.id, roomId: room.id, room2Id: room2.id, teacherId: teacher.id };
+  }
+  type S = Awaited<ReturnType<typeof setup>>;
+
+  const lesson = (s: S, roomId = s.roomId, extra: Partial<typeof lessons.$inferInsert> = {}) =>
+    t.db
+      .insert(lessons)
+      .values({
+        organizationId: s.orgId,
+        siteId: s.siteId,
+        roomId,
+        teacherUserId: s.teacherId,
+        startedAt: new Date(),
+        scheduledEndAt: new Date(Date.now() + 3_600_000),
+        ...extra,
+      })
+      .returning()
+      .then(([row]) => {
+        if (!row) throw new Error('lesson');
+        return row;
+      });
+
+  let n = 0;
+  const device = async (s: S, siteId = s.siteId) => {
+    n += 1;
+    const [row] = await t.db
+      .insert(devices)
+      .values({
+        organizationId: s.orgId,
+        siteId,
+        hostname: `l-pc-${n}`,
+        publicKey: Buffer.from(`lk-${n}`),
+        keyFingerprint: `lfp-${n}`,
+      })
+      .returning();
+    if (!row) throw new Error('device');
+    return row;
+  };
+
+  test('one active lesson per room', async () => {
+    const s = await setup();
+    const first = await lesson(s);
+    await rejects(lesson(s));
+    await expect(lesson(s, s.room2Id)).resolves.toBeDefined();
+    await t.db
+      .update(lessons)
+      .set({ status: 'ended', endedAt: new Date(), endReason: 'teacher' })
+      .where(sql`${lessons.id} = ${first.id}`);
+    await expect(lesson(s)).resolves.toBeDefined();
+  });
+
+  test('ended lesson must have ended_at', async () => {
+    const s = await setup();
+    await rejects(lesson(s, s.roomId, { status: 'ended' }));
+    await rejects(lesson(s, s.roomId, { endedAt: new Date() }));
+    await rejects(lesson(s, s.roomId, { status: 'paused' }));
+  });
+
+  test('a device is in one active lesson', async () => {
+    const s = await setup();
+    const l1 = await lesson(s);
+    const l2 = await lesson(s, s.room2Id);
+    const d = await device(s);
+    const join = (lessonId: string) =>
+      t.db.insert(lessonDevices).values({ lessonId, deviceId: d.id, organizationId: s.orgId, siteId: s.siteId });
+    await join(l1.id);
+    await rejects(join(l2.id));
+    await t.db.update(lessonDevices).set({ releasedAt: new Date() }).where(sql`${lessonDevices.lessonId} = ${l1.id}`);
+    await expect(join(l2.id)).resolves.toBeDefined();
+  });
+
+  test('lesson devices belong to the lesson site', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const far = await device(s, s.site2Id);
+    await rejects(
+      t.db
+        .insert(lessonDevices)
+        .values({ lessonId: l.id, deviceId: far.id, organizationId: s.orgId, siteId: s.siteId }),
+    );
+    await rejects(
+      t.db
+        .insert(lessonDevices)
+        .values({ lessonId: l.id, deviceId: far.id, organizationId: s.orgId, siteId: s.site2Id }),
+    );
+  });
+
+  test('command target status and reason are constrained', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const [cmd] = await t.db
+      .insert(commands)
+      .values({
+        organizationId: s.orgId,
+        siteId: s.siteId,
+        lessonId: l.id,
+        issuedBy: s.teacherId,
+        type: 'overlay.lock',
+        payload: {},
+        issuedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+      .returning();
+    if (!cmd) throw new Error('cmd');
+    expect(typeof cmd.seq).toBe('number');
+    const target = (status: string, reason: string | null = null) =>
+      t.db.insert(commandTargets).values({
+        commandId: cmd.id,
+        deviceId: d.id,
+        organizationId: s.orgId,
+        status,
+        reason,
+        updatedAt: new Date(),
+      });
+    await rejects(target('done'));
+    await rejects(target('failed'));
+    await rejects(target('pending', 'unsupported'));
+    await rejects(target('failed', 'because'));
+    await expect(target('failed', 'unsupported')).resolves.toBeDefined();
+    await rejects(
+      t.db.insert(commands).values({
+        organizationId: s.orgId,
+        siteId: s.siteId,
+        lessonId: l.id,
+        issuedBy: s.teacherId,
+        type: 'shell.run',
+        payload: {},
+        issuedAt: new Date(),
+        expiresAt: new Date(),
+      }),
+    );
   });
 });
