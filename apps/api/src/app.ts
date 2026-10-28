@@ -5,6 +5,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { CLOCK } from './common/clock.ts';
 import { correlationMiddleware } from './common/correlation.ts';
 import { ErrorFilter } from './common/error-filter.ts';
+import { Idempotency } from './common/idempotency.ts';
 import { OriginGuard } from './common/origin-guard.ts';
 import { API_CONFIG, type ApiConfig } from './config/config.ts';
 import { DB, type Db } from './db/client.ts';
@@ -33,8 +34,9 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       { provide: DB, useValue: opts.db },
       { provide: CLOCK, useValue: opts.now ?? Date.now },
       { provide: DEVICE_MANAGEMENT, useValue: opts.deviceManagement ?? null },
+      Idempotency,
     ],
-    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT],
+    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT, Idempotency],
   })
   class CoreModule {}
 

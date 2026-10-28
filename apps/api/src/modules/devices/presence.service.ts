@@ -2,21 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { CapabilityReport } from '@netschool/contracts';
 import { HEARTBEAT_INTERVAL_MS } from '@netschool/domain';
 import { eq } from 'drizzle-orm';
+import { canonical } from '../../common/canonical-json.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { deviceCapabilities, devices } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import type { AuthenticatedDevice } from './device-auth.guard.ts';
-
-// jsonb kalit tartibini saqlamaydi: taqqoslash kanonik ko'rinishda.
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  const entries = Object.entries(value)
-    .filter(([, v]) => v !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
-}
 
 // O'zgargan capability kalitlari va yuqori darajadagi maydonlar (os, desktopSession, …).
 function changedKeys(before: CapabilityReport | null, after: CapabilityReport): string[] {
