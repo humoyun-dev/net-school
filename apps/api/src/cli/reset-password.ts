@@ -6,7 +6,7 @@ import { hashPassword } from '../modules/identity/password.ts';
 import { oneTimePassword } from './bootstrap.ts';
 import type { CliEnv, ExitCode } from './types.ts';
 
-// Oflayn tiklash: yangi bir martalik parol, qulf yechiladi, barcha sessiyalar bekor.
+// Oflayn tiklash: yangi bir martalik parol, qulf yechiladi, o'chirilgan hisob qayta yoqiladi, barcha sessiyalar bekor.
 export async function resetPassword(argv: string[], env: CliEnv): Promise<ExitCode> {
   const username = argv[0];
   if (!username || argv.length !== 1) {
@@ -18,7 +18,7 @@ export async function resetPassword(argv: string[], env: CliEnv): Promise<ExitCo
   const found = await env.db.transaction(async (tx) => {
     const [user] = await tx
       .update(users)
-      .set({ passwordHash, mustChangePassword: true, failedLoginCount: 0, lockedUntil: null })
+      .set({ passwordHash, mustChangePassword: true, failedLoginCount: 0, lockedUntil: null, disabledAt: null })
       .where(eq(sql`lower(${users.username})`, username.toLowerCase()))
       .returning();
     if (!user) return false;

@@ -2,7 +2,10 @@ import { z } from 'zod';
 import { roleSchema } from './auth.ts';
 
 export const usernameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{2,63}$/i);
-export const roleInputSchema = z.strictObject({ role: roleSchema, siteId: z.uuid().nullable() });
+// school_admin'dan boshqa rol site talab qiladi (DB check constraint bilan bir xil qoida).
+export const roleInputSchema = z
+  .strictObject({ role: roleSchema, siteId: z.uuid().nullable() })
+  .refine((r) => r.role === 'school_admin' || r.siteId !== null, 'site is required for this role');
 
 export const createUserRequestSchema = z.strictObject({
   username: usernameSchema,

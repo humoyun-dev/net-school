@@ -1,6 +1,11 @@
-import { eq } from 'drizzle-orm';
+import { eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { Access } from '../src/common/access.ts';
 import { roleAssignments, users } from '../src/db/schema.ts';
+import { AuditWriter } from '../src/modules/audit/audit.writer.ts';
+import { loadActor } from '../src/modules/identity/actor.loader.ts';
+import { SessionService } from '../src/modules/identity/sessions.ts';
+import { UsersService } from '../src/modules/identity/users.service.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { createTestDb, type TestDb } from './support/db.ts';
 import { loginAs } from './support/login.ts';
@@ -155,6 +160,62 @@ describe('users', () => {
       cookie: await loginAs(app, 'a-site-admin'),
     });
     expect(site.json.users.map((u: { username: string }) => u.username).sort()).toEqual(['a-site-admin', 'a-teacher']);
+  });
+
+  test('non-admin role without a site is a validation error, not a server error', async () => {
+    const cookie = await loginAs(app, 'a-admin');
+    const create = await app.request('POST', '/api/v1/users', {
+      cookie,
+      body: newUser('teacher7', [{ role: 'teacher', siteId: null }]),
+    });
+    expect(create.status).toBe(400);
+    const add = await app.request('POST', `/api/v1/users/${teacherId}/roles`, {
+      cookie,
+      body: { role: 'it_support', siteId: null },
+    });
+    expect(add.status).toBe(400);
+  });
+
+  test('removing the org admin role of a disabled admin is allowed while another admin is enabled', async () => {
+    const cookie = await loginAs(app, 'a-admin');
+    const second = await seedUser(t.db, a.orgId, 'a-admin2', [{ role: 'school_admin', siteId: null }]);
+    expect((await app.request('PATCH', `/api/v1/users/${second}`, { cookie, body: { disabled: true } })).status).toBe(
+      200,
+    );
+    const [assignment] = await t.db.select().from(roleAssignments).where(eq(roleAssignments.userId, second));
+    expect((await app.request('DELETE', `/api/v1/users/${second}/roles/${assignment?.id}`, { cookie })).status).toBe(
+      204,
+    );
+  });
+
+  test('two org admins disabling each other leave one enabled', async () => {
+    // Guard'ni chetlab, ikkala so'rov ham tekshiruvdan o'tgan paytdagi poyga service darajasida.
+    const second = await seedUser(t.db, a.orgId, 'a-admin2', [{ role: 'school_admin', siteId: null }]);
+    const audit = new AuditWriter();
+    const service = new UsersService(
+      t.db,
+      Date.now,
+      new Access(t.db, audit),
+      audit,
+      new SessionService(t.db, { now: Date.now, idleMs: 7_200_000, absoluteMs: 43_200_000 }),
+    );
+    const ctx = async (userId: string) => ({
+      correlationId: `race-${userId.slice(0, 8)}`,
+      clientIp: '127.0.0.1',
+      actor: (await loadActor(t.db, userId))?.actor ?? null,
+      sessionId: null,
+    });
+    const outcomes = await Promise.allSettled([
+      service.setDisabled(await ctx(adminId), second, true),
+      service.setDisabled(await ctx(second), adminId, true),
+    ]);
+    expect(outcomes.map((o) => o.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const rejected = outcomes.find((o) => o.status === 'rejected') as PromiseRejectedResult;
+    expect(rejected.reason).toMatchObject({ code: 'conflict' });
+    const enabledAdmins = (await t.db.select().from(users).where(isNull(users.disabledAt))).filter((u) =>
+      u.username.startsWith('a-admin'),
+    );
+    expect(enabledAdmins).toHaveLength(1);
   });
 
   test('duplicate username is a conflict', async () => {

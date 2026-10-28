@@ -153,9 +153,11 @@ export class UsersService {
       { targetType: 'role_assignment', targetId: row.id },
     );
     await this.db.transaction(async (tx) => {
+      // O'chirilgan admin hisobga kirmaydi: uning rolini olib tashlash oxirgi faol adminni kamaytirmaydi.
       if (
         row.role === 'school_admin' &&
         row.siteId === null &&
+        user.disabledAt === null &&
         (await this.#orgAdminCount(tx, row.organizationId)) <= 1
       ) {
         throw new ApiError('conflict', 'Cannot remove the last organization admin');
@@ -184,7 +186,17 @@ export class UsersService {
         return this.access.deny(ctx, 'role.remove', { targetType: 'user', targetId: user.id });
     }
     if (disabled && user.id === actor.userId) throw new ApiError('conflict', 'Cannot disable yourself');
+    const isOrgAdmin = roles.some((r) => r.role === 'school_admin' && r.siteId === null);
     return this.db.transaction(async (tx) => {
+      // Faol org adminlar qulflanib sanaladi: ikki admin bir-birini bir vaqtda o'chira olmaydi.
+      if (
+        disabled &&
+        isOrgAdmin &&
+        user.disabledAt === null &&
+        (await this.#orgAdminCount(tx, user.organizationId)) <= 1
+      ) {
+        throw new ApiError('conflict', 'Cannot disable the last organization admin');
+      }
       const [row] = await tx
         .update(users)
         .set({ disabledAt: disabled ? new Date(this.now()) : null })

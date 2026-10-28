@@ -83,6 +83,15 @@ test('reset-password unlocks a locked account', async () => {
   expect(user).toMatchObject({ failedLoginCount: 0, lockedUntil: null });
 });
 
+test('reset-password re-enables a disabled user', async () => {
+  const { orgId, siteId } = await seedOrg(t.db);
+  const userId = await seedUser(t.db, orgId, 'teacher1', [{ role: 'teacher', siteId }]);
+  await t.db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, userId));
+  expect(await cli('reset-password', 'teacher1')).toBe(0);
+  const [user] = await t.db.select().from(users).where(eq(users.id, userId));
+  expect(user?.disabledAt).toBeNull();
+});
+
 test('reset-password for an unknown user exits 1', async () => {
   expect(await cli('reset-password', 'ghost')).toBe(1);
 });

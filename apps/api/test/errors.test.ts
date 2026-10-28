@@ -1,8 +1,8 @@
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Controller, Get, Post } from '@nestjs/common';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { Controller, Get, Logger, Post } from '@nestjs/common';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { ApiError } from '../src/common/errors.ts';
 import { Public } from '../src/common/route-flags.ts';
 import { loadConfig } from '../src/config/config.ts';
@@ -45,6 +45,14 @@ describe('error envelope', () => {
     expect(res.json.error.correlationId).toBe(res.headers.get('x-correlation-id'));
   });
 
+  test('expected client errors are not logged as server errors', async () => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    await app.request('GET', '/api/v1/test/conflict');
+    await app.request('GET', '/api/v1/nope');
+    expect(logged).not.toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
   test('thrown ApiError maps to status and envelope', async () => {
     const res = await app.request('GET', '/api/v1/test/conflict');
     expect(res.status).toBe(409);
@@ -54,7 +62,14 @@ describe('error envelope', () => {
   });
 
   test('unexpected error returns internal without details', async () => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
     const res = await app.request('GET', '/api/v1/test/boom');
+    // Server tomonida stack va correlationId bilan log qilinadi (mijozga chiqmaydi).
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining(res.headers.get('x-correlation-id') ?? 'missing'),
+      expect.stringContaining('secret internal detail'),
+    );
+    logged.mockRestore();
     expect(res.status).toBe(500);
     expect(res.json.error.code).toBe('internal');
     expect(JSON.stringify(res.json)).not.toContain('secret internal detail');

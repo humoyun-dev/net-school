@@ -147,7 +147,13 @@ export class AuthService {
     return rows.length === 1;
   }
 
-  async #reject(tx: Db, check: CredentialCheck, user: UserRow, reason: FailureReason, correlationId: string) {
+  async #reject(
+    tx: Db,
+    check: CredentialCheck,
+    user: UserRow,
+    reason: FailureReason,
+    correlationId: string,
+  ): Promise<never> {
     await this.#failed(tx, check, user, reason, correlationId);
     throw new ApiError('unauthenticated');
   }
