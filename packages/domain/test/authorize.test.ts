@@ -43,6 +43,12 @@ const ownSite: [Action, Target, Who[]][] = [
   ['role.assign', { organizationId: ORG, siteId: null, role: a('school_admin', null) }, ['orgAdmin']],
   ['audit.read', site(SITE), ['orgAdmin', 'siteAdmin']],
   ['audit.read', { organizationId: ORG, siteId: null }, ['orgAdmin']],
+  ['device.read', site(SITE), ['orgAdmin', 'siteAdmin', 'itSupport']],
+  ['device.read', site(SITE, room), ['orgAdmin', 'siteAdmin', 'itSupport', 'teacher']],
+  ['device.read', site(SITE, { roomId: 'room-other' }), ['orgAdmin', 'siteAdmin', 'itSupport']],
+  ['device.enroll', site(SITE), ['orgAdmin', 'siteAdmin', 'itSupport']],
+  ['device.manage', site(SITE, room), ['orgAdmin', 'siteAdmin']],
+  ['site.configure_mesh', site(SITE), ['orgAdmin']],
 ];
 
 const cases = ownSite.flatMap(([action, target, allowed]) =>
@@ -94,6 +100,23 @@ describe('authorize', () => {
     expect(authorize(actors.teacher, 'room.read', site(SITE, { roomId: 'room-assigned' })).allowed).toBe(true);
     expect(authorize(actors.teacher, 'room.read', site(SITE, { roomId: 'room-other' })).allowed).toBe(false);
     expect(authorize(actors.teacher, 'room.read', site(SITE)).allowed).toBe(false);
+  });
+
+  test('it_support cannot manage devices', () => {
+    expect(authorize(actors.itSupport, 'device.manage', site(SITE)).allowed).toBe(false);
+    expect(authorize(actors.itSupport, 'device.enroll', site(SITE)).allowed).toBe(true);
+  });
+
+  test('teacher reads devices only in assigned rooms', () => {
+    expect(authorize(actors.teacher, 'device.read', site(SITE, { roomId: 'room-assigned' })).allowed).toBe(true);
+    expect(authorize(actors.teacher, 'device.read', site(SITE, { roomId: 'room-other' })).allowed).toBe(false);
+    expect(authorize(actors.teacher, 'device.read', site(SITE)).allowed).toBe(false);
+    expect(authorize(actors.teacher, 'device.enroll', site(SITE, { roomId: 'room-assigned' })).allowed).toBe(false);
+  });
+
+  test('site admin cannot configure mesh domain', () => {
+    expect(authorize(actors.siteAdmin, 'site.configure_mesh', site(SITE)).allowed).toBe(false);
+    expect(authorize(actors.orgAdmin, 'site.configure_mesh', site(SITE)).allowed).toBe(true);
   });
 
   test('actor without assignments is denied everything', () => {

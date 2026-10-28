@@ -12,7 +12,11 @@ export type Action =
   | 'user.read'
   | 'role.assign'
   | 'role.remove'
-  | 'audit.read';
+  | 'audit.read'
+  | 'device.read'
+  | 'device.enroll'
+  | 'device.manage'
+  | 'site.configure_mesh';
 
 export interface Target {
   organizationId: string;
@@ -35,8 +39,13 @@ const SITE_ADMIN_ACTIONS = new Set<Action>([
   'user.create',
   'user.read',
   'audit.read',
+  'device.read',
+  'device.enroll',
+  'device.manage',
 ]);
-const IT_SUPPORT_ACTIONS = new Set<Action>(['site.read', 'room.read', 'user.read']);
+// site.configure_mesh hech qaysi to'plamda yo'q: site → MeshCentral domain bog'lanishi faqat org admin'da.
+const IT_SUPPORT_ACTIONS = new Set<Action>(['site.read', 'room.read', 'user.read', 'device.read', 'device.enroll']);
+const TEACHER_ROOM_ACTIONS = new Set<Action>(['room.read', 'device.read']);
 
 // Sof qoida: rad etish default; har ruxsat aniq rol va ko'lamdan kelib chiqadi.
 export function authorize(actor: Actor, action: Action, target: Target): Decision {
@@ -62,7 +71,9 @@ export function authorize(actor: Actor, action: Action, target: Target): Decisio
     if (role === 'it_support' && IT_SUPPORT_ACTIONS.has(action)) return ALLOW;
     if (role === 'teacher') {
       if (action === 'site.read') return ALLOW;
-      if (action === 'room.read' && target.roomId !== undefined && actor.roomIds.includes(target.roomId)) return ALLOW;
+      if (TEACHER_ROOM_ACTIONS.has(action) && target.roomId !== undefined && actor.roomIds.includes(target.roomId)) {
+        return ALLOW;
+      }
     }
   }
   return DENY;
