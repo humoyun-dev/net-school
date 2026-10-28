@@ -7,6 +7,7 @@ import { ErrorFilter } from './common/error-filter.ts';
 import { OriginGuard } from './common/origin-guard.ts';
 import { API_CONFIG, type ApiConfig } from './config/config.ts';
 import { DB, type Db } from './db/client.ts';
+import { AuditModule } from './modules/audit/audit.module.ts';
 import { HealthController } from './modules/health/health.controller.ts';
 
 export interface CreateAppOptions {
@@ -17,6 +18,7 @@ export interface CreateAppOptions {
 
 export async function createApp(config: ApiConfig, opts: CreateAppOptions): Promise<INestApplication> {
   @Module({
+    imports: [AuditModule],
     controllers: [HealthController, ...(opts.controllers ?? [])],
     providers: [
       { provide: API_CONFIG, useValue: config },
