@@ -5,7 +5,9 @@ export type ApiErrorCode =
   | 'password_change_required'
   | 'not_found'
   | 'conflict'
+  | 'capability_unavailable'
   | 'rate_limited'
+  | 'upstream_unavailable'
   | 'internal';
 
 export const ERROR_STATUS: Record<ApiErrorCode, number> = {
@@ -15,7 +17,9 @@ export const ERROR_STATUS: Record<ApiErrorCode, number> = {
   password_change_required: 403,
   not_found: 404,
   conflict: 409,
+  capability_unavailable: 409,
   rate_limited: 429,
+  upstream_unavailable: 503,
   internal: 500,
 };
 
@@ -26,7 +30,9 @@ const DEFAULT_MESSAGE: Record<ApiErrorCode, string> = {
   password_change_required: 'Password change required',
   not_found: 'Not found',
   conflict: 'Conflict',
+  capability_unavailable: 'Capability unavailable',
   rate_limited: 'Too many requests',
+  upstream_unavailable: 'Upstream service unavailable',
   internal: 'Internal error',
 };
 
