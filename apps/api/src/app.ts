@@ -18,6 +18,8 @@ import { HealthController } from './modules/health/health.controller.ts';
 import { IdentityModule } from './modules/identity/identity.module.ts';
 import { LessonsModule } from './modules/lessons/lessons.module.ts';
 import { OrganizationModule } from './modules/organization/organization.module.ts';
+import { WORKERS_ENABLED } from './modules/workers/outbox.worker.ts';
+import { WorkersModule } from './modules/workers/workers.module.ts';
 
 export interface CreateAppOptions {
   db: Db;
@@ -25,6 +27,8 @@ export interface CreateAppOptions {
   controllers?: Type[];
   // MeshCentral adapter; null yoki berilmasa — MeshCentral'siz rejim.
   deviceManagement?: DeviceManagementFactory | null;
+  // Fon workerlari (outbox, maintenance); testlar false bilan tick'ni qo'lda chaqiradi.
+  workers?: boolean;
   logger?: false | ('log' | 'warn' | 'error')[];
 }
 
@@ -38,8 +42,9 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       { provide: CLOCK, useValue: opts.now ?? Date.now },
       { provide: DEVICE_MANAGEMENT, useValue: opts.deviceManagement ?? null },
       Idempotency,
+      { provide: WORKERS_ENABLED, useValue: opts.workers ?? false },
     ],
-    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT, Idempotency],
+    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT, Idempotency, WORKERS_ENABLED],
   })
   class CoreModule {}
 
@@ -53,6 +58,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       DevicesModule,
       LessonsModule,
       CommandsModule,
+      WorkersModule,
     ],
     controllers: [HealthController, ...(opts.controllers ?? [])],
     providers: [
