@@ -21,4 +21,13 @@ export type DeviceEvent =
   | { type: 'device.added' | 'device.changed' | 'device.removed'; upstream: UpstreamDeviceRef }
   | { type: 'resync' };
 
+// Admin tasdiqlagan Companion qurilma ↔ MeshAgent node bog'lanishi (spec §6).
+export interface DeviceBinding {
+  siteId: string;
+  deviceId: string;
+  upstream: UpstreamDeviceRef;
+}
+
+export type EnrollmentResult = { status: 'bound'; snapshot: DeviceSnapshot } | { status: 'node_not_found' };
+
 export type Unsubscribe = () => void;

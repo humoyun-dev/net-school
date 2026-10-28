@@ -85,6 +85,26 @@ describe('MeshCentral adapter against pinned upstream', () => {
     expect(devices.every((d) => d.agentOnline === false)).toBe(true);
   });
 
+  test('reconcileEnrollment binds an existing node', async () => {
+    const upstream = await deviceNamed('pc-01');
+    const result = await new MeshCentralDeviceManagement(admin, site).reconcileEnrollment({
+      siteId: 'site-a',
+      deviceId: 'device-1',
+      upstream,
+    });
+    expect(result.status).toBe('bound');
+    expect(result.status === 'bound' && result.snapshot.name).toBe('pc-01');
+  });
+
+  test('reconcileEnrollment reports an unknown node id', async () => {
+    const result = await new MeshCentralDeviceManagement(admin, site).reconcileEnrollment({
+      siteId: 'site-a',
+      deviceId: 'device-1',
+      upstream: { ...scope, meshNodeId: 'AAAAnotarealnode' },
+    });
+    expect(result).toEqual({ status: 'node_not_found' });
+  });
+
   test('emits device.added when a device is added', async () => {
     const events: DeviceEvent[] = [];
     const off = new MeshCentralDeviceManagement(admin, site).subscribeDeviceEvents((e) => events.push(e));

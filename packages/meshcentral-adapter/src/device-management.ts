@@ -1,4 +1,11 @@
-import type { DeviceEvent, DeviceManagementPort, DeviceSnapshot, Unsubscribe } from '@netschool/domain';
+import type {
+  DeviceBinding,
+  DeviceEvent,
+  DeviceManagementPort,
+  DeviceSnapshot,
+  EnrollmentResult,
+  Unsubscribe,
+} from '@netschool/domain';
 import type { MeshRequester } from './control-client.ts';
 import { AdapterError } from './errors.ts';
 import { parseDeviceEvent } from './map-events.ts';
@@ -19,6 +26,18 @@ export class MeshCentralDeviceManagement implements DeviceManagementPort {
     const scope = this.#sites.get(siteId);
     if (!scope) throw new AdapterError('scope_denied', `Unknown site: ${siteId}`);
     return mapNodesResponse(await this.#client.request('nodes'), scope);
+  }
+
+  async reconcileEnrollment(binding: DeviceBinding): Promise<EnrollmentResult> {
+    const scope = this.#sites.get(binding.siteId);
+    const { upstream } = binding;
+    if (!scope || scope.meshInstanceId !== upstream.meshInstanceId || scope.meshDomainId !== upstream.meshDomainId) {
+      throw new AdapterError('scope_denied', 'Node is outside the site scope');
+    }
+    const snapshot = (await this.listDevices(binding.siteId)).find(
+      (d) => d.upstream.meshNodeId === upstream.meshNodeId,
+    );
+    return snapshot ? { status: 'bound', snapshot } : { status: 'node_not_found' };
   }
 
   subscribeDeviceEvents(handler: (event: DeviceEvent) => void): Unsubscribe {

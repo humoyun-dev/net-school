@@ -29,6 +29,36 @@ describe('MeshCentralDeviceManagement', () => {
     expect((err as AdapterError).code).toBe('scope_denied');
   });
 
+  test('binding from another domain is scope_denied', async () => {
+    const { client, devices } = setup();
+    client.replies.set('nodes', nodesFixture);
+    const upstream = { ...scope, meshDomainId: 'other', meshNodeId: PC01_ID };
+    const err = await devices.reconcileEnrollment({ siteId: 'site-a', deviceId: 'd1', upstream }).catch((e) => e);
+    expect((err as AdapterError).code).toBe('scope_denied');
+    const otherInstance = { ...scope, meshInstanceId: 'mc2', meshNodeId: PC01_ID };
+    const err2 = await devices
+      .reconcileEnrollment({ siteId: 'site-a', deviceId: 'd1', upstream: otherInstance })
+      .catch((e) => e);
+    expect((err2 as AdapterError).code).toBe('scope_denied');
+    expect(client.sent).toEqual([]);
+  });
+
+  test('missing node is node_not_found', async () => {
+    const { client, devices } = setup();
+    client.replies.set('nodes', nodesFixture);
+    const missing = { ...scope, meshNodeId: 'nope' };
+    expect(await devices.reconcileEnrollment({ siteId: 'site-a', deviceId: 'd1', upstream: missing })).toEqual({
+      status: 'node_not_found',
+    });
+    const found = await devices.reconcileEnrollment({
+      siteId: 'site-a',
+      deviceId: 'd1',
+      upstream: { ...scope, meshNodeId: PC01_ID },
+    });
+    expect(found.status).toBe('bound');
+    expect(found.status === 'bound' && found.snapshot.upstream.meshNodeId).toBe(PC01_ID);
+  });
+
   test('subscribeDeviceEvents forwards mapped events and resync', () => {
     const { client, devices } = setup();
     const events: DeviceEvent[] = [];
