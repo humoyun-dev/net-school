@@ -6,18 +6,21 @@ import { correlationMiddleware } from './common/correlation.ts';
 import { ErrorFilter } from './common/error-filter.ts';
 import { OriginGuard } from './common/origin-guard.ts';
 import { API_CONFIG, type ApiConfig } from './config/config.ts';
+import { DB, type Db } from './db/client.ts';
 import { HealthController } from './modules/health/health.controller.ts';
 
 export interface CreateAppOptions {
+  db: Db;
   controllers?: Type[];
   logger?: false | ('log' | 'warn' | 'error')[];
 }
 
-export async function createApp(config: ApiConfig, opts: CreateAppOptions = {}): Promise<INestApplication> {
+export async function createApp(config: ApiConfig, opts: CreateAppOptions): Promise<INestApplication> {
   @Module({
     controllers: [HealthController, ...(opts.controllers ?? [])],
     providers: [
       { provide: API_CONFIG, useValue: config },
+      { provide: DB, useValue: opts.db },
       { provide: APP_FILTER, useClass: ErrorFilter },
       { provide: APP_GUARD, useClass: OriginGuard },
     ],

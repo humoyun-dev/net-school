@@ -3,6 +3,7 @@ import { createServer } from 'node:net';
 import type { INestApplication, Type } from '@nestjs/common';
 import { makeCert } from '@netschool/test-support';
 import { createApp } from '../../src/app.ts';
+import { createTestDb, type TestDb } from './db.ts';
 
 export interface TestResponse {
   status: number;
@@ -13,6 +14,7 @@ export interface TestResponse {
 
 export interface TestApp {
   origin: string;
+  db: TestDb;
   ca: string;
   request(
     method: string,
@@ -35,18 +37,22 @@ function freePort(): Promise<number> {
   });
 }
 
-export async function startTestApp(opts: { now?: () => number; controllers?: Type[] } = {}): Promise<TestApp> {
+export async function startTestApp(
+  opts: { now?: () => number; controllers?: Type[]; db?: TestDb } = {},
+): Promise<TestApp> {
+  const db = opts.db ?? (await createTestDb());
   const cert = await makeCert('localhost');
   const port = await freePort();
   const origin = `https://localhost:${port}`;
   const app: INestApplication = await createApp(
     { port, host: '127.0.0.1', publicOrigin: origin, tls: cert, databaseUrl: 'unused' },
-    { controllers: opts.controllers, logger: false },
+    { db: db.db, controllers: opts.controllers, logger: false },
   );
   await app.listen(port, '127.0.0.1');
 
   return {
     origin,
+    db,
     ca: cert.cert,
     request(method, path, init = {}) {
       const body = init.body === undefined ? undefined : JSON.stringify(init.body);
@@ -82,6 +88,10 @@ export async function startTestApp(opts: { now?: () => number; controllers?: Typ
         req.end(body);
       });
     },
-    close: () => app.close(),
+    async close() {
+      await app.close();
+      // Tashqaridan berilgan DB'ni chaqiruvchi yopadi.
+      if (!opts.db) await db.close().catch(() => {});
+    },
   };
 }

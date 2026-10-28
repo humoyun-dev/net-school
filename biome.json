@@ -6,7 +6,14 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!infra/meshcentral/upstream", "!**/*.md", "!**/test/fixtures/*.html", "!pnpm-lock.yaml"]
+    "includes": [
+      "**",
+      "!infra/meshcentral/upstream",
+      "!**/*.md",
+      "!**/test/fixtures/*.html",
+      "!pnpm-lock.yaml",
+      "!apps/api/drizzle"
+    ]
   },
   "formatter": {
     "indentStyle": "space",

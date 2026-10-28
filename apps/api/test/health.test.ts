@@ -26,3 +26,15 @@ test('response echoes a valid correlation id and replaces an invalid one', async
   expect(replaced).not.toBe('bad id!');
   expect(replaced).toMatch(/^[0-9a-f-]{36}$/);
 });
+
+test('healthz reports the database state', async () => {
+  const res = await app.request('GET', '/api/v1/healthz');
+  expect(res.json).toEqual({ status: 'ok', db: 'ok' });
+
+  const broken = await startTestApp();
+  await broken.db.close();
+  const down = await broken.request('GET', '/api/v1/healthz');
+  expect(down.status).toBe(503);
+  expect(down.json).toEqual({ status: 'degraded', db: 'down' });
+  await broken.close();
+});
