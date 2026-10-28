@@ -2,6 +2,7 @@
 
 export * from './access/authorize.ts';
 export * from './access/roles.ts';
+export * from './commands.ts';
 export * from './devices.ts';
 export * from './ports/device-management.ts';
 export * from './presence.ts';

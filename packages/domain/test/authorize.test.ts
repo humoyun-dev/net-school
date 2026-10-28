@@ -49,6 +49,14 @@ const ownSite: [Action, Target, Who[]][] = [
   ['device.enroll', site(SITE), ['orgAdmin', 'siteAdmin', 'itSupport']],
   ['device.manage', site(SITE, room), ['orgAdmin', 'siteAdmin']],
   ['site.configure_mesh', site(SITE), ['orgAdmin']],
+  ['lesson.start', site(SITE, room), ['orgAdmin', 'siteAdmin', 'teacher']],
+  ['lesson.start', site(SITE, { roomId: 'room-other' }), ['orgAdmin', 'siteAdmin']],
+  ['lesson.read', site(SITE, room), ['orgAdmin', 'siteAdmin', 'itSupport', 'teacher']],
+  ['command.read', site(SITE, room), ['orgAdmin', 'siteAdmin', 'itSupport', 'teacher']],
+  ['lesson.end', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
+  ['lesson.end', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
+  ['command.issue', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
+  ['command.issue', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
 ];
 
 const cases = ownSite.flatMap(([action, target, allowed]) =>
@@ -117,6 +125,23 @@ describe('authorize', () => {
   test('site admin cannot configure mesh domain', () => {
     expect(authorize(actors.siteAdmin, 'site.configure_mesh', site(SITE)).allowed).toBe(false);
     expect(authorize(actors.orgAdmin, 'site.configure_mesh', site(SITE)).allowed).toBe(true);
+  });
+
+  test('teacher ends and commands only own lesson', () => {
+    const own = site(SITE, { roomId: 'room-assigned', ownerUserId: 'u' });
+    expect(authorize(actors.teacher, 'lesson.end', own).allowed).toBe(true);
+    expect(authorize(actors.teacher, 'command.issue', own).allowed).toBe(true);
+    // Egasi bo'lsa ham boshqa xonada emas; ownerUserId berilmasa — rad.
+    expect(authorize(actors.teacher, 'command.issue', { ...own, roomId: 'room-other' }).allowed).toBe(false);
+    expect(authorize(actors.teacher, 'lesson.end', site(SITE, { roomId: 'room-assigned' })).allowed).toBe(false);
+  });
+
+  test('it_support reads lessons but cannot command', () => {
+    const own = site(SITE, { roomId: 'room-assigned', ownerUserId: 'u' });
+    expect(authorize(actors.itSupport, 'lesson.read', own).allowed).toBe(true);
+    expect(authorize(actors.itSupport, 'command.read', own).allowed).toBe(true);
+    expect(authorize(actors.itSupport, 'command.issue', own).allowed).toBe(false);
+    expect(authorize(actors.itSupport, 'lesson.start', own).allowed).toBe(false);
   });
 
   test('actor without assignments is denied everything', () => {

@@ -16,13 +16,19 @@ export type Action =
   | 'device.read'
   | 'device.enroll'
   | 'device.manage'
-  | 'site.configure_mesh';
+  | 'site.configure_mesh'
+  | 'lesson.start'
+  | 'lesson.read'
+  | 'lesson.end'
+  | 'command.issue'
+  | 'command.read';
 
 export interface Target {
   organizationId: string;
   siteId?: string | null;
   roomId?: string;
   role?: RoleAssignment; // role.assign / role.remove uchun berilayotgan yoki olinayotgan rol
+  ownerUserId?: string; // dars egasi (lesson.end, command.issue)
 }
 
 export type Decision = { allowed: true } | { allowed: false; reason: 'scope_denied' };
@@ -42,10 +48,31 @@ const SITE_ADMIN_ACTIONS = new Set<Action>([
   'device.read',
   'device.enroll',
   'device.manage',
+  'lesson.start',
+  'lesson.read',
+  'lesson.end',
+  'command.issue',
+  'command.read',
 ]);
 // site.configure_mesh hech qaysi to'plamda yo'q: site → MeshCentral domain bog'lanishi faqat org admin'da.
-const IT_SUPPORT_ACTIONS = new Set<Action>(['site.read', 'room.read', 'user.read', 'device.read', 'device.enroll']);
-const TEACHER_ROOM_ACTIONS = new Set<Action>(['room.read', 'device.read']);
+const IT_SUPPORT_ACTIONS = new Set<Action>([
+  'site.read',
+  'room.read',
+  'user.read',
+  'device.read',
+  'device.enroll',
+  'lesson.read',
+  'command.read',
+]);
+const TEACHER_ROOM_ACTIONS = new Set<Action>([
+  'room.read',
+  'device.read',
+  'lesson.start',
+  'lesson.read',
+  'command.read',
+]);
+// Faqat o'z darsida: boshqa teacher darsini yopish yoki unga buyruq berish mumkin emas.
+const TEACHER_OWNER_ACTIONS = new Set<Action>(['lesson.end', 'command.issue']);
 
 // Sof qoida: rad etish default; har ruxsat aniq rol va ko'lamdan kelib chiqadi.
 export function authorize(actor: Actor, action: Action, target: Target): Decision {
@@ -71,9 +98,9 @@ export function authorize(actor: Actor, action: Action, target: Target): Decisio
     if (role === 'it_support' && IT_SUPPORT_ACTIONS.has(action)) return ALLOW;
     if (role === 'teacher') {
       if (action === 'site.read') return ALLOW;
-      if (TEACHER_ROOM_ACTIONS.has(action) && target.roomId !== undefined && actor.roomIds.includes(target.roomId)) {
-        return ALLOW;
-      }
+      const inRoom = target.roomId !== undefined && actor.roomIds.includes(target.roomId);
+      if (inRoom && TEACHER_ROOM_ACTIONS.has(action)) return ALLOW;
+      if (inRoom && TEACHER_OWNER_ACTIONS.has(action) && target.ownerUserId === actor.userId) return ALLOW;
     }
   }
   return DENY;
