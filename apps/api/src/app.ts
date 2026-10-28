@@ -14,6 +14,7 @@ import { CommandsModule } from './modules/commands/commands.module.ts';
 import { DevicesModule } from './modules/devices/devices.module.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory } from './modules/devices/mesh.ts';
 import { EventsModule } from './modules/events/events.module.ts';
+import { EventsApiModule } from './modules/events/events-api.module.ts';
 import { HealthController } from './modules/health/health.controller.ts';
 import { IdentityModule } from './modules/identity/identity.module.ts';
 import { LessonsModule } from './modules/lessons/lessons.module.ts';
@@ -59,6 +60,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       LessonsModule,
       CommandsModule,
       WorkersModule,
+      EventsApiModule,
     ],
     controllers: [HealthController, ...(opts.controllers ?? [])],
     providers: [
