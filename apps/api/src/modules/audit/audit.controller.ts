@@ -1,6 +1,6 @@
 import { Controller, Get, Inject, Query, Req } from '@nestjs/common';
 import { auditQuerySchema } from '@netschool/contracts';
-import { and, desc, eq, lt, or } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import { Access } from '../../common/access.ts';
 import { ApiError } from '../../common/errors.ts';
@@ -9,17 +9,20 @@ import { parseBody } from '../../common/validation.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { auditEvents } from '../../db/schema.ts';
 
-// Cursor: oxirgi yozuvning (at, id) juftligi, base64url JSON.
-function encodeCursor(at: Date, id: string): string {
-  return Buffer.from(JSON.stringify([at.toISOString(), id])).toString('base64url');
+// Cursor: oxirgi yozuvning (at, id) juftligi, base64url JSON. `at` PostgreSQL matn ko'rinishida —
+// mikrosekund aniqligi saqlanadi (JS Date millisekundgacha qisqartirib, qatorlarni tashlab yuborardi).
+const AT_TEXT = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?([+-]\d{2}(:\d{2})?|Z)?$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function encodeCursor(at: string, id: string): string {
+  return Buffer.from(JSON.stringify([at, id])).toString('base64url');
 }
 
-function decodeCursor(value: string): { at: Date; id: string } {
+function decodeCursor(value: string): { at: string; id: string } {
   try {
-    const [at, id] = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as [string, string];
-    const date = new Date(at);
-    if (Number.isNaN(date.getTime()) || typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id)) throw new Error();
-    return { at: date, id };
+    const [at, id] = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as [unknown, unknown];
+    if (typeof at !== 'string' || !AT_TEXT.test(at) || typeof id !== 'string' || !UUID.test(id)) throw new Error();
+    return { at, id };
   } catch {
     throw new ApiError('validation_failed');
   }
@@ -45,14 +48,14 @@ export class AuditController {
     );
     const cursor = before ? decodeCursor(before) : undefined;
     const rows = await this.db
-      .select()
+      .select({ event: auditEvents, atText: sql<string>`${auditEvents.at}::text` })
       .from(auditEvents)
       .where(
         and(
           eq(auditEvents.organizationId, actor.organizationId),
           siteId ? eq(auditEvents.siteId, siteId) : undefined,
           cursor
-            ? or(lt(auditEvents.at, cursor.at), and(eq(auditEvents.at, cursor.at), lt(auditEvents.id, cursor.id)))
+            ? sql`(${auditEvents.at}, ${auditEvents.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
             : undefined,
         ),
       )
@@ -61,7 +64,7 @@ export class AuditController {
     const page = rows.slice(0, limit);
     const last = page.at(-1);
     return {
-      events: page.map((e) => ({
+      events: page.map(({ event: e }) => ({
         id: e.id,
         at: e.at.toISOString(),
         siteId: e.siteId,
@@ -73,7 +76,7 @@ export class AuditController {
         correlationId: e.correlationId,
         details: e.details,
       })),
-      nextCursor: rows.length > limit && last ? encodeCursor(last.at, last.id) : null,
+      nextCursor: rows.length > limit && last ? encodeCursor(last.atText, last.event.id) : null,
     };
   }
 }

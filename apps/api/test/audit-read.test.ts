@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest';
 import { auditEvents } from '../src/db/schema.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
@@ -80,4 +81,28 @@ test('limit is bounded and bad cursors are rejected', async () => {
 test('teacher cannot read audit events', async () => {
   const cookie = await loginAs(app, 'a-teacher');
   expect((await app.request('GET', `/api/v1/audit-events?siteId=${a.siteId}`, { cookie })).status).toBe(403);
+});
+
+test('cursor pagination keeps rows that share a millisecond', async () => {
+  await t.reset();
+  const c = await seedOrg(t.db, 'C');
+  await seedUser(t.db, c.orgId, 'c-admin', [{ role: 'school_admin', siteId: null }]);
+  // Bir millisekund ichida, mikrosekundlari farqli to'rtta yozuv.
+  for (const [i, at] of ['10:00:00.000100', '10:00:00.000200', '10:00:00.000300', '10:00:00.000400'].entries()) {
+    await t.db.execute(
+      sql`insert into audit_events (organization_id, action, result, correlation_id, at) values (${c.orgId}, 'room.update', 'succeeded', ${`micro-${i}`}, ${`2026-10-02 ${at}+00`}::timestamptz)`,
+    );
+  }
+  const cookie = await loginAs(app, 'c-admin');
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const res = await app.request('GET', `/api/v1/audit-events?limit=1${cursor ? `&before=${cursor}` : ''}`, {
+      cookie,
+    });
+    seen.push(...res.json.events.map((e: { correlationId: string }) => e.correlationId));
+    cursor = res.json.nextCursor ?? undefined;
+    if (!cursor) break;
+  }
+  expect(seen.filter((s) => s.startsWith('micro-'))).toEqual(['micro-3', 'micro-2', 'micro-1', 'micro-0']);
 });
