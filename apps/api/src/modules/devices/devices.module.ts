@@ -8,16 +8,19 @@ import { DevicesController } from './devices.controller.ts';
 import { DevicesService } from './devices.service.ts';
 import { EnrollmentsController } from './enrollments.controller.ts';
 import { CLAIM_THROTTLE, EnrollmentsService } from './enrollments.service.ts';
+import { MeshBindingController } from './mesh-binding.controller.ts';
+import { MeshBindingService } from './mesh-binding.service.ts';
 import { PresenceService } from './presence.service.ts';
 
 @Module({
-  controllers: [EnrollmentsController, DeviceChannelController, DevicesController],
+  controllers: [EnrollmentsController, DeviceChannelController, DevicesController, MeshBindingController],
   providers: [
     Access,
     DeviceAuthGuard,
     EnrollmentsService,
     PresenceService,
     DevicesService,
+    MeshBindingService,
     // Claim IP cheklovi login cheklovidan alohida hisoblanadi.
     { provide: CLAIM_THROTTLE, useFactory: (now: Clock) => new LoginThrottle(now), inject: [CLOCK] },
   ],

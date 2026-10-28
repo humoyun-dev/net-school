@@ -3,6 +3,7 @@ import { createServer } from 'node:net';
 import type { INestApplication, Type } from '@nestjs/common';
 import { makeCert } from '@netschool/test-support';
 import { createApp } from '../../src/app.ts';
+import type { DeviceManagementFactory } from '../../src/modules/devices/mesh.ts';
 import { createTestDb, type TestDb } from './db.ts';
 
 export interface TestResponse {
@@ -38,15 +39,34 @@ function freePort(): Promise<number> {
 }
 
 export async function startTestApp(
-  opts: { now?: () => number; controllers?: Type[]; db?: TestDb } = {},
+  opts: {
+    now?: () => number;
+    controllers?: Type[];
+    db?: TestDb;
+    deviceManagement?: DeviceManagementFactory | null;
+  } = {},
 ): Promise<TestApp> {
   const db = opts.db ?? (await createTestDb());
   const cert = await makeCert('localhost');
   const port = await freePort();
   const origin = `https://localhost:${port}`;
   const app: INestApplication = await createApp(
-    { port, host: '127.0.0.1', publicOrigin: origin, tls: cert, databaseUrl: 'unused' },
-    { db: db.db, now: opts.now, controllers: opts.controllers, logger: false },
+    {
+      port,
+      host: '127.0.0.1',
+      publicOrigin: origin,
+      tls: cert,
+      databaseUrl: 'unused',
+      mesh: null,
+      meshInstanceId: 'local',
+    },
+    {
+      db: db.db,
+      now: opts.now,
+      controllers: opts.controllers,
+      deviceManagement: opts.deviceManagement ?? null,
+      logger: false,
+    },
   );
   await app.listen(port, '127.0.0.1');
 

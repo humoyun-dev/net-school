@@ -10,6 +10,7 @@ import { API_CONFIG, type ApiConfig } from './config/config.ts';
 import { DB, type Db } from './db/client.ts';
 import { AuditModule } from './modules/audit/audit.module.ts';
 import { DevicesModule } from './modules/devices/devices.module.ts';
+import { DEVICE_MANAGEMENT, type DeviceManagementFactory } from './modules/devices/mesh.ts';
 import { HealthController } from './modules/health/health.controller.ts';
 import { IdentityModule } from './modules/identity/identity.module.ts';
 import { OrganizationModule } from './modules/organization/organization.module.ts';
@@ -18,6 +19,8 @@ export interface CreateAppOptions {
   db: Db;
   now?: () => number;
   controllers?: Type[];
+  // MeshCentral adapter; null yoki berilmasa — MeshCentral'siz rejim.
+  deviceManagement?: DeviceManagementFactory | null;
   logger?: false | ('log' | 'warn' | 'error')[];
 }
 
@@ -29,8 +32,9 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       { provide: API_CONFIG, useValue: config },
       { provide: DB, useValue: opts.db },
       { provide: CLOCK, useValue: opts.now ?? Date.now },
+      { provide: DEVICE_MANAGEMENT, useValue: opts.deviceManagement ?? null },
     ],
-    exports: [API_CONFIG, DB, CLOCK],
+    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT],
   })
   class CoreModule {}
 

@@ -109,7 +109,48 @@ describe('loadConfig', () => {
       publicOrigin: 'https://hub.school.lan',
       tls: { cert: 'CERT', key: 'KEY' },
       databaseUrl: 'postgres://u:p@db/netschool',
+      mesh: null,
+      meshInstanceId: 'local',
     });
+  });
+
+  test('loadConfig requires all MeshCentral settings when the URL is set', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ns-cfg-'));
+    await writeFile(join(dir, 'mc-ca.pem'), 'MCCA');
+    await writeFile(join(dir, 'mc-pass'), 'mc-secret-value\n');
+    const base = {
+      PUBLIC_ORIGIN: 'https://hub.school.lan',
+      TLS_CERT: 'CERT',
+      TLS_KEY: 'KEY',
+      DATABASE_URL: 'postgres://u:p@db/netschool',
+      MESHCENTRAL_URL: 'wss://meshcentral:4430/control.ashx',
+    };
+    let message = '';
+    try {
+      loadConfig(base);
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toMatch(/MESHCENTRAL_USERNAME/);
+    expect(message).toMatch(/MESHCENTRAL_PASSWORD/);
+    expect(message).toMatch(/MESHCENTRAL_CA/);
+    const config = loadConfig({
+      ...base,
+      MESHCENTRAL_USERNAME: 'netschool-api',
+      MESHCENTRAL_PASSWORD_FILE: join(dir, 'mc-pass'),
+      MESHCENTRAL_CA_FILE: join(dir, 'mc-ca.pem'),
+      MESH_INSTANCE_ID: 'hub-1',
+    });
+    expect(config.mesh).toEqual({
+      url: 'wss://meshcentral:4430/control.ashx',
+      username: 'netschool-api',
+      password: 'mc-secret-value',
+      ca: 'MCCA',
+    });
+    expect(config.meshInstanceId).toBe('hub-1');
+    expect(() => loadConfig({ ...base, MESHCENTRAL_URL: 'http://meshcentral/control.ashx' })).toThrow(
+      /MESHCENTRAL_URL/,
+    );
   });
 
   test('loadConfig error does not echo secret values', () => {

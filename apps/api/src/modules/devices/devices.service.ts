@@ -6,9 +6,11 @@ import { Access } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isUuid } from '../../common/db-errors.ts';
 import type { RequestContext } from '../../common/request-context.ts';
+import { API_CONFIG, type ApiConfig } from '../../config/config.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { deviceCapabilities, devices, meshBindings, rooms, sites } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
+import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort } from './mesh.ts';
 
 export type DeviceRow = typeof devices.$inferSelect;
 export type DeviceListScope = { siteId: string } | { roomId: string };
@@ -20,11 +22,14 @@ export class DevicesService {
     @Inject(CLOCK) private readonly now: Clock,
     @Inject(Access) private readonly access: Access,
     @Inject(AuditWriter) private readonly audit: AuditWriter,
+    @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(DEVICE_MANAGEMENT) private readonly factory: DeviceManagementFactory | null,
   ) {}
 
   async list(ctx: RequestContext, scope: DeviceListScope): Promise<Device[]> {
     const actor = this.access.actor(ctx);
     let where: ReturnType<typeof eq>;
+    let siteId: string;
     if ('roomId' in scope) {
       const [room] = isUuid(scope.roomId)
         ? await this.db
@@ -40,6 +45,7 @@ export class DevicesService {
         { targetType: 'room', targetId: room.id },
       );
       where = eq(devices.roomId, room.id);
+      siteId = room.siteId;
     } else {
       const [site] = isUuid(scope.siteId)
         ? await this.db
@@ -55,6 +61,7 @@ export class DevicesService {
         { targetType: 'site', targetId: site.id },
       );
       where = eq(devices.siteId, site.id);
+      siteId = site.id;
     }
     const rows = await this.db
       .select({ device: devices, report: deviceCapabilities.report, meshNodeId: meshBindings.meshNodeId })
@@ -63,9 +70,31 @@ export class DevicesService {
       .leftJoin(meshBindings, eq(meshBindings.deviceId, devices.id))
       .where(and(where, isNull(devices.retiredAt)))
       .orderBy(asc(devices.hostname), asc(devices.id));
-    return rows.map((r) =>
-      this.present(r.device, (r.report as CapabilityReport | null) ?? null, r.meshNodeId ? 'unknown' : 'unbound'),
+    const agents = await this.#agentStates(
+      siteId,
+      rows.some((r) => r.meshNodeId !== null),
     );
+    return rows.map((r) =>
+      this.present(
+        r.device,
+        (r.report as CapabilityReport | null) ?? null,
+        r.meshNodeId === null ? 'unbound' : agents ? (agents.get(r.meshNodeId) ? 'online' : 'offline') : 'unknown',
+      ),
+    );
+  }
+
+  // MeshAgent holati so'rov paytida adapterdan; MeshCentral javob bermasa ro'yxat baribir qaytadi (unknown).
+  async #agentStates(siteId: string, anyBound: boolean): Promise<Map<string, boolean> | null> {
+    if (!anyBound) return null;
+    const [site] = await this.db.select().from(sites).where(eq(sites.id, siteId));
+    if (!site) return null;
+    try {
+      const { port } = requirePort(this.factory, this.config.meshInstanceId, site);
+      const snapshots = await port.listDevices(site.id);
+      return new Map(snapshots.map((s) => [s.upstream.meshNodeId, s.agentOnline]));
+    } catch {
+      return null;
+    }
   }
 
   async assignRoom(ctx: RequestContext, deviceId: string, roomId: string | null): Promise<Device> {

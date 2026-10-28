@@ -12,10 +12,12 @@
     "@nestjs/platform-express": "^11.2.8",
     "@netschool/contracts": "workspace:*",
     "@netschool/domain": "workspace:*",
+    "@netschool/meshcentral-adapter": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "ws": "^8.22.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
