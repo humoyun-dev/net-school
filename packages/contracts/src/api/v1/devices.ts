@@ -46,7 +46,15 @@ export const claimResponseSchema = z.object({
 });
 
 export const heartbeatRequestSchema = z.strictObject({});
-export const heartbeatResponseSchema = z.object({ heartbeatIntervalSeconds: z.literal(10) });
+// Overlay faqat lease ichida turadi: server javob bermasa qurilma uni o'zi olib tashlaydi (spec §10).
+export const heartbeatLessonSchema = z.object({
+  id: z.uuid(),
+  overlay: z.object({ locked: z.boolean(), sequence: z.string().nullable(), leaseExpiresAt: timestamp }),
+});
+export const heartbeatResponseSchema = z.object({
+  heartbeatIntervalSeconds: z.literal(10),
+  lesson: heartbeatLessonSchema.nullable(),
+});
 
 export const deviceSchema = z.object({
   id: z.uuid(),
