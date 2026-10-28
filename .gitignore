@@ -17,3 +17,4 @@ meshcentral-web/
 dist/
 infra/compose/secrets/
 infra/compose/.env
+!.env.example
