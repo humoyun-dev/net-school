@@ -11,7 +11,8 @@
     "test:contract": "vitest run --project contract",
     "typecheck": "pnpm -r exec tsc --noEmit",
     "lint": "biome check .",
-    "meshcentral:install": "cd infra/meshcentral/upstream && npm ci --omit=optional --no-audit --no-fund"
+    "meshcentral:install": "cd infra/meshcentral/upstream && npm ci --omit=optional --no-audit --no-fund",
+    "build:api": "pnpm --filter @netschool/api build"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.3",
