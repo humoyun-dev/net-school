@@ -7,6 +7,15 @@ function hasCode(err: unknown, code: string): boolean {
 }
 
 export const isUniqueViolation = (err: unknown) => hasCode(err, '23505');
+
+// Buzilgan constraint nomi (pg va PGlite `constraint` maydoni).
+export function violatedConstraint(err: unknown): string | undefined {
+  for (let e: unknown = err; e; e = (e as { cause?: unknown }).cause) {
+    const name = (e as { constraint?: unknown }).constraint;
+    if (typeof name === 'string') return name;
+  }
+  return undefined;
+}
 export const isForeignKeyViolation = (err: unknown) => hasCode(err, '23503');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

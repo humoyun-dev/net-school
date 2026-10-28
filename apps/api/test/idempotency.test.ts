@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { ApiError } from '../src/common/errors.ts';
 import { Idempotency, idempotencyKeyOf } from '../src/common/idempotency.ts';
 import { requestContext } from '../src/common/request-context.ts';
+import { sites } from '../src/db/schema.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { loginAs } from './support/login.ts';
 import { seedOrg, seedUser } from './support/seed.ts';
@@ -22,21 +23,21 @@ class IdemController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.idem.run(
-      requestContext(req),
-      `test:${scope}`,
-      idempotencyKeyOf(req),
-      body,
-      201,
-      async () => {
-        runs += 1;
-        if (failNext) {
-          failNext = false;
-          throw new ApiError('conflict', 'work failed');
-        }
-        return { run: runs, echo: body };
-      },
-    );
+    const ctx = requestContext(req);
+    const result = await this.idem.run(ctx, `test:${scope}`, idempotencyKeyOf(req), body, 201, async (tx) => {
+      runs += 1;
+      if (scope === 'dup') {
+        // Ish ichidagi boshqa unique buzilishi (sites_org_name).
+        const organizationId = ctx.actor?.organizationId ?? '';
+        await tx.insert(sites).values({ organizationId, name: 'same' });
+        await tx.insert(sites).values({ organizationId, name: 'same' });
+      }
+      if (failNext) {
+        failNext = false;
+        throw new ApiError('conflict', 'work failed');
+      }
+      return { run: runs, echo: body };
+    });
     res.status(result.status);
     return result.body;
   }
@@ -130,5 +131,12 @@ describe('Idempotency-Key', () => {
     const again = await post(alice, 'key-0007');
     expect(again.status).toBe(201);
     expect(runs).toBe(2);
+  });
+
+  test('unique violations inside the work are not mistaken for replays', async () => {
+    const res = await post(alice, 'key-0008', { a: 1 }, 'dup');
+    // Kutilmagan xato — 500, "kalit boshqa so'rov bilan ishlatilgan" degan noto'g'ri 409 emas.
+    expect(res.status).toBe(500);
+    expect(res.json.error.code).toBe('internal');
   });
 });

@@ -12,8 +12,10 @@ import { DB, type Db } from './db/client.ts';
 import { AuditModule } from './modules/audit/audit.module.ts';
 import { DevicesModule } from './modules/devices/devices.module.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory } from './modules/devices/mesh.ts';
+import { EventsModule } from './modules/events/events.module.ts';
 import { HealthController } from './modules/health/health.controller.ts';
 import { IdentityModule } from './modules/identity/identity.module.ts';
+import { LessonsModule } from './modules/lessons/lessons.module.ts';
 import { OrganizationModule } from './modules/organization/organization.module.ts';
 
 export interface CreateAppOptions {
@@ -41,7 +43,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
   class CoreModule {}
 
   @Module({
-    imports: [CoreModule, AuditModule, IdentityModule, OrganizationModule, DevicesModule],
+    imports: [CoreModule, AuditModule, EventsModule, IdentityModule, OrganizationModule, DevicesModule, LessonsModule],
     controllers: [HealthController, ...(opts.controllers ?? [])],
     providers: [
       { provide: APP_FILTER, useClass: ErrorFilter },

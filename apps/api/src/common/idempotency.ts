@@ -7,7 +7,7 @@ import { DB, type Db } from '../db/client.ts';
 import { idempotencyKeys } from '../db/schema.ts';
 import { canonical } from './canonical-json.ts';
 import { CLOCK, type Clock } from './clock.ts';
-import { isUniqueViolation } from './db-errors.ts';
+import { isUniqueViolation, violatedConstraint } from './db-errors.ts';
 import { ApiError } from './errors.ts';
 import type { RequestContext } from './request-context.ts';
 
@@ -60,7 +60,8 @@ export class Idempotency {
         return { status, body };
       });
     } catch (err) {
-      if (!isUniqueViolation(err)) throw err;
+      // Faqat kalitning o'z PK'si; ish ichidagi boshqa unique xatolari o'zicha qoladi.
+      if (!isUniqueViolation(err) || violatedConstraint(err) !== 'idempotency_keys_pk') throw err;
       const [stored] = await this.db.select().from(idempotencyKeys).where(pk);
       if (!stored || stored.requestHash !== requestHash || stored.responseStatus === null) {
         throw new ApiError('conflict', 'Idempotency-Key was used with a different request');
