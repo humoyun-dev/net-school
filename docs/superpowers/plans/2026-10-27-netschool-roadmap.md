@@ -16,6 +16,7 @@ Hozir batafsil yozilgan: **P0a** → [2026-10-27-p0a-foundation-meshcentral-adap
 - Har business recordda `organization_id`, kerakli joyda `site_id` (§8).
 - Media kadrlari DB/outbox/auditga yozilmaydi (§11).
 - Private key'lar repoda bo'lmaydi; `meshcentral-data/` ignor qilingan.
+- **Markaziy universitet boshqaruvi majburiy** (spec §7.1, [ADR 0007](../../adr/0007-central-university-management.md)): markazdan o'chirish/qayta yuklash/yoqish, admin huquqi bilan dastur o'rnatish/o'chirish, talaba dastur o'rnata/o'chira va oboini o'zgartira olmasligi, markaziy IT adminning barcha kompyuterlardagi to'liq texnik huquqi. Hech bir sub-plan bularni ixtiyoriy qilmaydi; ular qo'llab-quvvatlanadigan har OS'da sinovdan o'tmaguncha release yo'q.
 
 ## Bosqichlar va sub-planlar
 
@@ -39,9 +40,10 @@ Qabul: P0c'da har OS natijasi qayd etilgan; hech qaysi OS sinovsiz "qo'llanadi" 
 | **P1d** | Remote sessions (mahsulot) | P0b broker'ni API'ga ulash: `POST /lessons/{id}/remote-sessions`, `DELETE /remote-sessions/{id}`; control lease 30 s / 10 s renewal, monoton fencing; end-lesson revoke; startup reconciliation | P1c, P0b |
 | **P1e** | Companion (student, Electron) | Enrollment klienti (fail-closed TLS), WS kanal, heartbeat, binary JPEG miniaturalar (320–480 px, 1–2 fps), soft overlay (120 s lease, monotonic timer, rebootda eskirgan policy qaytmaydi), help/message, SQLite cache; renderer sandbox + contextIsolation | P1c |
 | **P1f** | Teacher web panel | `apps/web` React+Vite: sinf setkasi (30 tile, latest-frame), dars boshqaruvi, buyruqlar va har device natijasi, remote viewer iframe (`packages/remote-viewer`), uz/ru/en; `apps/desktop` Electron qobig'i | P1d, P1e |
-| **P1g** | MVP qabul e2e | `tests/e2e`: §15.1 qabul mezonlari (quyida) | P1f |
+| **P1h** | Markaziy quvvat boshqaruvi (**majburiy**) | Adapter `requestPowerAction` (o'chirish, qayta yuklash, uxlatish) va Wake-on-LAN (shu segmentdagi yoqiq agent orqali); qurilma / xona / bino / butun universitet bo'yicha, darhol yoki jadval bilan; P1c buyruq modeli ustida (har qurilma natijasi, `Idempotency-Key`, outbox, audit), javobi yo'qolsa `unknown` + reconcile; ommaviy amal qurilma sonini ko'rsatib tasdiq so'raydi; rollar: markaziy IT admin (butun tashkilot) va site IT admini; o'qituvchida bu huquq yo'q | P1d |
+| **P1g** | MVP qabul e2e | `tests/e2e`: §15.1 qabul mezonlari (quyida) | P1f, P1h |
 
-P1 qabul (§15.1): boshqa xona/maktab qurilmasiga kirish rad; view-only'da klaviatura ishlamaydi; bitta device'da ikki teacher control lease ololmaydi; end-lesson faol controlni belgilangan muddatda uzadi; server o'chsa overlay cheksiz qolmaydi; agent reboot/reconnectdan keyin eskirgan lock qaytmaydi.
+P1 qabul (§15.1): markaziy IT admin butun universitet yoki tanlangan bino/xona kompyuterlarini o'chira, qayta yuklay va (WoL qo'llasa) yoqa oladi, har qurilma natijasi ko'rinadi; boshqa xona/maktab qurilmasiga kirish rad; view-only'da klaviatura ishlamaydi; bitta device'da ikki teacher control lease ololmaydi; end-lesson faol controlni belgilangan muddatda uzadi; server o'chsa overlay cheksiz qolmaydi; agent reboot/reconnectdan keyin eskirgan lock qaytmaydi.
 
 ### 2-bosqich — o'qitish jarayoni va policy
 
@@ -50,16 +52,20 @@ P1 qabul (§15.1): boshqa xona/maktab qurilmasiga kirish rad; view-only'da klavi
 | P2a | Media SFU | Self-hosted LiveKit; Teacher Show / student presentation; room token publish/subscribe rollari; alohida revoke; UDP cheklanganda fallback |
 | P2b | Assignments | StoragePort (pilotda lokal volume), xavfsiz nom/yo'l, kvota, checksum, retry |
 | P2c | Policy | School baseline + lesson policy qatlamlari; immutable versiyalar, desired/applied/ack; managed browser extension |
-| P2d | OS helper (Go) | Windows service / macOS daemon / Linux systemd; ACL'li pipe/socket, versiyalangan allowlist, umumiy shell yo'q |
-| P2e | Installer va update | Signed installer (Windows), notarization (macOS), Linux paketlar; mos server/agent/Companion manifest; rollback; uninstall fayllarni buzmaydi |
-| P2f | Load va real sinf | 30 endpoint bir dars, 60 stress; §11 maqsadlari: miniatura p95 ≤2 s, command ack p95 ≤1 s, LAN input p95 ≤250 ms, reconcile ≤30 s |
+| P2d | OS helper (Go) — **har kompyuterda majburiy** | Windows service / macOS daemon / Linux systemd (SYSTEM/root); ACL'li pipe/socket, versiyalangan allowlist; talaba to'xtata/o'chira olmaydi; P2g va P2h shu helper orqali |
+| P2e | Installer va update | Signed installer (Windows), notarization (macOS), Linux paketlar; MeshAgent + Companion + OS Helper birga va majburiy, macOS'da MDM'ga ro'yxatdan o'tish; mos server/agent/Companion/helper manifest; rollback; uninstall faqat IT admin ruxsati bilan va fayllarni buzmaydi; o'rnatish yo'riqnomasida BIOS/UEFI paroli, yuklash tartibini qulflash, disk shifrlash |
+| P2g | Markaziy dastur o'rnatish (**majburiy**) | Markaziy dastur katalogi: faqat imzolangan/checksum'li paketlar (Windows MSI/winget, macOS pkg MDM bilan, Linux deb/rpm), hub'da oflayn kesh; admin huquqida o'rnatish, yangilash, o'chirish — qurilmadan butun universitetgacha, bosqichma-bosqich rollout, har qurilma natijasi va rollback; audit | P2d |
+| P2h | Majburiy OS cheklovlari (**majburiy**) | Universitet bazaviy siyosati (o'qituvchi bekor qila olmaydi): talaba standart foydalanuvchi; dastur o'rnatish va o'chirish taqiqlangan (Windows AppLocker/WDAC + siyosat, macOS MDM profil, Linux polkit); oboi va desktop sozlamalari qulflangan (Windows registry siyosati, macOS MDM profil, Linux dconf lock); versiyalangan siyosat, desired/applied/ack (P2c); Helper davriy tekshiradi, drift topilsa qayta qo'llaydi va audit qiladi; oflayn ham oxirgi siyosat saqlanadi | P2c, P2d |
+| P2f | Load va real sinf | 30 endpoint bir dars, 60 stress; universitet miqyosi (barcha kompyuterlar soni bo'yicha: inventar, ommaviy quvvat va o'rnatish rollout'i); §11 maqsadlari: miniatura p95 ≤2 s, command ack p95 ≤1 s, LAN input p95 ≤250 ms, reconcile ≤30 s |
 
 ### 3-bosqich — mobil, ChromeOS, ko'p maktab
 
-P3a Android/iOS/iPadOS native participant PoC → capability; P3b ChromeOS managed extension; P3c multi-school (har maktabga o'z hub'i) + cloud eventual sync (har site bitta authoritative writer).
+P3a Android/iOS/iPadOS native participant PoC → capability; P3b ChromeOS managed extension; P3c ko'p kampus: universitet bitta markaziy hub bilan boshqariladi (ADR 0007); bir nechta kampus/hub va cloud eventual sync — kengaytma (har site bitta authoritative writer).
 
 ## Bajarish tartibi
 
-P0a → P0b → P0c → P1a (P0a'dan keyin P0b/P0c bilan parallel boshlash mumkin) → P1b → P1c → P1d ∥ P1e → P1f → P1g → 2-bosqich.
+P0a → P0b → P0c → P1a (P0a'dan keyin P0b/P0c bilan parallel boshlash mumkin) → P1b → P1c → P1d ∥ P1e → P1h → P1f → P1g → 2-bosqich (avval majburiy markaziy boshqaruv: P2c → P2d → P2g ∥ P2h, keyin P2a, P2b, P2e, P2f).
+
+**Release sharti:** P1h, P2d, P2e, P2g va P2h (spec §7.1) qo'llab-quvvatlanadigan har OS'da qabul testidan o'tmaguncha hech qaysi versiya release qilinmaydi.
 
 Har sub-plan tugashida: testlar yashil, `docs/adr/` da yangi qarorlar, keyingi sub-planning batafsil rejasi yoziladi.

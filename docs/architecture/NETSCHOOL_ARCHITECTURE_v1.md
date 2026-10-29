@@ -131,7 +131,7 @@ O‘quvchi/admin bir NetSchool installer ko‘radi, ichida esa vazifalari aniq a
 | NetSchool Companion | Oddiy OS user | Student toolbar, chat, help, screen sharing, thumbnails, overlay |
 | NetSchool OS Helper | Faqat kerakli admin/root imkoniyatlari | Versiyalangan allowlist buyruqlari, siyosat adapterlari, xizmat lifecycle |
 
-Helper kerak bo‘lmaguncha MVP’da o‘rnatilmaydi. U MeshAgentning remote-desktop dvigatelini qayta yozmaydi. GUI capture logged-in user sessiyasida ishlaydi; root/service process barcha desktop ruxsatlarini avtomatik olmaydi.
+Helper har boshqariladigan kompyuterda **majburiy** (§7.1, ADR 0007): quvvat, dastur o‘rnatish va OS cheklovlari shu orqali bajariladi. U MeshAgentning remote-desktop dvigatelini qayta yozmaydi. GUI capture logged-in user sessiyasida ishlaydi; root/service process barcha desktop ruxsatlarini avtomatik olmaydi.
 
 Companion va helper orasida ACL bilan himoyalangan named pipe yoki Unix socket ishlatiladi. Peer identity va xabar schema’si tekshiriladi; umumiy “shell(command)” endpoint bo‘lmaydi. Electron renderer sandbox, contextIsolation va cheklangan preload IPC bilan ishlaydi. Rendererga DB, private key yoki MeshCentral admin credential berilmaydi.
 
@@ -175,7 +175,27 @@ Endpoint capability javobi faqat boolean emas:
 
 UI, backend va endpoint uchalasi capability/policy’ni tekshiradi. UI tugmasining o‘chirilishi yakka himoya emas. Capability ruxsat berilganda, revoke qilinganda, OS user almashganda va agent yangilanganda qayta hisoblanadi.
 
-Hard lock, USB/print cheklash, hamma browser trafikini filtrlash yoki UAC/login-screen boshqaruvi umumiy Electron xususiyati emas. Ular alohida managed-device/MDM yoki OS policy bosqichi. Soft overlay funksiyasi interfeysda ham soft sifatida ko‘rsatiladi. OS login lock va classroom overlay alohida command; o‘qituvchi OS parolisiz avtomatik login/unlock va’dasi yo‘q.
+Hard lock, USB/print cheklash, hamma browser trafikini filtrlash yoki UAC/login-screen boshqaruvi umumiy Electron xususiyati emas. Ular OS Helper va (macOS’da) MDM orqali bajariladi; §7.1’dagi markaziy boshqaruv imkoniyatlari majburiy. Soft overlay funksiyasi interfeysda ham soft sifatida ko‘rsatiladi. OS login lock va classroom overlay alohida command; o‘qituvchi OS parolisiz avtomatik login/unlock va’dasi yo‘q.
+
+
+### 7.1. Markaziy universitet boshqaruvi (majburiy)
+
+NetSchool butun universitet uchun markaziy dastur: barcha kompyuterlar bitta markazlashgan tarmoq sifatida boshqariladi. Quyidagi imkoniyatlar **har doim bo‘lishi shart** va qo‘llab-quvvatlanadigan har OS’da sinovdan o‘tmaguncha release qilinmaydi (ADR 0007):
+
+| Imkoniyat | Qamrov | Bajaruvchi | Windows | macOS | Linux |
+|---|---|---|---|---|---|
+| O‘chirish, qayta yuklash, uxlatish | qurilma / xona / bino / butun universitet; darhol yoki jadval bilan | MeshAgent (adapter `requestPowerAction`) | ha | ha | ha |
+| Yoqish (Wake-on-LAN) | xuddi shu | shu tarmoq segmentidagi yoqiq agent | BIOS/NIC qo‘llasa | qo‘llasa | qo‘llasa |
+| Dastur o‘rnatish / yangilash / o‘chirish (admin huquqi) | qurilmadan butun universitetgacha, bosqichma-bosqich | OS Helper (SYSTEM/root) | MSI / winget | pkg (MDM bilan) | deb / rpm |
+| Dastur o‘rnatish va o‘chirishni taqiqlash | bazaviy siyosat | OS Helper; talaba standart foydalanuvchi | AppLocker/WDAC + siyosat | MDM profil | polkit + paket menejer huquqi |
+| Oboi va desktop sozlamalarini qulflash | bazaviy siyosat | OS Helper | registry siyosati | MDM profil | dconf lock |
+| Remote desktop/control, terminal, fayllar | barcha qurilmalar | MeshCentral (gateway orqali) | ha | ruxsatlar bilan | X11 / Wayland PoC |
+
+- **Rollar.** Markaziy IT admin (butun tashkilot bo‘yicha) — barcha site’larda barcha qurilma boshqaruvi huquqlari. Site IT admini — xuddi shu huquqlar o‘z binosida. O‘qituvchi — faqat o‘z darsidagi dars buyruqlari. Talaba — hech qanday.
+- **Har kompyuterda majburiy komponentlar:** MeshAgent, Companion, OS Helper; macOS’da MDM ro‘yxatdan o‘tish. Installer ularni birga o‘rnatadi va hech biri talaba tomonidan o‘chirilmaydi.
+- **Siyosat doim amalda.** Bazaviy siyosat hub’da versiyalanadi, Helper qo‘llaydi, davriy tekshiradi va farq (drift) topilsa qayta qo‘llaydi va audit qiladi; tarmoq uzilsa oxirgi bazaviy siyosat qurilmada qoladi (§10).
+- **Nazorat.** Har amal auditda. Dastur faqat markaziy katalogdagi imzolangan, checksum’li paketdan. Ommaviy xavfli amal qurilma sonini ko‘rsatib tasdiq so‘raydi va bosqichma-bosqich bajariladi. Natija har qurilma bo‘yicha (§9 command modeli); javobi yo‘qolishi mumkin bo‘lgan quvvat buyrug‘i `unknown` va keyingi tekshiruv bilan.
+- **Fizik cheklovlar.** Wake-on-LAN BIOS/NIC va tok borligiga bog‘liq. Jismoniy kirish bilan dasturiy cheklovni chetlab o‘tish mumkin: BIOS/UEFI paroli, yuklash tartibini qulflash va disk shifrlash o‘rnatish yo‘riqnomasining majburiy qismi.
 
 ## 8. Backend modullari va ma’lumot modeli
 
@@ -245,7 +265,7 @@ Command envelope’da `commandId`, `targetDeviceId`, `lessonId`, `issuedAt`, `ex
 
 Command lifecycle: `pending → sent → acknowledged → succeeded|failed|expired|cancelled`. Retry faqat expiry ichida va action turiga mos. Message, URL launch yoki reboot qayta jo‘natilganda dublikat bajarilishining oldi olinadi. Tizim universal exactly-once kafolatini da’vo qilmaydi: power kabi javobi yo‘qolishi mumkin bo‘lgan operatsiyada `unknown` va keyingi reconciliation zarur.
 
-Teacher API’da arbitrary shell/script bo‘lmaydi. ITSupport remote terminali alohida rol va audit bilan boshqariladi. Browserga tegishli chat matni yoki URL shell argumentiga aylantirilmaydi.
+Teacher API’da arbitrary shell/script bo‘lmaydi. Markaziy va site IT adminining remote terminali, quvvat, dastur o‘rnatish va siyosat buyruqlari alohida rol va audit bilan boshqariladi (§7.1). Browserga tegishli chat matni yoki URL shell argumentiga aylantirilmaydi.
 
 ## 10. Policy, uzilish va dars tugashi
 
@@ -370,7 +390,7 @@ Qabul: internetni uzib to‘liq lokal dars; cheklangan UDP’da media fallback; 
 
 ### 3-bosqich — mobil, ChromeOS va ko‘p maktab
 
-Android/iOS/iPadOS native participant, ChromeOS managed extension, advanced policy/MDM va markaziy boshqaruv. Birinchi multi-school model: har maktabga o‘z hub/MeshCentral instance’i. Cloud tarix/hisobotni eventual sync bilan oladi; dars command’i cloud va LAN’dan bir paytda mustaqil boshqarilmaydi. Har site bitta authoritative writer; remote cloud action shu hub orqali validatsiyadan o‘tadi. Offline vaqtida cloud faqat stale holatni ko‘rsatadi.
+Android/iOS/iPadOS native participant, ChromeOS managed extension, advanced policy/MDM va markaziy boshqaruv. Universitet modeli: butun universitet bitta markaziy hub/MeshCentral instance’i bilan boshqariladi (§7.1, ADR 0007); bir nechta kampus/hub — keyingi kengaytma. Cloud tarix/hisobotni eventual sync bilan oladi; dars command’i cloud va LAN’dan bir paytda mustaqil boshqarilmaydi. Har site bitta authoritative writer; remote cloud action shu hub orqali validatsiyadan o‘tadi. Offline vaqtida cloud faqat stale holatni ko‘rsatadi.
 
 Native mobili uchun alohida capability va UX qabul mezonlari tuziladi. Desktop controlga teng bo‘lmagan platformada chat/topshiriq/ko‘rsatish ishlaydi, yetishmaydigan imkoniyat interfeysda tushuntiriladi.
 
@@ -385,6 +405,7 @@ Native mobili uchun alohida capability va UX qabul mezonlari tuziladi. Desktop c
 | Lifecycle | Install, upgrade, rollback, uninstall, macOS notarization, Windows signing |
 | Load | 30/60 thumbnail, full control + broadcast, slow browser, bandwidth/CPU/memory va frame drops |
 | Data | Backup restore, school scope constraints, outbox recovery, audit correlation |
+| Markaziy boshqaruv (majburiy) | Har OS’da: o‘chirish/qayta yuklash/WoL, imzolangan paketni ommaviy o‘rnatish va o‘chirish, talaba dastur o‘rnata/o‘chira va oboini o‘zgartira olmasligi, qo‘lda buzilgan siyosatning qayta qo‘llanishi, butun universitet bo‘yicha rollout va audit |
 
 Bu turn davomida manba va prototip kodlari tekshirildi; yuqoridagi runtime/OS testlari bajarilmadi. Kodni boshlash uchun birinchi ish — yangi monorepo va school hub skeletida 0-bosqichning end-to-end oqimini ishlatish.
 
