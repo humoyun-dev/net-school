@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import type { AuthorizedDesktopRequest } from '@netschool/domain';
+import { MeshCentralPrincipals, MeshCentralViewerUpstream, type MeshRequester } from '@netschool/meshcentral-adapter';
 import {
   createGateway,
   type Gateway,
@@ -17,6 +18,22 @@ export interface RemoteUpstream {
   viewer: ViewerUpstream;
   listPrincipals(): Promise<{ userId: string; sessionId: string }[]>;
   revokePrincipal(userId: string): Promise<void>;
+}
+
+// main.ts va contract harness bir xil ulanadi. MeshCentral yoki gateway sozlanmagan bo'lsa null.
+export function buildRemoteUpstream(mesh: MeshRequester, config: ApiConfig): RemoteUpstream | null {
+  if (!config.mesh || !config.gateway) return null;
+  const principals = new MeshCentralPrincipals(mesh);
+  return {
+    viewer: new MeshCentralViewerUpstream({
+      admin: mesh,
+      endpoint: { origin: meshHttpsOrigin(config.mesh), ca: config.mesh.ca },
+      // Viewer sahifasidagi host'lar brauzer ko'radigan gateway host'iga almashtiriladi.
+      publicHost: new URL(config.gateway.publicOrigin).host,
+    }),
+    listPrincipals: () => principals.listSessionPrincipals(),
+    revokePrincipal: (userId) => principals.revoke(userId),
+  };
 }
 
 // RemoteUpstream | null; null — MeshCentral sozlanmagan, gateway o'chiq.
