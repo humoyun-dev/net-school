@@ -49,6 +49,8 @@ export async function startTestApp(
     deviceManagement?: DeviceManagementFactory | null;
     // Soxta remote upstream; berilmasa gateway o'chiq. Gateway listener'ini test o'zi ochadi (listen).
     remote?: RemoteUpstream | null;
+    // Fon workerlari (haqiqiy taymer bilan); berilmasa o'chiq — testlar tick'ni qo'lda chaqiradi.
+    workers?: boolean;
   } = {},
 ): Promise<TestApp> {
   const db = opts.db ?? (await createTestDb());
@@ -76,6 +78,7 @@ export async function startTestApp(
       controllers: opts.controllers,
       deviceManagement: opts.deviceManagement ?? null,
       remote,
+      workers: opts.workers ?? false,
       logger: false,
     },
   );

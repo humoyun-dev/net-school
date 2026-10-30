@@ -21,6 +21,7 @@ import {
 } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import { EventLog, Outbox } from '../events/event-log.ts';
+import { closeRemoteSessions } from '../remote-sessions/closing.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort } from './mesh.ts';
 
 export type DeviceRow = typeof devices.$inferSelect;
@@ -121,15 +122,17 @@ export class DevicesService {
         : [];
       if (!room) return this.access.deny(ctx, 'device.manage', { targetType: 'room', targetId: roomId }, device.siteId);
     }
-    return this.db.transaction(async (tx) => {
+    const assigned = await this.db.transaction(async (tx) => {
       const [row] = await tx.update(devices).set({ roomId }).where(eq(devices.id, device.id)).returning();
       if (!row) throw new Error('device update failed');
-      if (roomId !== device.roomId) await this.#leaveLesson(tx, device.id);
+      if (roomId !== device.roomId) await this.#leaveLesson(tx, ctx, device.id);
       await this.ok(tx, ctx, 'device.assign_room', row, { roomId, previousRoomId: device.roomId });
       const [caps] = await tx.select().from(deviceCapabilities).where(eq(deviceCapabilities.deviceId, row.id));
       const [binding] = await tx.select().from(meshBindings).where(eq(meshBindings.deviceId, row.id));
       return this.present(row, (caps?.report as CapabilityReport | undefined) ?? null, binding ? 'unknown' : 'unbound');
     });
+    this.outbox.kick();
+    return assigned;
   }
 
   // Qurilma identity'si bekor qilinadi: imzolangan so'rovlar rad, MeshAgent bog'lanishi o'chiriladi.
@@ -141,9 +144,10 @@ export class DevicesService {
         .set({ retiredAt: new Date(this.now()) })
         .where(eq(devices.id, device.id));
       await tx.delete(meshBindings).where(eq(meshBindings.deviceId, device.id));
-      await this.#leaveLesson(tx, device.id);
+      await this.#leaveLesson(tx, ctx, device.id);
       await this.ok(tx, ctx, 'device.retire', device);
     });
+    this.outbox.kick();
   }
 
   // Faol (retired emas) qurilma + device.manage; topilmasa ham bir xil 403.
@@ -167,14 +171,21 @@ export class DevicesService {
     return row;
   }
 
-  // Xonadan chiqqan yoki retire qilingan qurilma eski xona darsida qolmaydi: a'zolik tugaydi, ochiq target'lar bekor.
-  async #leaveLesson(tx: Db, deviceId: string): Promise<void> {
+  // Xonadan chiqqan yoki retire qilingan qurilma eski xona darsida qolmaydi: a'zolik tugaydi, masofaviy sessiyalari
+  // yopiladi, ochiq target'lar bekor. Chaqiruvchi commit'dan keyin Outbox.kick() qiladi (remote.revoke).
+  async #leaveLesson(tx: Db, ctx: RequestContext, deviceId: string): Promise<void> {
     const at = new Date(this.now());
     const left = await tx
       .update(lessonDevices)
       .set({ releasedAt: at })
       .where(and(eq(lessonDevices.deviceId, deviceId), isNull(lessonDevices.releasedAt)))
       .returning({ lessonId: lessonDevices.lessonId });
+    // Xona voqealaridan oldin: sessiya qatorlari xona lock'idan oldin olinadi (closing.ts dagi lock tartibi).
+    await closeRemoteSessions(tx, { deviceId }, 'device_left', at, this.access.actor(ctx).userId, ctx.correlationId, {
+      events: this.events,
+      outbox: this.outbox,
+      audit: this.audit,
+    });
     for (const { lessonId } of left) {
       const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId));
       if (!lesson) continue;
