@@ -8,6 +8,7 @@ import { DB, type Db } from '../../db/client.ts';
 import { commands, events, lessons, rooms } from '../../db/schema.ts';
 import { CommandsService } from '../commands/commands.service.ts';
 import { LessonsService } from '../lessons/lessons.service.ts';
+import { RemoteSessionsService } from '../remote-sessions/remote-sessions.service.ts';
 import { type Notifier, ROOM_NOTIFIER } from './notifier.ts';
 
 const PAGE = 500;
@@ -23,6 +24,7 @@ export class EventsService {
     @Inject(Access) private readonly access: Access,
     @Inject(LessonsService) private readonly lessons: LessonsService,
     @Inject(CommandsService) private readonly commands: CommandsService,
+    @Inject(RemoteSessionsService) private readonly remoteSessions: RemoteSessionsService,
     @Inject(ROOM_NOTIFIER) private readonly notifier: Notifier,
   ) {}
 
@@ -85,7 +87,8 @@ export class EventsService {
       .select()
       .from(lessons)
       .where(and(eq(lessons.roomId, roomId), eq(lessons.status, 'active')));
-    if (!lesson) return { cursor, resync: true, snapshot: { lesson: null, commands: [] }, events: [] };
+    if (!lesson)
+      return { cursor, resync: true, snapshot: { lesson: null, commands: [], remoteSessions: [] }, events: [] };
     const recent = await this.db
       .select({ id: commands.id })
       .from(commands)
@@ -97,7 +100,11 @@ export class EventsService {
     return {
       cursor,
       resync: true,
-      snapshot: { lesson: await this.lessons.view(this.db, lesson), commands: views },
+      snapshot: {
+        lesson: await this.lessons.view(this.db, lesson),
+        commands: views,
+        remoteSessions: await this.remoteSessions.openOfLesson(this.db, lesson.id),
+      },
       events: [],
     };
   }

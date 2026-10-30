@@ -80,6 +80,44 @@ describe('MeshControlClient', () => {
     expect((err as AdapterError).detail).toBe('Invalid rights');
   });
 
+  test('tag-correlated requests resolve on the tagged reply', async () => {
+    const received: Record<string, unknown>[] = [];
+    server.handle = (socket, msg) => {
+      received.push(msg);
+      // meshuser.js serverCommandUsers: muvaffaqiyatda responseid yo'q, faqat tag.
+      socket.send(JSON.stringify({ action: msg.action, users: [{ _id: 'user//a' }], tag: msg.tag }));
+    };
+    const c = makeClient();
+    await c.connect();
+    const reply = await c.request<{ users: unknown[] }>('users', {}, { correlate: 'tag' });
+    expect(reply.users).toEqual([{ _id: 'user//a' }]);
+    expect(typeof received[0]?.tag).toBe('string');
+    expect(typeof received[0]?.responseid).toBe('string');
+  });
+
+  test('tagged request fails on an access-denied reply', async () => {
+    server.handle = (socket, msg) =>
+      socket.send(JSON.stringify({ action: msg.action, responseid: msg.responseid, result: 'Access denied' }));
+    const c = makeClient();
+    await c.connect();
+    const err = await c.request('users', {}, { correlate: 'tag' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AdapterError);
+    expect((err as AdapterError).code).toBe('upstream_rejected');
+    expect((err as AdapterError).detail).toBe('Access denied');
+  });
+
+  test('plain requests ignore a foreign tag and untagged requests send no tag', async () => {
+    const received: Record<string, unknown>[] = [];
+    server.handle = (socket, msg) => {
+      received.push(msg);
+      socket.send(JSON.stringify({ action: msg.action, tag: msg.responseid }));
+    };
+    const c = makeClient({ requestTimeoutMs: 100 });
+    await c.connect();
+    expect(await codeOf(c.request('nodes'))).toBe('upstream_timeout');
+    expect(received[0]).not.toHaveProperty('tag');
+  });
+
   test('routes unsolicited messages to onMessage', async () => {
     const c = makeClient();
     const seen: unknown[] = [];
@@ -138,6 +176,18 @@ describe('MeshControlClient', () => {
     await tick(200);
     expect(server.connectionCount).toBe(2);
     expect(await codeOf(c.request('nodes'))).toBe('upstream_auth_failed');
+  });
+
+  test('connected reflects the live link', async () => {
+    const c = makeClient();
+    expect(c.connected).toBe(false);
+    await c.connect();
+    expect(c.connected).toBe(true);
+    server.dropAll();
+    await until(() => !c.connected);
+    await until(() => c.connected);
+    await c.close();
+    expect(c.connected).toBe(false);
   });
 
   test('close() stops reconnecting', async () => {

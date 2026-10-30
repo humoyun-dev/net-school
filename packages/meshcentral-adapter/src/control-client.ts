@@ -16,13 +16,24 @@ export interface MeshControlClientOptions {
   heartbeatIntervalMs?: number; // ping oralig'i; ikki oraliqda pong yo'q → ulanish o'lik
 }
 
+// correlate: 'tag' — `users` kabi action'lar muvaffaqiyatda responseid emas, `tag`ni qaytaradi (meshuser.js serverCommandUsers);
+// shuning uchun ikkala kalit yuboriladi va qaysi biri bilan javob kelsa, shu so'rov tugaydi.
+export interface MeshRequestOptions {
+  correlate?: 'responseid' | 'tag';
+}
+
 export interface MeshRequester {
-  request<T = Record<string, unknown>>(action: string, payload?: Record<string, unknown>): Promise<T>;
+  request<T = Record<string, unknown>>(
+    action: string,
+    payload?: Record<string, unknown>,
+    opts?: MeshRequestOptions,
+  ): Promise<T>;
   onMessage(handler: (msg: unknown) => void): Unsubscribe;
   onResync(handler: () => void): Unsubscribe;
 }
 
 interface Pending {
+  byTag: boolean;
   resolve(value: unknown): void;
   reject(err: AdapterError): void;
   timer: NodeJS.Timeout;
@@ -61,6 +72,11 @@ export class MeshControlClient implements MeshRequester {
     return this.#open();
   }
 
+  // serverinfo kelgan va hali uzilmagan ulanish (health uchun); reconnect paytida false.
+  get connected(): boolean {
+    return this.#ready && !this.#closed && this.#fatal === undefined;
+  }
+
   async close(): Promise<void> {
     this.#closed = true;
     clearTimeout(this.#reconnectTimer);
@@ -73,20 +89,22 @@ export class MeshControlClient implements MeshRequester {
     });
   }
 
-  request<T = Message>(action: string, payload: Message = {}): Promise<T> {
+  request<T = Message>(action: string, payload: Message = {}, opts: MeshRequestOptions = {}): Promise<T> {
     if (this.#fatal) return Promise.reject(this.#fatal);
     const ws = this.#ws;
     if (this.#closed || !this.#ready || !ws) {
       return Promise.reject(new AdapterError('upstream_unavailable', 'Not connected to MeshCentral'));
     }
     const responseid = randomUUID();
+    const byTag = opts.correlate === 'tag';
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(responseid);
         reject(new AdapterError('upstream_timeout', `No response to ${action}`));
       }, this.#opts.requestTimeoutMs);
-      this.#pending.set(responseid, { resolve: resolve as (v: unknown) => void, reject, timer });
-      ws.send(JSON.stringify({ action, ...payload, responseid }));
+      this.#pending.set(responseid, { byTag, resolve: resolve as (v: unknown) => void, reject, timer });
+      // Tag rejimida tag === responseid: muvaffaqiyat javobi tag bilan, rad javobi responseid bilan keladi.
+      ws.send(JSON.stringify({ action, ...payload, responseid, ...(byTag ? { tag: responseid } : {}) }));
     });
   }
 
@@ -165,9 +183,16 @@ export class MeshControlClient implements MeshRequester {
           if (reconnected) for (const h of this.#resyncHandlers) notify(h);
           return;
         }
-        const id = msg.responseid;
-        const pending = typeof id === 'string' ? this.#pending.get(id) : undefined;
-        if (pending && typeof id === 'string') {
+        let id = typeof msg.responseid === 'string' ? msg.responseid : undefined;
+        let pending = id === undefined ? undefined : this.#pending.get(id);
+        if (!pending && typeof msg.tag === 'string') {
+          const tagged = this.#pending.get(msg.tag);
+          if (tagged?.byTag) {
+            id = msg.tag;
+            pending = tagged;
+          }
+        }
+        if (pending && id !== undefined) {
           this.#pending.delete(id);
           clearTimeout(pending.timer);
           if (msg.result === undefined || msg.result === 'ok') pending.resolve(msg);

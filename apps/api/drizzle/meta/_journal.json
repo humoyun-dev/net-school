@@ -50,6 +50,20 @@
       "when": 1793198863433,
       "tag": "0006_maintenance_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793353136213,
+      "tag": "0007_remote_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793360649886,
+      "tag": "0008_remote_sessions_superseded",
+      "breakpoints": true
     }
   ]
 }

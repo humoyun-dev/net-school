@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { outbox } from '../src/db/schema.ts';
+import { Outbox } from '../src/modules/events/event-log.ts';
 import { DEVICE_NOTIFIER, type Notifier, ROOM_NOTIFIER } from '../src/modules/events/notifier.ts';
+import { RemoteGateway } from '../src/modules/remote-sessions/remote-gateway.ts';
 import { OutboxWorker } from '../src/modules/workers/outbox.worker.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { setCapabilities, setHeartbeat } from './support/caps.ts';
@@ -38,6 +40,27 @@ const enqueue = (topic: string, payload: Record<string, unknown> = {}) =>
       return row;
     });
 const rowOf = async (id: number) => (await app.db.db.select().from(outbox).where(eq(outbox.id, id)))[0];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Haqiqiy taymer bilan kutish: kick tick'ni fonda ishga tushiradi.
+const eventually = async (check: () => Promise<boolean>, ms = 2_000) => {
+  const until = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > until) throw new Error('timed out');
+    await sleep(10);
+  }
+};
+// workers: true bilan, lekin interval ishga tushirilmagan (onApplicationBootstrap chaqirilmaydi). O'z Outbox'i:
+// ilovaning kick'ini egallab olmaydi.
+const enabledWorker = (signal = new Outbox(() => now)) =>
+  new OutboxWorker(
+    app.db.db,
+    () => now,
+    true,
+    app.get<Notifier>(DEVICE_NOTIFIER),
+    app.get<Notifier>(ROOM_NOTIFIER),
+    signal,
+    app.get<RemoteGateway>(RemoteGateway),
+  );
 
 describe('outbox worker', () => {
   test('outbox rows wake waiting devices and rooms', async () => {
@@ -104,6 +127,186 @@ describe('outbox worker', () => {
     expect(parked?.lastError).toMatch(/nobody\.listens/);
     expect(await worker.tick(at + 3_600_000)).toBe(0);
     expect((await rowOf(row.id))?.attempts).toBe(10);
+  });
+
+  test('a crashed claim is retried after the claim lease', async () => {
+    let calls = 0;
+    let claimed!: () => void;
+    const firstCall = new Promise<void>((r) => {
+      claimed = r;
+    });
+    worker.register('test.hang', () => {
+      calls += 1;
+      if (calls > 1) return;
+      claimed();
+      // Jarayon claim'dan keyin o'lganini taqlid qiladi: natija hech qachon yozilmaydi.
+      return new Promise<void>(() => {});
+    });
+    const row = await enqueue('test.hang');
+    void worker.tick(now);
+    await firstCall;
+    expect(await worker.tick(now + 29_000)).toBe(0);
+    expect(calls).toBe(1);
+    expect(await worker.tick(now + 30_001)).toBe(1);
+    expect(calls).toBe(2);
+    expect((await rowOf(row.id))?.processedAt?.getTime()).toBe(now + 30_001);
+  });
+
+  test('a handler that crashes every time is parked after the attempt limit', async () => {
+    let calls = 0;
+    // Har claim'dan keyin jarayon o'lganini taqlid qiladi: natija hech qachon yozilmaydi.
+    worker.register('test.crash', () => {
+      calls += 1;
+      return new Promise<void>(() => {});
+    });
+    const row = await enqueue('test.crash');
+    let at = now;
+    for (let i = 1; i <= 10; i++) {
+      void worker.tick(at);
+      await eventually(async () => calls === i);
+      at += 30_001;
+    }
+    const parked = await rowOf(row.id);
+    expect(parked).toMatchObject({ attempts: 10, processedAt: null });
+    expect(await worker.tick(at + 3_600_000)).toBe(0);
+    expect(calls).toBe(10);
+  });
+
+  test('a late failure does not reset a newer claim', async () => {
+    let calls = 0;
+    let fail!: () => void;
+    const gate = new Promise<void>((r) => {
+      fail = r;
+    });
+    let claimed!: () => void;
+    const firstCall = new Promise<void>((r) => {
+      claimed = r;
+    });
+    worker.register('test.slowfail', async () => {
+      calls += 1;
+      if (calls > 1) return new Promise<void>(() => {});
+      claimed();
+      await gate;
+      throw new Error('late boom');
+    });
+    const row = await enqueue('test.slowfail');
+    const stale = worker.tick(now);
+    await firstCall;
+    // Lease tugadi: boshqa tick qatorni qayta oldi va handler hali ishlamoqda.
+    void worker.tick(now + 30_001);
+    await eventually(async () => calls === 2);
+    fail();
+    expect(await stale).toBe(0);
+    const r = await rowOf(row.id);
+    expect(r).toMatchObject({ attempts: 2, processedAt: null, lastError: null });
+    expect(r?.nextAttemptAt.getTime()).toBe(now + 30_001 + 30_000);
+  });
+
+  test('rows whose claim lease passed mid-batch are left for the next claim', async () => {
+    const seen: string[] = [];
+    worker.register('test.batch', (p) => {
+      const name = (p as { name: string }).name;
+      seen.push(name);
+      // Birinchi handler butun claim lease'ini yeydi.
+      if (name === 'first') now += 30_000;
+    });
+    const first = await enqueue('test.batch', { name: 'first' });
+    const second = await enqueue('test.batch', { name: 'second' });
+    const claimedAt = now;
+    expect(await worker.tick(now)).toBe(1);
+    expect(seen).toEqual(['first']);
+    expect((await rowOf(first.id))?.processedAt).not.toBeNull();
+    // Ikkinchisi bajarilmagan va natijasi yozilmagan: lease tugagach qayta olinadi.
+    const left = await rowOf(second.id);
+    expect(left).toMatchObject({ attempts: 1, processedAt: null, lastError: null });
+    expect(left?.nextAttemptAt.getTime()).toBe(claimedAt + 30_000);
+    expect(await worker.tick(now)).toBe(1);
+    expect(seen).toEqual(['first', 'second']);
+    expect(await rowOf(second.id)).toMatchObject({ attempts: 2, lastError: null });
+  });
+
+  test('a batch runs at most 16 handlers at once', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    worker.register('test.pool', async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await gate;
+      inFlight -= 1;
+    });
+    for (let i = 0; i < 20; i++) await enqueue('test.pool');
+    let settled = false;
+    const ticking = worker.tick(now).then((n) => {
+      settled = true;
+      return n;
+    });
+    await eventually(async () => inFlight === 16);
+    await sleep(50);
+    expect(peak).toBe(16);
+    expect(settled).toBe(false);
+    release();
+    // Tick barcha boshlangan handler'lar tugagach qaytadi.
+    expect(await ticking).toBe(20);
+    expect(peak).toBe(16);
+  });
+
+  test('kick runs a tick without waiting for the interval', async () => {
+    let calls = 0;
+    worker.register('test.kick', () => {
+      calls += 1;
+    });
+    const off = await enqueue('test.kick');
+    // workers: false (testlar) — kick hech narsa qilmaydi.
+    worker.kick();
+    await sleep(100);
+    expect(calls).toBe(0);
+    expect((await rowOf(off.id))?.processedAt).toBeNull();
+
+    // Xizmatlar commit'dan keyin Outbox.kick() chaqiradi — worker shu signalga ulangan.
+    const signal = new Outbox(() => now);
+    const on = enabledWorker(signal);
+    on.register('test.kick', () => {
+      calls += 1;
+    });
+    signal.kick();
+    await eventually(async () => (await rowOf(off.id))?.processedAt != null);
+    expect(calls).toBe(1);
+  });
+
+  test('a kick during a running tick is not lost', async () => {
+    const on = enabledWorker();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started!: () => void;
+    const running = new Promise<void>((r) => {
+      started = r;
+    });
+    const seen: string[] = [];
+    on.register('test.slow', async () => {
+      seen.push('slow');
+      started();
+      await gate;
+    });
+    on.register('test.late', () => {
+      seen.push('late');
+    });
+    await enqueue('test.slow');
+    on.kick();
+    await running;
+    // Tick davom etmoqda: yangi qator va kick ustma-ust tick ochmaydi, lekin yo'qolmaydi.
+    const late = await enqueue('test.late');
+    on.kick();
+    await sleep(50);
+    expect(seen).toEqual(['slow']);
+    release();
+    await eventually(async () => (await rowOf(late.id))?.processedAt != null);
+    expect(seen).toEqual(['slow', 'late']);
   });
 
   test('issued command reaches a long-polling device through the worker', async () => {

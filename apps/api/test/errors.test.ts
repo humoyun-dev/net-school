@@ -111,6 +111,7 @@ describe('loadConfig', () => {
       databaseUrl: 'postgres://u:p@db/netschool',
       mesh: null,
       meshInstanceId: 'local',
+      gateway: null,
     });
   });
 
@@ -124,6 +125,7 @@ describe('loadConfig', () => {
       TLS_KEY: 'KEY',
       DATABASE_URL: 'postgres://u:p@db/netschool',
       MESHCENTRAL_URL: 'wss://meshcentral:4430/control.ashx',
+      GATEWAY_PUBLIC_ORIGIN: 'https://hub.school.lan:8444',
     };
     let message = '';
     try {

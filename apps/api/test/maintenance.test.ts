@@ -152,6 +152,7 @@ describe('maintenance worker', () => {
       'events_at',
       'outbox_processed_at',
       'idempotency_keys_created_at',
+      'remote_sessions_open_expires',
     ]) {
       expect(byName.has(name), name).toBe(true);
     }

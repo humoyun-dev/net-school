@@ -2,7 +2,15 @@
 
 Servislar: `postgres` (NetSchool va MeshCentral uchun **alohida** database va user), `meshcentral` (pin qilingan submodule'dan build), `api-migrate` (bir martalik migratsiya), `api` (NetSchool API, HTTPS).
 
-Tashqariga faqat `api` chiqadi (`443 → 8443`). MeshCentral web/admin paneli va PostgreSQL hech qanday port publish qilmaydi (spec §13). MeshCentral agent porti P0c natijasiga ko'ra qo'shiladi — hozircha publish qilinmagan.
+Tashqariga faqat `api` chiqadi: `443 → 8443` (API) va `8444 → 8444` (remote session gateway, ADR 0003). MeshCentral web/admin paneli va PostgreSQL hech qanday port publish qilmaydi (spec §13). MeshCentral agent porti P0c natijasiga ko'ra qo'shiladi — hozircha publish qilinmagan.
+
+## API ↔ MeshCentral
+
+- API `wss://meshcentral:4430/control.ashx` ga `netschool-svc` service account bilan ulanadi. Account'ni `meshcentral` konteyneri ([entrypoint.sh](../meshcentral/entrypoint.sh)) birinchi ishga tushishda `secrets/meshcentral_service_password` bilan yaratadi va site administrator qiladi; keyingi ishga tushishlarda mavjud account'ga tegilmaydi (parol ham o'zgarmaydi).
+- TLS: MeshCentral root CA'sining faqat public qismi (`root-cert-public.crt`) `meshcentral-ca` volume orqali api'ga read-only beriladi; `meshcentral-data` (private key'lar) api'ga mount qilinmaydi. Sertifikat nomi `meshcentral` ga qotirilgan — API hostname tekshiruvini o'chirmaydi.
+- `api` faqat `meshcentral` healthy bo'lgach (CA fayli bor va 4430 shu CA bilan TLS javob beradi) ishga tushadi. Keyin MeshCentral uzilsa, API ishlashda davom etadi va fonda qayta ulanadi.
+- `GET /api/v1/healthz` → `{"status":"ok","db":"ok","mesh":"ok"}`; `mesh`: `ok` (ulangan) | `down` (ulanmagan — HTTP baribir 200) | `disabled` (`MESHCENTRAL_URL` berilmagan).
+- Barcha servislar `hub` tarmog'ida, qat'iy subnet bilan (`HUB_SUBNET`, standart `172.31.250.0/24`; boshqa konteynerlar `HUB_DYNAMIC_RANGE`, standart `172.31.250.128/25` dan oladi). `api` qat'iy manzilda (`API_IP`, standart `172.31.250.10`) va MeshCentral `trustedProxy` aynan shu IP (`MESHCENTRAL_TRUSTED_PROXY` → `render-config.mjs`): X-Forwarded-For faqat gateway'dan ishoniladi. DNS nomi ishlatilmaydi — MeshCentral uni faqat ishga tushishda aniqlaydi, `api` esa undan keyin ko'tariladi. Maktab LAN'i bilan to'qnashsa uchala qiymatni `.env`da birga almashtiring.
 
 ## Sirlar
 
@@ -15,12 +23,14 @@ for s in postgres_superuser_password netschool_db_password meshcentral_db_passwo
   openssl rand -hex 32 | tr -d '\n' > "secrets/$s"   # hex: DB URL'da kodlash talab qilmaydi
 done
 printf 'postgres://netschool:%s@postgres:5432/netschool' "$(cat secrets/netschool_db_password)" > secrets/netschool_database_url
+# MeshCentral service account paroli: passwordRequirements (min 16, har sinfdan 1) uchun `-Aa1` qo'shimchasi.
+printf '%s-Aa1' "$(openssl rand -hex 24)" > secrets/meshcentral_service_password
 # TLS: maktab CA yoki admin tarqatgan lokal CA bilan imzolangan sertifikat (spec §13)
 cp /path/to/hub.crt secrets/api_tls_cert
 cp /path/to/hub.key secrets/api_tls_key
 # Fayllar konteyner ichidagi postgres/node userlari o'qishi uchun 644; host'da himoya — papka 700.
 chmod 644 secrets/*
-cp .env.example .env   # PUBLIC_ORIGIN va MESHCENTRAL_CERT_NAME ni moslang
+cp .env.example .env   # PUBLIC_ORIGIN va GATEWAY_PUBLIC_ORIGIN ni moslang
 ```
 
 ## Ishga tushirish
@@ -33,9 +43,18 @@ docker compose run --rm api-migrate node dist/cli.mjs bootstrap --org "Maktab" -
 
 Parolni tiklash (oflayn): `docker compose run --rm api-migrate node dist/cli.mjs reset-password <username>`.
 
-## Cheklovlar (P1a)
+## Cheklovlar
 
-- Remote-session gateway servisi P1d'da qo'shiladi.
-- API'ning MeshCentral ulanishi (`MESHCENTRAL_URL`, `MESHCENTRAL_USERNAME`, `MESHCENTRAL_PASSWORD_FILE`, `MESHCENTRAL_CA_FILE`, `MESH_INSTANCE_ID`) va uning service account'i ham P1d'da; ungacha qurilmani MeshAgent'ga bog'lash 409 `capability_unavailable` qaytaradi (ADR 0005).
 - MeshCentral `autoBackup` o'chiq: backup rejasi (NetSchool DB + MeshCentral DB + MeshCentral data/sertifikatlar) alohida vazifa (spec §13).
-- `trustedProxy: 127.0.0.1` shablonda: gateway alohida konteynerda bo'lganda (P1d) uning tarmoq manzili bilan almashtiriladi.
+- `secrets/meshcentral_service_password` ni almashtirish mavjud account parolini o'zgartirmaydi (entrypoint account'ni faqat yo'q bo'lsa yaratadi). Parol MeshCentral to'xtagan holatda CLI bilan yangilanadi; image `ENTRYPOINT` argumentlarni e'tiborsiz qoldiradi, shuning uchun `--entrypoint node`:
+
+  ```sh
+  docker compose stop api meshcentral
+  # Avval yangi parol (min 16, har sinfdan 1) secrets/meshcentral_service_password ga yoziladi (boshi/oxirida bo'sh joysiz).
+  docker compose run --rm --entrypoint node meshcentral meshcentral.js \
+    --datapath /opt/meshcentral/meshcentral-data --resetaccount netschool-svc \
+    --pass="$(tr -d '\r\n' < secrets/meshcentral_service_password)"
+  docker compose up -d
+  ```
+
+  CLI xatoda ham 0 bilan chiqadi: `api` loglarida MeshCentral'ga ulanish xatosi yo'qligini tekshiring.

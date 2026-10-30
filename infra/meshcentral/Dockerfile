@@ -6,6 +6,9 @@ COPY infra/meshcentral/upstream/package.json infra/meshcentral/upstream/package-
 RUN npm ci --omit=optional --no-audit --no-fund && npm install --no-save --no-audit --no-fund pg@8.16.3
 COPY infra/meshcentral/upstream/ ./
 COPY infra/meshcentral/config.template.json infra/meshcentral/render-config.mjs /opt/netschool/
-RUN mkdir -p meshcentral-data meshcentral-files && chown -R node:node /opt/meshcentral
+COPY --chmod=0755 infra/meshcentral/entrypoint.sh /opt/netschool/
+# /run/meshcentral-ca — api bilan bo'lishiladigan volume (faqat root-cert-public.crt); egasi node bo'lishi kerak.
+RUN mkdir -p meshcentral-data meshcentral-files /run/meshcentral-ca \
+  && chown -R node:node /opt/meshcentral /run/meshcentral-ca
 USER node
-ENTRYPOINT ["sh", "-c", "node /opt/netschool/render-config.mjs && exec node meshcentral.js --datapath /opt/meshcentral/meshcentral-data"]
+ENTRYPOINT ["/opt/netschool/entrypoint.sh"]

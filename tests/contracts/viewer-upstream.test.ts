@@ -44,8 +44,11 @@ function spy(inner: MeshRequester): MeshRequester {
   };
 }
 
+let sessionSeq = 0;
+
+// Har ochilish o'z id'siga ega: principal username'i sessiya id'sidan olinadi va bir vaqtda ikki xil bo'la olmaydi.
 async function open(mode: AuthorizedDesktopRequest['mode'] = 'view'): Promise<MeshCentralViewerSession> {
-  const session = await upstream.open({ sessionId: 's-1', actorId: 'u-1', device: pc01, mode });
+  const session = await upstream.open({ sessionId: `s-${++sessionSeq}`, actorId: 'u-1', device: pc01, mode });
   sessions.push(session);
   return session;
 }

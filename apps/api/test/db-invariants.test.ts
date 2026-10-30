@@ -5,17 +5,20 @@ import {
   auditEvents,
   commands,
   commandTargets,
+  controlLeases,
   devices,
   enrollments,
   lessonDevices,
   lessons,
   meshBindings,
   organizations,
+  remoteSessions,
   roleAssignments,
   rooms,
   sites,
   users,
 } from '../src/db/schema.ts';
+import { takeControlLease } from '../src/modules/remote-sessions/remote-sessions.service.ts';
 import { createTestDb, type TestDb } from './support/db.ts';
 
 let t: TestDb;
@@ -407,5 +410,207 @@ describe('lesson invariants', () => {
         expiresAt: new Date(),
       }),
     );
+  });
+
+  const session = (
+    s: S,
+    l: { id: string },
+    d: { id: string },
+    extra: Partial<typeof remoteSessions.$inferInsert> = {},
+  ) =>
+    t.db
+      .insert(remoteSessions)
+      .values({
+        organizationId: s.orgId,
+        siteId: s.siteId,
+        roomId: s.roomId,
+        lessonId: l.id,
+        deviceId: d.id,
+        actorUserId: s.teacherId,
+        mode: 'control',
+        status: 'active',
+        openedAt: new Date(),
+        expiresAt: new Date(Date.now() + 30_000),
+        ...extra,
+      })
+      .returning()
+      .then(([row]) => {
+        if (!row) throw new Error('session');
+        return row;
+      });
+
+  const nextFencing = async () => {
+    const res = (await t.db.execute(sql`select nextval('control_fencing_seq')::text as v`)) as unknown as {
+      rows: { v: string }[];
+    };
+    return BigInt(res.rows[0]?.v ?? '');
+  };
+
+  test('a device has at most one control lease', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const first = await session(s, l, d);
+    const second = await session(s, l, d, { mode: 'view' });
+    const lease = (sessionId: string) =>
+      t.db.insert(controlLeases).values({
+        deviceId: d.id,
+        organizationId: s.orgId,
+        sessionId,
+        fencing: 1,
+        acquiredAt: new Date(),
+        expiresAt: new Date(Date.now() + 30_000),
+      });
+    await lease(first.id);
+    await rejects(lease(second.id));
+    // Bitta sessiya ikkita qurilmada lease ushlay olmaydi.
+    const other = await device(s);
+    await rejects(
+      t.db.insert(controlLeases).values({
+        deviceId: other.id,
+        organizationId: s.orgId,
+        sessionId: first.id,
+        fencing: 2,
+        acquiredAt: new Date(),
+        expiresAt: new Date(Date.now() + 30_000),
+      }),
+    );
+  });
+
+  test("a lease belongs to its session's device", async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const other = await device(s);
+    const sess = await session(s, l, d);
+    const lease = (deviceId: string, organizationId = s.orgId) =>
+      t.db.insert(controlLeases).values({
+        deviceId,
+        organizationId,
+        sessionId: sess.id,
+        fencing: 1,
+        acquiredAt: new Date(),
+        expiresAt: new Date(Date.now() + 30_000),
+      });
+    await rejects(lease(other.id));
+    // Tashkilot qurilmaning tashkilotiga mos bo'lishi shart.
+    const foreign = await org('foreign-org');
+    await rejects(lease(d.id, foreign.orgId));
+    await expect(lease(d.id)).resolves.toBeDefined();
+  });
+
+  test('remote session mode, status and reason are constrained', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    await rejects(session(s, l, d, { mode: 'shell' }));
+    await rejects(session(s, l, d, { status: 'paused' }));
+    await rejects(
+      session(s, l, d, { status: 'closed', closedAt: new Date(), closeReason: 'because', closedBy: s.teacherId }),
+    );
+    for (const reason of [
+      'teacher',
+      'admin',
+      'lesson_ended',
+      'device_left',
+      'lease_expired',
+      'upstream_failed',
+      'restart',
+      'superseded',
+    ]) {
+      await expect(
+        session(s, l, d, { status: 'closed', closedAt: new Date(), closeReason: reason }),
+      ).resolves.toBeDefined();
+    }
+    for (const mode of ['view', 'control']) {
+      for (const status of ['opening', 'active']) {
+        await expect(session(s, l, d, { mode, status })).resolves.toBeDefined();
+      }
+    }
+  });
+
+  test('closed session must have closed_at and reason', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    await rejects(session(s, l, d, { status: 'closed' }));
+    await rejects(session(s, l, d, { status: 'closed', closedAt: new Date() }));
+    await rejects(session(s, l, d, { status: 'closed', closeReason: 'teacher' }));
+    await rejects(session(s, l, d, { status: 'active', closedAt: new Date() }));
+    await rejects(session(s, l, d, { status: 'opening', closeReason: 'teacher' }));
+    await expect(
+      session(s, l, d, { status: 'closed', closedAt: new Date(), closeReason: 'teacher' }),
+    ).resolves.toBeDefined();
+    const open = await session(s, l, d);
+    await rejects(t.db.update(remoteSessions).set({ status: 'closed' }).where(sql`${remoteSessions.id} = ${open.id}`));
+    await expect(
+      t.db
+        .update(remoteSessions)
+        .set({ status: 'closed', closedAt: new Date(), closeReason: 'device_left' })
+        .where(sql`${remoteSessions.id} = ${open.id}`),
+    ).resolves.toBeDefined();
+  });
+
+  test('remote session device belongs to the lesson site', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const far = await device(s, s.site2Id);
+    await rejects(session(s, l, far));
+    await rejects(session(s, l, far, { siteId: s.site2Id }));
+    // Xona ham dars site'iga tegishli bo'lishi shart.
+    const [foreignRoom] = await t.db
+      .insert(rooms)
+      .values({ organizationId: s.orgId, siteId: s.site2Id, name: 'far-room' })
+      .returning();
+    if (!foreignRoom) throw new Error('room');
+    const here = await device(s);
+    await rejects(session(s, l, here, { roomId: foreignRoom.id }));
+    const near = await device(s);
+    await expect(session(s, l, near)).resolves.toBeDefined();
+    // Boshqa tashkilot foydalanuvchisi actor bo'la olmaydi.
+    const other = await org('other');
+    const [stranger] = await t.db
+      .insert(users)
+      .values({ organizationId: other.orgId, username: 'stranger', displayName: 'S', passwordHash: 'x' })
+      .returning();
+    if (!stranger) throw new Error('user');
+    await rejects(session(s, l, near, { actorUserId: stranger.id }));
+  });
+
+  test('fencing values increase', async () => {
+    const a = await nextFencing();
+    const b = await nextFencing();
+    const c = await nextFencing();
+    expect(b).toBeGreaterThan(a);
+    expect(c).toBeGreaterThan(b);
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const sess = await session(s, l, d);
+    await expect(
+      t.db.execute(sql`insert into control_leases (device_id, organization_id, session_id, fencing, acquired_at, expires_at)
+        values (${d.id}, ${s.orgId}, ${sess.id}, nextval('control_fencing_seq'), now(), now() + interval '30 seconds')`),
+    ).resolves.toBeDefined();
+  });
+
+  test('an expired lease is taken over by another session of the device', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const at = new Date(1_800_000_000_000);
+    const take = (sessionId: string, now: Date) =>
+      takeControlLease(t.db, { deviceId: d.id, organizationId: s.orgId, sessionId, at: now });
+    const first = await session(s, l, d);
+    const second = await session(s, l, d);
+    const held = await take(first.id, at);
+    expect(held).not.toBeNull();
+    // Muddati o'tmagan lease boshqa sessiyaga o'tmaydi.
+    expect(await take(second.id, new Date(at.getTime() + 29_999))).toBeNull();
+    // Composite FK (session_id, device_id) yangi sessiya qatoriga o'tadi; fencing o'sadi.
+    const taken = await take(second.id, new Date(at.getTime() + 30_000));
+    expect(taken?.fencing).toBeGreaterThan(held?.fencing ?? Number.POSITIVE_INFINITY);
+    const rows = await t.db.select().from(controlLeases);
+    expect(rows).toEqual([expect.objectContaining({ deviceId: d.id, sessionId: second.id, fencing: taken?.fencing })]);
+    expect(rows[0]?.expiresAt.getTime()).toBe(at.getTime() + 60_000);
   });
 });

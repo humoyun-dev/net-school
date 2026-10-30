@@ -13,6 +13,7 @@
     "@netschool/contracts": "workspace:*",
     "@netschool/domain": "workspace:*",
     "@netschool/meshcentral-adapter": "workspace:*",
+    "@netschool/session-gateway": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",

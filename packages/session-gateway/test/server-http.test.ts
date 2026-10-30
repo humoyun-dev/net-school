@@ -193,9 +193,10 @@ describe('gateway HTTP: redeem', () => {
   test('redeeming a second ticket closes the superseded session', async () => {
     const first = await login(1);
     const { ticket } = await broker.open(req(2));
+    const old = registry.get('rs-1');
     const res = await call(`/rs/redeem?ticket=${ticket}`, cookie(first));
     expect(res.status).toBe(303);
-    expect(registry.get('rs-1')?.closed).toBe(true);
+    expect(old?.closed).toBe(true);
     expect(registry.get('rs-2')?.closed).toBe(false);
     expect(fake.sessions[0]?.revokeCalls).toBe(1);
     expect(events.filter((e) => e.type === 'session_closed')).toEqual([
@@ -217,17 +218,22 @@ describe('gateway HTTP: redeem', () => {
   test('failed attach returns 502 and closes the session', async () => {
     const { ticket } = await broker.open(req(1));
     sess(0).attachError = new Error('login refused: secret-detail');
+    const session = registry.get('rs-1');
     const res = await call(`/rs/redeem?ticket=${ticket}`);
     expect(res.status).toBe(502);
     expect(res.body).not.toContain('secret-detail');
     expect(res.headers['set-cookie']).toBeUndefined();
-    expect(registry.get('rs-1')?.closed).toBe(true);
+    expect(session?.closed).toBe(true);
     await until(() => fake.sessions[0]?.revokeCalls === 1);
     expect(events).toContainEqual({
       type: 'upstream_error',
       sessionId: 'rs-1',
       message: 'login refused: secret-detail',
     });
+    // Gateway o'zi yopdi: tashqi (API) tomon DB sessiyasini ham yopishi uchun hodisa.
+    expect(events.filter((e) => e.type === 'session_closed')).toEqual([
+      { type: 'session_closed', sessionId: 'rs-1', reason: 'attach_failed' },
+    ]);
   });
 });
 

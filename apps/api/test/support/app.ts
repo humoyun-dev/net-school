@@ -4,6 +4,8 @@ import type { INestApplication, Type } from '@nestjs/common';
 import { makeCert } from '@netschool/test-support';
 import { createApp } from '../../src/app.ts';
 import type { DeviceManagementFactory } from '../../src/modules/devices/mesh.ts';
+import type { MeshLink } from '../../src/modules/health/health.controller.ts';
+import type { RemoteUpstream } from '../../src/modules/remote-sessions/remote-gateway.ts';
 import { createTestDb, type TestDb } from './db.ts';
 
 export interface TestResponse {
@@ -46,12 +48,19 @@ export async function startTestApp(
     controllers?: Type[];
     db?: TestDb;
     deviceManagement?: DeviceManagementFactory | null;
+    // Soxta remote upstream; berilmasa gateway o'chiq. Gateway listener'ini test o'zi ochadi (listen).
+    remote?: RemoteUpstream | null;
+    // Soxta MeshCentral ulanish holati (healthz); berilmasa `mesh: disabled`.
+    mesh?: MeshLink | null;
+    // Fon workerlari (haqiqiy taymer bilan); berilmasa o'chiq — testlar tick'ni qo'lda chaqiradi.
+    workers?: boolean;
   } = {},
 ): Promise<TestApp> {
   const db = opts.db ?? (await createTestDb());
   const cert = await makeCert('localhost');
   const port = await freePort();
   const origin = `https://localhost:${port}`;
+  const remote = opts.remote ?? null;
   const app: INestApplication = await createApp(
     {
       port,
@@ -59,14 +68,21 @@ export async function startTestApp(
       publicOrigin: origin,
       tls: cert,
       databaseUrl: 'unused',
-      mesh: null,
+      // Gateway upstream endpoint'i config.mesh'dan olinadi; soxta upstream bilan unga hech qachon ulanilmaydi.
+      mesh: remote
+        ? { url: 'wss://127.0.0.1:9/control.ashx', username: 'unused', password: 'unused', ca: cert.cert }
+        : null,
       meshInstanceId: 'local',
+      gateway: remote ? { port: 0, publicOrigin: 'https://localhost:8444' } : null,
     },
     {
       db: db.db,
       now: opts.now,
       controllers: opts.controllers,
       deviceManagement: opts.deviceManagement ?? null,
+      remote,
+      mesh: opts.mesh ?? null,
+      workers: opts.workers ?? false,
       logger: false,
     },
   );

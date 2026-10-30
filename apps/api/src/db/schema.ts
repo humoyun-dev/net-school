@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  pgSequence,
   pgTable,
   primaryKey,
   text,
@@ -507,3 +508,90 @@ export const idempotencyKeys = pgTable(
     index('idempotency_keys_created_at').on(t.createdAt),
   ],
 );
+
+export const remoteSessions = pgTable(
+  'remote_sessions',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id').notNull(),
+    roomId: uuid('room_id').notNull(),
+    lessonId: uuid('lesson_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    actorUserId: uuid('actor_user_id').notNull(),
+    mode: text('mode').notNull(),
+    status: text('status').notNull(),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    closeReason: text('close_reason'),
+    closedBy: uuid('closed_by'),
+  },
+  (t) => [
+    foreignKey({
+      name: 'remote_sessions_lesson_fk',
+      columns: [t.siteId, t.lessonId],
+      foreignColumns: [lessons.siteId, lessons.id],
+    }),
+    foreignKey({
+      name: 'remote_sessions_room_fk',
+      columns: [t.siteId, t.roomId],
+      foreignColumns: [rooms.siteId, rooms.id],
+    }),
+    foreignKey({
+      name: 'remote_sessions_device_fk',
+      columns: [t.siteId, t.deviceId],
+      foreignColumns: [devices.siteId, devices.id],
+    }),
+    foreignKey({
+      name: 'remote_sessions_actor_fk',
+      columns: [t.organizationId, t.actorUserId],
+      foreignColumns: [users.organizationId, users.id],
+    }),
+    // control_leases (session_id, device_id) FK nishoni.
+    unique('remote_sessions_id_device').on(t.id, t.deviceId),
+    check('remote_sessions_mode', sql`${t.mode} in ('view', 'control')`),
+    check('remote_sessions_status', sql`${t.status} in ('opening', 'active', 'closed')`),
+    check(
+      'remote_sessions_close_reason',
+      sql`${t.closeReason} in ('teacher', 'admin', 'lesson_ended', 'device_left', 'lease_expired', 'upstream_failed', 'restart', 'superseded')`,
+    ),
+    check(
+      'remote_sessions_closed_consistent',
+      sql`(${t.status} = 'closed') = (${t.closedAt} is not null and ${t.closeReason} is not null) and (${t.closedAt} is not null) = (${t.closeReason} is not null)`,
+    ),
+    // Faqat ochiq sessiyalar so'raladi: muddat sweep'i, dars yopilishi va qurilma chiqishi.
+    index('remote_sessions_open_expires').on(t.expiresAt).where(sql`${t.status} <> 'closed'`),
+    index('remote_sessions_open_lesson').on(t.lessonId).where(sql`${t.status} <> 'closed'`),
+    index('remote_sessions_open_device').on(t.deviceId).where(sql`${t.status} <> 'closed'`),
+  ],
+);
+
+// Bitta qurilmada bitta boshqaruv lease'i (primary key); fencing eski egasini rad etish uchun.
+export const controlLeases = pgTable(
+  'control_leases',
+  {
+    deviceId: uuid('device_id').primaryKey(),
+    organizationId: uuid('organization_id').notNull(),
+    sessionId: uuid('session_id').notNull().unique('control_leases_session'),
+    fencing: bigint('fencing', { mode: 'number' }).notNull(),
+    acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // Lease faqat o'z sessiyasining qurilmasi uchun bo'lishi mumkin.
+    foreignKey({
+      name: 'control_leases_session_fk',
+      columns: [t.sessionId, t.deviceId],
+      foreignColumns: [remoteSessions.id, remoteSessions.deviceId],
+    }),
+    foreignKey({
+      name: 'control_leases_device_fk',
+      columns: [t.organizationId, t.deviceId],
+      foreignColumns: [devices.organizationId, devices.id],
+    }),
+  ],
+);
+
+// Global monoton fencing token'lar (lease olinganda nextval).
+export const controlFencingSeq = pgSequence('control_fencing_seq');
