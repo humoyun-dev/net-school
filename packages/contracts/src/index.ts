@@ -4,5 +4,6 @@ export * from './api/v1/commands.ts';
 export * from './api/v1/devices.ts';
 export * from './api/v1/lessons.ts';
 export * from './api/v1/organization.ts';
+export * from './api/v1/remote-sessions.ts';
 export * from './api/v1/users.ts';
 export * from './capabilities.ts';

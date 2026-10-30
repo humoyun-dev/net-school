@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { lessonSchema } from './lessons.ts';
+import { remoteSessionSchema } from './remote-sessions.ts';
 
 const timestamp = z.iso.datetime({ offset: true });
 
@@ -85,7 +86,14 @@ export type ReceiptRequest = z.infer<typeof receiptRequestSchema>;
 
 export const eventSchema = z.object({
   seq: z.string(),
-  type: z.enum(['lesson.started', 'lesson.ended', 'command.created', 'command.target_updated']),
+  type: z.enum([
+    'lesson.started',
+    'lesson.ended',
+    'command.created',
+    'command.target_updated',
+    'remote_session.opened',
+    'remote_session.closed',
+  ]),
   at: timestamp,
   lessonId: z.uuid().nullable(),
   data: z.record(z.string(), z.unknown()),
@@ -95,7 +103,13 @@ export type Event = z.infer<typeof eventSchema>;
 export const eventsResponseSchema = z.object({
   cursor: z.string(),
   resync: z.boolean(),
-  snapshot: z.object({ lesson: lessonSchema.nullable(), commands: z.array(commandSchema) }).optional(),
+  snapshot: z
+    .object({
+      lesson: lessonSchema.nullable(),
+      commands: z.array(commandSchema),
+      remoteSessions: z.array(remoteSessionSchema),
+    })
+    .optional(),
   events: z.array(eventSchema),
 });
 export type EventsResponse = z.infer<typeof eventsResponseSchema>;
