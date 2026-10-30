@@ -16,7 +16,7 @@ import {
   remoteAction,
   type UpstreamDeviceRef,
 } from '@netschool/domain';
-import { and, asc, eq, gt, isNull, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
 import { Access, type AuditTarget } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isUuid } from '../../common/db-errors.ts';
@@ -117,6 +117,7 @@ export class RemoteSessionsService {
     @Inject(RemoteGateway) private readonly gateway: RemoteGateway,
   ) {
     gateway.onSessionEnded((sessionId, reason) => void this.#closeEnded(sessionId, reason));
+    outbox.onSessionsClosed((sessionIds) => void this.#dropClosed(sessionIds));
   }
 
   // Darvoza tartibi: ruxsat → a'zolik (403) → MeshCentral sozlanganligi → capability → agent online → lease.
@@ -478,6 +479,24 @@ export class RemoteSessionsService {
       this.#log.error(
         `Closing remote session ${sessionId} (${reason}) failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+
+  // Commit bo'lgan yopilishlar: gateway soketlari outbox tick'ini kutmaydi (osilgan revoke ularni ushlamaydi).
+  // DB'da hali yopilmagan id (boshqa so'rovning tranzaksiyasi commit bo'lmagan) navbatga qaytadi.
+  async #dropClosed(sessionIds: string[]): Promise<void> {
+    try {
+      const rows = await this.db
+        .select({ id: remoteSessions.id })
+        .from(remoteSessions)
+        .where(and(inArray(remoteSessions.id, sessionIds), eq(remoteSessions.status, 'closed')));
+      const closed = new Set(rows.map((r) => r.id));
+      for (const id of closed) this.gateway.drop(id);
+      const pending = sessionIds.filter((id) => !closed.has(id));
+      if (pending.length > 0) this.outbox.sessionsClosed(pending);
+    } catch (err) {
+      // Soketlar baribir outbox `remote.revoke`da yopiladi.
+      this.#log.warn(`Dropping closed remote sessions failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

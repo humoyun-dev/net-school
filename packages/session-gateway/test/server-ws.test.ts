@@ -597,14 +597,15 @@ describe('gateway WS: disconnect', () => {
     const value = await login(1);
     const browser = await openBrowser(value);
     await until(() => conns.length === 1);
-    expect(registry.get('rs-1')?.sockets.size).toBe(1);
+    const session = registry.get('rs-1');
+    expect(session?.sockets.size).toBe(1);
 
     const started = Date.now();
     await registry.close('rs-1', 'revoked');
     await until(() => browser.closeCode() !== undefined && conn(0).closed, 1000);
     expect(Date.now() - started).toBeLessThan(1000);
     expect(browser.closeCode()).toBe(1008);
-    await until(() => registry.get('rs-1')?.sockets.size === 0, 1000);
+    await until(() => session?.sockets.size === 0, 1000);
     expect(sess(0).revokeCalls).toBe(1);
   });
 
@@ -647,12 +648,13 @@ describe('gateway WS: disconnect', () => {
     const browser = await openBrowser(value);
     await until(() => conns.length === 1);
     browser.ws.pause(); // close kadri o'qilmaydi, javob ham yo'q
+    const session = registry.get('rs-1');
     await registry.close('rs-1', 'revoked');
     await until(() => conn(0).closed, 500); // upstream kutilmaydi
     expect(browser.closeCode()).toBeUndefined();
     await tick(300);
-    expect(registry.get('rs-1')?.sockets.size).toBe(1); // 1 s kutiladi
-    await until(() => registry.get('rs-1')?.sockets.size === 0, 2000); // gateway tomoni soketni uzdi
+    expect(session?.sockets.size).toBe(1); // 1 s kutiladi
+    await until(() => session?.sockets.size === 0, 2000); // gateway tomoni soketni uzdi
   });
 
   test('upstream close closes the browser socket and propagates a valid code', async () => {
@@ -687,10 +689,11 @@ describe('gateway WS: disconnect', () => {
     upgradeDelayMs = 300;
     const value = await login(1);
     const browser = await openBrowser(value);
+    const session = registry.get('rs-1');
     await registry.close('rs-1', 'revoked');
     await until(() => browser.closeCode() !== undefined, 1000);
     expect(browser.closeCode()).toBe(1008);
-    expect(registry.get('rs-1')?.sockets.size).toBe(0);
+    expect(session?.sockets.size).toBe(0);
     await tick(450); // kechikkan upstream upgrade tugasa ham hech narsa ulanib qolmaydi
     for (const c of conns) await until(() => c.closed, 1000);
     expect(events.filter((e) => e.type === 'upstream_error')).toEqual([]);

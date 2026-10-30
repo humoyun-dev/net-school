@@ -55,6 +55,9 @@ export interface OutboxPayload {
 @Injectable()
 export class Outbox {
   #onKick: (() => void) | undefined;
+  #onSessionsClosed: ((sessionIds: string[]) => void) | undefined;
+  // Tranzaksiyada yopilgan masofaviy sessiyalar: navbatdagi kick() ularni uzatadi.
+  readonly #closedSessions = new Set<string>();
 
   constructor(@Inject(CLOCK) private readonly now: Clock) {}
 
@@ -65,12 +68,29 @@ export class Outbox {
 
   // Shoshilinch qatorlar (remote.revoke) yozilgan tranzaksiya commit bo'lgach chaqiriladi: worker intervalni kutmaydi.
   // Tranzaksiya ichida chaqirilmaydi — commit'gacha worker qatorni ko'rmaydi.
+  // Yopilgan sessiyalar ham shu yerda uzatiladi: ularning gateway soketlari outbox tick'ini kutmaydi.
   kick(): void {
+    if (this.#closedSessions.size > 0) {
+      const ids = [...this.#closedSessions];
+      this.#closedSessions.clear();
+      this.#onSessionsClosed?.(ids);
+    }
     this.#onKick?.();
   }
 
   // OutboxWorker o'zini ulaydi (modul sikli bo'lmasligi uchun xizmatlar worker'ni emas, Outbox'ni biladi).
   onKick(listener: () => void): void {
     this.#onKick = listener;
+  }
+
+  // closeRemoteSessions tranzaksiya ichida chaqiradi; commit'ni kick() bildiradi. Boshqa so'rovning kick'i id'ni
+  // commit'dan oldin olishi mumkin — tinglovchi DB'da yopilganini tekshiradi va yopilmaganini qaytaradi.
+  sessionsClosed(sessionIds: Iterable<string>): void {
+    for (const id of sessionIds) this.#closedSessions.add(id);
+  }
+
+  // RemoteSessionsService ulanadi (gateway soketlarini lokal uzadi).
+  onSessionsClosed(listener: (sessionIds: string[]) => void): void {
+    this.#onSessionsClosed = listener;
   }
 }
