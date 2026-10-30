@@ -4,7 +4,13 @@ import { CLOCK, type Clock } from '../../common/clock.ts';
 import type { Db } from '../../db/client.ts';
 import { events, outbox } from '../../db/schema.ts';
 
-export type EventType = 'lesson.started' | 'lesson.ended' | 'command.created' | 'command.target_updated';
+export type EventType =
+  | 'lesson.started'
+  | 'lesson.ended'
+  | 'command.created'
+  | 'command.target_updated'
+  | 'remote_session.opened'
+  | 'remote_session.closed';
 
 export interface NewEvent {
   organizationId: string;

@@ -18,6 +18,7 @@ import {
   sites,
   users,
 } from '../src/db/schema.ts';
+import { takeControlLease } from '../src/modules/remote-sessions/remote-sessions.service.ts';
 import { createTestDb, type TestDb } from './support/db.ts';
 
 let t: TestDb;
@@ -589,5 +590,26 @@ describe('lesson invariants', () => {
       t.db.execute(sql`insert into control_leases (device_id, organization_id, session_id, fencing, acquired_at, expires_at)
         values (${d.id}, ${s.orgId}, ${sess.id}, nextval('control_fencing_seq'), now(), now() + interval '30 seconds')`),
     ).resolves.toBeDefined();
+  });
+
+  test('an expired lease is taken over by another session of the device', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const at = new Date(1_800_000_000_000);
+    const take = (sessionId: string, now: Date) =>
+      takeControlLease(t.db, { deviceId: d.id, organizationId: s.orgId, sessionId, at: now });
+    const first = await session(s, l, d);
+    const second = await session(s, l, d);
+    const held = await take(first.id, at);
+    expect(held).not.toBeNull();
+    // Muddati o'tmagan lease boshqa sessiyaga o'tmaydi.
+    expect(await take(second.id, new Date(at.getTime() + 29_999))).toBeNull();
+    // Composite FK (session_id, device_id) yangi sessiya qatoriga o'tadi; fencing o'sadi.
+    const taken = await take(second.id, new Date(at.getTime() + 30_000));
+    expect(taken?.fencing).toBeGreaterThan(held?.fencing ?? Number.POSITIVE_INFINITY);
+    const rows = await t.db.select().from(controlLeases);
+    expect(rows).toEqual([expect.objectContaining({ deviceId: d.id, sessionId: second.id, fencing: taken?.fencing })]);
+    expect(rows[0]?.expiresAt.getTime()).toBe(at.getTime() + 60_000);
   });
 });

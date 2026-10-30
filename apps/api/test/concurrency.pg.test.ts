@@ -1,13 +1,15 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import { commandTargets, events, lessons, outbox } from '../src/db/schema.ts';
+import { commandTargets, controlLeases, events, lessons, outbox, remoteSessions, sites } from '../src/db/schema.ts';
 import { EventLog } from '../src/modules/events/event-log.ts';
 import { OutboxWorker } from '../src/modules/workers/outbox.worker.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { setCapabilities, setHeartbeat } from './support/caps.ts';
 import { type DeviceKey, deviceRequest, makeDeviceKey, seedDevice } from './support/device.ts';
-import { issueCommand, startLesson } from './support/lesson.ts';
+import { idem, issueCommand, startLesson } from './support/lesson.ts';
 import { loginAs } from './support/login.ts';
+import { FakeMesh } from './support/mesh.ts';
+import { FakeRemote, seedBinding } from './support/remote.ts';
 import { seedOrg, seedRoom, seedUser } from './support/seed.ts';
 
 // Faqat real PostgreSQL'da (CI: TEST_DATABASE_URL): PGlite bitta ulanishda tranzaksiyalarni ketma-ket bajaradi.
@@ -22,21 +24,38 @@ describe.skipIf(!realPg)('concurrency on real PostgreSQL', () => {
   let roomId: string;
   let teacher: string;
   let device: { id: string; key: DeviceKey };
+  const mesh = new FakeMesh();
+  const remote = new FakeRemote();
 
   beforeAll(async () => {
-    app = await startTestApp({ now: () => now });
+    app = await startTestApp({ now: () => now, deviceManagement: mesh.factory, remote: remote.upstream });
   });
   beforeEach(async () => {
     await app.db.reset();
     ({ orgId, siteId } = await seedOrg(app.db.db));
     roomId = await seedRoom(app.db.db, orgId, siteId, '101');
-    await seedUser(app.db.db, orgId, 'teacher1', [{ role: 'teacher', siteId }], { roomIds: [roomId] });
+    const teacherId = await seedUser(app.db.db, orgId, 'teacher1', [{ role: 'teacher', siteId }], {
+      roomIds: [roomId],
+    });
     teacher = await loginAs(app, 'teacher1');
     const key = makeDeviceKey();
     const id = await seedDevice(app.db.db, orgId, siteId, key.publicKey, { roomId });
     await setCapabilities(app.db.db, orgId, id, { 'classroom.message': { state: 'available' } });
     await setHeartbeat(app.db.db, id, now);
     device = { id, key };
+    // MeshCentral'da bog'langan, agenti online qurilma (remote sessiya darvozasi uchun).
+    await app.db.db.update(sites).set({ meshDomainId: 'dom-a' }).where(eq(sites.id, siteId));
+    await seedBinding(app.db.db, {
+      orgId,
+      siteId,
+      deviceId: id,
+      meshDomainId: 'dom-a',
+      meshNodeId: 'node-1',
+      boundBy: teacherId,
+    });
+    mesh.nodes.clear();
+    mesh.nodes.set('node-1', { domain: 'dom-a', name: 'pc', online: true });
+    remote.reset();
   });
   afterAll(async () => {
     await app?.close();
@@ -148,5 +167,24 @@ describe.skipIf(!realPg)('concurrency on real PostgreSQL', () => {
     const [after] = await app.db.db.select().from(outbox).where(eq(outbox.id, row.id));
     expect(after).toMatchObject({ attempts: 1, lastError: null });
     expect(after?.processedAt?.getTime()).toBe(now);
+  });
+
+  test('control lease is exclusive under concurrency', async () => {
+    const lesson = (await startLesson(app, teacher, roomId)).json;
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        app.request('POST', `/api/v1/lessons/${lesson.id}/remote-sessions`, {
+          body: { deviceId: device.id, mode: 'control' },
+          cookie: teacher,
+          headers: idem(),
+        }),
+      ),
+    );
+    const statuses = results.map((r) => (r.status === 201 ? 201 : `${r.status}/${r.json.error.code}`)).sort();
+    expect(statuses).toEqual([201, '409/control_busy', '409/control_busy', '409/control_busy', '409/control_busy']);
+    const winner = results.find((r) => r.status === 201)?.json;
+    expect(await app.db.db.select().from(remoteSessions)).toEqual([expect.objectContaining({ id: winner.id })]);
+    expect(await app.db.db.select().from(controlLeases)).toEqual([expect.objectContaining({ sessionId: winner.id })]);
+    expect(remote.opened.map((o) => o.sessionId)).toEqual([winner.id]);
   });
 });
