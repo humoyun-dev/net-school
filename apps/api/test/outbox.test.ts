@@ -225,6 +225,35 @@ describe('outbox worker', () => {
     expect(await rowOf(second.id)).toMatchObject({ attempts: 2, lastError: null });
   });
 
+  test('a batch runs at most 16 handlers at once', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    worker.register('test.pool', async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await gate;
+      inFlight -= 1;
+    });
+    for (let i = 0; i < 20; i++) await enqueue('test.pool');
+    let settled = false;
+    const ticking = worker.tick(now).then((n) => {
+      settled = true;
+      return n;
+    });
+    await eventually(async () => inFlight === 16);
+    await sleep(50);
+    expect(peak).toBe(16);
+    expect(settled).toBe(false);
+    release();
+    // Tick barcha boshlangan handler'lar tugagach qaytadi.
+    expect(await ticking).toBe(20);
+    expect(peak).toBe(16);
+  });
+
   test('kick runs a tick without waiting for the interval', async () => {
     let calls = 0;
     worker.register('test.kick', () => {

@@ -361,6 +361,42 @@ describe('revoking remote sessions', () => {
     }
   });
 
+  test('a hanging revoke does not delay other sessions', async () => {
+    const [d1, d2] = [await device(), await device()];
+    const lesson = await lessonIn();
+    const first = (await open(app, teacher, lesson.id, { deviceId: d1, mode: 'view' })).json;
+    const second = (await open(app, teacher, lesson.id, { deviceId: d2, mode: 'view' })).json;
+    const hanging = remote.sessions.get(first.id);
+    if (!hanging) throw new Error('upstream session');
+    let release!: () => void;
+    hanging.revokeHold = new Promise<void>((r) => {
+      release = r;
+    });
+    // Birinchi sessiyaning revoke qatori batch'da oldinroq.
+    expect((await close(teacher, first.id)).status).toBe(204);
+    expect((await close(teacher, second.id)).status).toBe(204);
+
+    let settled = false;
+    const ticking = outboxTick().then((n) => {
+      settled = true;
+      return n;
+    });
+    const began = Date.now();
+    while (gateway().isOpen(second.id)) {
+      if (Date.now() - began > 2_000) throw new Error('second session was not revoked within 2 s');
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(Date.now() - began).toBeLessThanOrEqual(2_000);
+    expect(remote.sessions.get(second.id)?.revokeCalls).toBe(1);
+    // Birinchisi hali osilgan: tick barcha boshlangan handler'lar tugashini kutadi.
+    expect(hanging.revokeCalls).toBe(1);
+    expect(settled).toBe(false);
+    release();
+    await ticking;
+    const rows = await revokeRows();
+    expect(rows.every((r) => r.processedAt !== null)).toBe(true);
+  });
+
   test('a hanging revoke fails within its timeout', async () => {
     const d = await device();
     const lesson = await lessonIn();
