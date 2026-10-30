@@ -57,6 +57,11 @@ const ownSite: [Action, Target, Who[]][] = [
   ['lesson.end', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
   ['command.issue', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
   ['command.issue', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
+  ['remote.view', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
+  ['remote.view', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
+  ['remote.control', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
+  ['remote.control', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
+  ['remote.manage', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin']],
 ];
 
 const cases = ownSite.flatMap(([action, target, allowed]) =>
@@ -142,6 +147,34 @@ describe('authorize', () => {
     expect(authorize(actors.itSupport, 'command.read', own).allowed).toBe(true);
     expect(authorize(actors.itSupport, 'command.issue', own).allowed).toBe(false);
     expect(authorize(actors.itSupport, 'lesson.start', own).allowed).toBe(false);
+  });
+
+  test('teacher opens remote sessions only in own lesson', () => {
+    const own = site(SITE, { roomId: 'room-assigned', ownerUserId: 'u' });
+    for (const action of ['remote.view', 'remote.control'] as const) {
+      expect(authorize(actors.teacher, action, own).allowed, action).toBe(true);
+      // Boshqa xona, boshqa egasi yoki egasi berilmagan — rad.
+      expect(authorize(actors.teacher, action, { ...own, roomId: 'room-other' }).allowed, action).toBe(false);
+      expect(authorize(actors.teacher, action, { ...own, ownerUserId: 'someone-else' }).allowed, action).toBe(false);
+      expect(authorize(actors.teacher, action, site(SITE, { roomId: 'room-assigned' })).allowed, action).toBe(false);
+    }
+  });
+
+  test('it_support cannot open lesson remote sessions', () => {
+    const own = site(SITE, { roomId: 'room-assigned', ownerUserId: 'u' });
+    for (const action of ['remote.view', 'remote.control', 'remote.manage'] as const) {
+      expect(authorize(actors.itSupport, action, own).allowed, action).toBe(false);
+      expect(authorize(actors.student, action, own).allowed, action).toBe(false);
+    }
+  });
+
+  test('only admins manage other sessions', () => {
+    const foreign = site(SITE, { roomId: 'room-assigned', ownerUserId: 'someone-else' });
+    expect(authorize(actors.orgAdmin, 'remote.manage', foreign).allowed).toBe(true);
+    expect(authorize(actors.siteAdmin, 'remote.manage', foreign).allowed).toBe(true);
+    // Teacher o'z darsida ham boshqa sessiyani yopa olmaydi.
+    expect(authorize(actors.teacher, 'remote.manage', { ...foreign, ownerUserId: 'u' }).allowed).toBe(false);
+    expect(authorize(actors.teacher, 'remote.manage', foreign).allowed).toBe(false);
   });
 
   test('actor without assignments is denied everything', () => {
