@@ -9,6 +9,7 @@ services:
       NETSCHOOL_DB_PASSWORD_FILE: /run/secrets/netschool_db_password
       MESHCENTRAL_DB_PASSWORD_FILE: /run/secrets/meshcentral_db_password
     secrets: [postgres_superuser_password, netschool_db_password, meshcentral_db_password]
+    networks: [hub]
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -30,7 +31,11 @@ services:
       MESHCENTRAL_CERT_NAME: meshcentral
       # entrypoint.sh shu parol bilan `netschool-svc` service account'ini (yo'q bo'lsa) yaratadi.
       MESHCENTRAL_SERVICE_PASSWORD_FILE: /run/secrets/meshcentral_service_password
+      # Gateway (api) manzili: X-Forwarded-For faqat shu IP'dan ishoniladi. DNS nomi emas — MeshCentral uni
+      # faqat ishga tushishda aniqlaydi, api esa undan keyin ko'tariladi.
+      MESHCENTRAL_TRUSTED_PROXY: ${API_IP:-172.31.250.10}
     secrets: [meshcentral_db_password, meshcentral_service_password]
+    networks: [hub]
     volumes:
       - meshcentral-data:/opt/meshcentral/meshcentral-data
       - meshcentral-files:/opt/meshcentral/meshcentral-files
@@ -64,6 +69,7 @@ services:
     environment:
       DATABASE_URL_FILE: /run/secrets/netschool_database_url
     secrets: [netschool_database_url]
+    networks: [hub]
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,6 +93,10 @@ services:
       GATEWAY_PORT: "8444"
       GATEWAY_PUBLIC_ORIGIN: ${GATEWAY_PUBLIC_ORIGIN:?GATEWAY_PUBLIC_ORIGIN is required, e.g. https://hub.school.lan:8444}
     secrets: [api_tls_cert, api_tls_key, netschool_database_url, meshcentral_service_password]
+    networks:
+      hub:
+        # Qat'iy manzil: meshcentral `trustedProxy` shu IP (MESHCENTRAL_TRUSTED_PROXY).
+        ipv4_address: ${API_IP:-172.31.250.10}
     volumes:
       - meshcentral-ca:/run/meshcentral-ca:ro
     ports:
@@ -100,6 +110,16 @@ services:
       meshcentral:
         condition: service_healthy
     restart: unless-stopped
+
+networks:
+  # Qat'iy subnet: api IP'si (gateway) MeshCentral'da trusted proxy. Maktab LAN'i bilan to'qnashsa HUB_SUBNET,
+  # HUB_DYNAMIC_RANGE va API_IP ni .env'da birga almashtiring: API_IP subnet ichida, lekin dinamik diapazondan tashqarida
+  # (aks holda boshqa konteyner, masalan `compose run`, shu manzilni olib qo'yishi mumkin).
+  hub:
+    ipam:
+      config:
+        - subnet: ${HUB_SUBNET:-172.31.250.0/24}
+          ip_range: ${HUB_DYNAMIC_RANGE:-172.31.250.128/25}
 
 secrets:
   postgres_superuser_password:
