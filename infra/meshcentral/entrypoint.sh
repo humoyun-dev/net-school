@@ -17,7 +17,9 @@ account() { mc --showitem "user//$SVC_USER"; }
 case "$(account)" in
   *"\"_id\": \"user//$SVC_USER\""*) ;;
   *)
-    pass=$(cat "$MESHCENTRAL_SERVICE_PASSWORD_FILE")
+    # api (config.ts `*_FILE`) bilan bir xil: boshi va oxiridagi bo'sh joy (\r ham) String.prototype.trim() bilan kesiladi.
+    pass=$(node -e 'process.stdout.write(require("node:fs").readFileSync(process.argv[1], "utf8").trim())' \
+      "$MESHCENTRAL_SERVICE_PASSWORD_FILE")
     [ -n "$pass" ] || { echo "netschool: MESHCENTRAL_SERVICE_PASSWORD_FILE is empty" >&2; exit 1; }
     # `--pass=` shakli: minimist `--pass -…` ni flag deb o'qimasin.
     mc --createaccount "$SVC_USER" --pass="$pass" --email "$SVC_USER@netschool.invalid" >/dev/null

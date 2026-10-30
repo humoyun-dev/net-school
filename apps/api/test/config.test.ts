@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { loadConfig } from '../src/config/config.ts';
 
@@ -48,5 +51,27 @@ describe('gateway config', () => {
     const config = loadConfig({ ...base, GATEWAY_PUBLIC_ORIGIN: 'https://hub.school.lan:8444', GATEWAY_PORT: '8443' });
     expect(config.mesh).toBeNull();
     expect(config.gateway).toBeNull();
+  });
+});
+
+describe('secret files', () => {
+  // MeshCentral entrypoint.sh service parolini xuddi shunday (trim) o'qiydi: ikki tomon bir xil parolni ko'radi.
+  test('*_FILE values are trimmed of surrounding whitespace including CR', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ns-config-'));
+    try {
+      const file = join(dir, 'meshcentral_service_password');
+      writeFileSync(file, ' \tmc-secret value\r\n\n');
+      const { MESHCENTRAL_PASSWORD: _, ...env } = mesh;
+      const config = loadConfig({
+        ...env,
+        MESHCENTRAL_PASSWORD_FILE: file,
+        GATEWAY_PUBLIC_ORIGIN: 'https://hub.school.lan:8444',
+      });
+      expect(config.mesh?.password).toBe('mc-secret value');
+      writeFileSync(file, ' \r\n');
+      expect(problemsOf({ ...env, MESHCENTRAL_PASSWORD_FILE: file })).toMatch(/MESHCENTRAL_PASSWORD is required/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -46,4 +46,15 @@ Parolni tiklash (oflayn): `docker compose run --rm api-migrate node dist/cli.mjs
 ## Cheklovlar
 
 - MeshCentral `autoBackup` o'chiq: backup rejasi (NetSchool DB + MeshCentral DB + MeshCentral data/sertifikatlar) alohida vazifa (spec §13).
-- `secrets/meshcentral_service_password` ni almashtirish mavjud account parolini o'zgartirmaydi: avval MeshCentral'da (`--resetaccount netschool-svc --pass=…`, server to'xtagan holatda) yangilang, keyin faylni.
+- `secrets/meshcentral_service_password` ni almashtirish mavjud account parolini o'zgartirmaydi (entrypoint account'ni faqat yo'q bo'lsa yaratadi). Parol MeshCentral to'xtagan holatda CLI bilan yangilanadi; image `ENTRYPOINT` argumentlarni e'tiborsiz qoldiradi, shuning uchun `--entrypoint node`:
+
+  ```sh
+  docker compose stop api meshcentral
+  # Avval yangi parol (min 16, har sinfdan 1) secrets/meshcentral_service_password ga yoziladi (boshi/oxirida bo'sh joysiz).
+  docker compose run --rm --entrypoint node meshcentral meshcentral.js \
+    --datapath /opt/meshcentral/meshcentral-data --resetaccount netschool-svc \
+    --pass="$(tr -d '\r\n' < secrets/meshcentral_service_password)"
+  docker compose up -d
+  ```
+
+  CLI xatoda ham 0 bilan chiqadi: `api` loglarida MeshCentral'ga ulanish xatosi yo'qligini tekshiring.

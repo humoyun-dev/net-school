@@ -9,8 +9,8 @@ import { type MeshCentralInstance, startMeshCentral } from './harness/meshcentra
 
 // Revoke chegarasi (global constraints): yopilish commit'idan keyin soketlar va principal ≤ 2 s.
 const REVOKE_BUDGET_MS = 2_000;
-// Reconciler'ning birinchi qayta urinishi (5 s) va ro'yxatlash/o'chirish uchun zaxira.
-const RETRY_BUDGET_MS = 10_000;
+// Reconciler qayta urinishlari (har 5 s): bitta urinish o'tkazib yuborilsa ham ro'yxatlash/o'chirish sig'adi.
+const RETRY_BUDGET_MS = 20_000;
 
 let mc: MeshCentralInstance;
 let api: ApiInstance;
