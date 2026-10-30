@@ -5,12 +5,14 @@ import {
   auditEvents,
   commands,
   commandTargets,
+  controlLeases,
   devices,
   enrollments,
   lessonDevices,
   lessons,
   meshBindings,
   organizations,
+  remoteSessions,
   roleAssignments,
   rooms,
   sites,
@@ -407,5 +409,155 @@ describe('lesson invariants', () => {
         expiresAt: new Date(),
       }),
     );
+  });
+
+  const session = (
+    s: S,
+    l: { id: string },
+    d: { id: string },
+    extra: Partial<typeof remoteSessions.$inferInsert> = {},
+  ) =>
+    t.db
+      .insert(remoteSessions)
+      .values({
+        organizationId: s.orgId,
+        siteId: s.siteId,
+        roomId: s.roomId,
+        lessonId: l.id,
+        deviceId: d.id,
+        actorUserId: s.teacherId,
+        mode: 'control',
+        status: 'active',
+        openedAt: new Date(),
+        expiresAt: new Date(Date.now() + 30_000),
+        ...extra,
+      })
+      .returning()
+      .then(([row]) => {
+        if (!row) throw new Error('session');
+        return row;
+      });
+
+  const nextFencing = async () => {
+    const res = (await t.db.execute(sql`select nextval('control_fencing_seq')::text as v`)) as unknown as {
+      rows: { v: string }[];
+    };
+    return BigInt(res.rows[0]?.v ?? '');
+  };
+
+  test('a device has at most one control lease', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const first = await session(s, l, d);
+    const second = await session(s, l, d, { mode: 'view' });
+    const lease = (sessionId: string) =>
+      t.db.insert(controlLeases).values({
+        deviceId: d.id,
+        organizationId: s.orgId,
+        sessionId,
+        fencing: 1,
+        acquiredAt: new Date(),
+        expiresAt: new Date(Date.now() + 30_000),
+      });
+    await lease(first.id);
+    await rejects(lease(second.id));
+    // Bitta sessiya ikkita qurilmada lease ushlay olmaydi.
+    const other = await device(s);
+    await rejects(
+      t.db.insert(controlLeases).values({
+        deviceId: other.id,
+        organizationId: s.orgId,
+        sessionId: first.id,
+        fencing: 2,
+        acquiredAt: new Date(),
+        expiresAt: new Date(Date.now() + 30_000),
+      }),
+    );
+  });
+
+  test('remote session mode, status and reason are constrained', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    await rejects(session(s, l, d, { mode: 'shell' }));
+    await rejects(session(s, l, d, { status: 'paused' }));
+    await rejects(
+      session(s, l, d, { status: 'closed', closedAt: new Date(), closeReason: 'because', closedBy: s.teacherId }),
+    );
+    for (const reason of [
+      'teacher',
+      'admin',
+      'lesson_ended',
+      'device_left',
+      'lease_expired',
+      'upstream_failed',
+      'restart',
+    ]) {
+      await expect(
+        session(s, l, d, { status: 'closed', closedAt: new Date(), closeReason: reason }),
+      ).resolves.toBeDefined();
+    }
+    for (const mode of ['view', 'control']) {
+      for (const status of ['opening', 'active']) {
+        await expect(session(s, l, d, { mode, status })).resolves.toBeDefined();
+      }
+    }
+  });
+
+  test('closed session must have closed_at and reason', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    await rejects(session(s, l, d, { status: 'closed' }));
+    await rejects(session(s, l, d, { status: 'closed', closedAt: new Date() }));
+    await rejects(session(s, l, d, { status: 'closed', closeReason: 'teacher' }));
+    await rejects(session(s, l, d, { status: 'active', closedAt: new Date() }));
+    await rejects(session(s, l, d, { status: 'opening', closeReason: 'teacher' }));
+    await expect(
+      session(s, l, d, { status: 'closed', closedAt: new Date(), closeReason: 'teacher' }),
+    ).resolves.toBeDefined();
+    const open = await session(s, l, d);
+    await rejects(t.db.update(remoteSessions).set({ status: 'closed' }).where(sql`${remoteSessions.id} = ${open.id}`));
+    await expect(
+      t.db
+        .update(remoteSessions)
+        .set({ status: 'closed', closedAt: new Date(), closeReason: 'device_left' })
+        .where(sql`${remoteSessions.id} = ${open.id}`),
+    ).resolves.toBeDefined();
+  });
+
+  test('remote session device belongs to the lesson site', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const far = await device(s, s.site2Id);
+    await rejects(session(s, l, far));
+    await rejects(session(s, l, far, { siteId: s.site2Id }));
+    const near = await device(s);
+    await expect(session(s, l, near)).resolves.toBeDefined();
+    // Boshqa tashkilot foydalanuvchisi actor bo'la olmaydi.
+    const other = await org('other');
+    const [stranger] = await t.db
+      .insert(users)
+      .values({ organizationId: other.orgId, username: 'stranger', displayName: 'S', passwordHash: 'x' })
+      .returning();
+    if (!stranger) throw new Error('user');
+    await rejects(session(s, l, near, { actorUserId: stranger.id }));
+  });
+
+  test('fencing values increase', async () => {
+    const a = await nextFencing();
+    const b = await nextFencing();
+    const c = await nextFencing();
+    expect(b).toBeGreaterThan(a);
+    expect(c).toBeGreaterThan(b);
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const sess = await session(s, l, d);
+    await expect(
+      t.db.execute(sql`insert into control_leases (device_id, organization_id, session_id, fencing, acquired_at, expires_at)
+        values (${d.id}, ${s.orgId}, ${sess.id}, nextval('control_fencing_seq'), now(), now() + interval '30 seconds')`),
+    ).resolves.toBeDefined();
   });
 });

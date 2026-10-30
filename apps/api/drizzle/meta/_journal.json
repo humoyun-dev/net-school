@@ -50,6 +50,13 @@
       "when": 1793198863433,
       "tag": "0006_maintenance_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793353056770,
+      "tag": "0007_remote_sessions",
+      "breakpoints": true
     }
   ]
 }
