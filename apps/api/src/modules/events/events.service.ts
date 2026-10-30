@@ -8,6 +8,7 @@ import { DB, type Db } from '../../db/client.ts';
 import { commands, events, lessons, rooms } from '../../db/schema.ts';
 import { CommandsService } from '../commands/commands.service.ts';
 import { LessonsService } from '../lessons/lessons.service.ts';
+import { RemoteSessionsService } from '../remote-sessions/remote-sessions.service.ts';
 import { type Notifier, ROOM_NOTIFIER } from './notifier.ts';
 
 const PAGE = 500;
@@ -23,6 +24,7 @@ export class EventsService {
     @Inject(Access) private readonly access: Access,
     @Inject(LessonsService) private readonly lessons: LessonsService,
     @Inject(CommandsService) private readonly commands: CommandsService,
+    @Inject(RemoteSessionsService) private readonly remoteSessions: RemoteSessionsService,
     @Inject(ROOM_NOTIFIER) private readonly notifier: Notifier,
   ) {}
 
@@ -98,8 +100,11 @@ export class EventsService {
     return {
       cursor,
       resync: true,
-      // remoteSessions: Task 10 to'ldiradi (hozircha bo'sh).
-      snapshot: { lesson: await this.lessons.view(this.db, lesson), commands: views, remoteSessions: [] },
+      snapshot: {
+        lesson: await this.lessons.view(this.db, lesson),
+        commands: views,
+        remoteSessions: await this.remoteSessions.openOfLesson(this.db, lesson.id),
+      },
       events: [],
     };
   }
