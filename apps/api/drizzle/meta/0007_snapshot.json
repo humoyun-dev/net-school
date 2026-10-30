@@ -1,5 +1,5 @@
 {
-  "id": "003dca06-e26e-4c36-a4dd-a2778cc6782e",
+  "id": "8dea5f0f-d39b-49a8-972d-166b86fc4379",
   "prevId": "60a1a355-fd76-4dd7-a6f6-7eca5bf63600",
   "version": "7",
   "dialect": "postgresql",
@@ -635,9 +635,26 @@
           "tableFrom": "control_leases",
           "tableTo": "remote_sessions",
           "columnsFrom": [
-            "session_id"
+            "session_id",
+            "device_id"
           ],
           "columnsTo": [
+            "id",
+            "device_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "control_leases_device_fk": {
+          "name": "control_leases_device_fk",
+          "tableFrom": "control_leases",
+          "tableTo": "devices",
+          "columnsFrom": [
+            "organization_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "organization_id",
             "id"
           ],
           "onDelete": "no action",
@@ -1955,6 +1972,21 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "remote_sessions_room_fk": {
+          "name": "remote_sessions_room_fk",
+          "tableFrom": "remote_sessions",
+          "tableTo": "rooms",
+          "columnsFrom": [
+            "site_id",
+            "room_id"
+          ],
+          "columnsTo": [
+            "site_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "remote_sessions_device_fk": {
           "name": "remote_sessions_device_fk",
           "tableFrom": "remote_sessions",
@@ -1987,7 +2019,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "remote_sessions_id_device": {
+          "name": "remote_sessions_id_device",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "device_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "remote_sessions_mode": {

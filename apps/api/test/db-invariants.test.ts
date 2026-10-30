@@ -476,6 +476,28 @@ describe('lesson invariants', () => {
     );
   });
 
+  test("a lease belongs to its session's device", async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const other = await device(s);
+    const sess = await session(s, l, d);
+    const lease = (deviceId: string, organizationId = s.orgId) =>
+      t.db.insert(controlLeases).values({
+        deviceId,
+        organizationId,
+        sessionId: sess.id,
+        fencing: 1,
+        acquiredAt: new Date(),
+        expiresAt: new Date(Date.now() + 30_000),
+      });
+    await rejects(lease(other.id));
+    // Tashkilot qurilmaning tashkilotiga mos bo'lishi shart.
+    const foreign = await org('foreign-org');
+    await rejects(lease(d.id, foreign.orgId));
+    await expect(lease(d.id)).resolves.toBeDefined();
+  });
+
   test('remote session mode, status and reason are constrained', async () => {
     const s = await setup();
     const l = await lesson(s);
@@ -533,6 +555,14 @@ describe('lesson invariants', () => {
     const far = await device(s, s.site2Id);
     await rejects(session(s, l, far));
     await rejects(session(s, l, far, { siteId: s.site2Id }));
+    // Xona ham dars site'iga tegishli bo'lishi shart.
+    const [foreignRoom] = await t.db
+      .insert(rooms)
+      .values({ organizationId: s.orgId, siteId: s.site2Id, name: 'far-room' })
+      .returning();
+    if (!foreignRoom) throw new Error('room');
+    const here = await device(s);
+    await rejects(session(s, l, here, { roomId: foreignRoom.id }));
     const near = await device(s);
     await expect(session(s, l, near)).resolves.toBeDefined();
     // Boshqa tashkilot foydalanuvchisi actor bo'la olmaydi.
