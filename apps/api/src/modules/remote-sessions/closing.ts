@@ -25,7 +25,8 @@ function matching(filter: SessionFilter): SQL {
 // Modul DI'siz: dars yopilishi, qurilma chiqishi, maintenance va ochish xatosi shu yerdan yopadi.
 // Chaqiruvchining tranzaksiyasida: sessiya qatorlari, keyin xona lock'i (EventLog) — chaqiruvchi o'z xona
 // voqeasini shundan keyin yozadi, aks holda aktivatsiya (sessiya → xona) bilan deadlock bo'lishi mumkin.
-// Gateway soketlari va principal commit'dan keyin outbox `remote.revoke` orqali yopiladi.
+// Commit'dan keyin chaqiruvchining Outbox.kick()i: gateway soketlari darhol (outbox'ni kutmasdan) uziladi, principal esa
+// outbox `remote.revoke` orqali qayta urinish bilan o'chiriladi.
 export async function closeRemoteSessions(
   tx: Db,
   filter: SessionFilter,
@@ -49,6 +50,7 @@ export async function closeRemoteSessions(
     .where(inArray(remoteSessions.id, ids));
   // Yopilgan sessiya lease ushlamaydi: qurilma darhol boshqa controller uchun bo'sh.
   await tx.delete(controlLeases).where(inArray(controlLeases.sessionId, ids));
+  deps.outbox.sessionsClosed(ids);
 
   await deps.events.lockRooms(
     tx,

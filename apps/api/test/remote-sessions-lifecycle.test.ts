@@ -1,5 +1,6 @@
 import { request as httpsRequest } from 'node:https';
 import { remoteSessionSchema } from '@netschool/contracts';
+import { until } from '@netschool/test-support';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { auditEvents, controlLeases, events, outbox, remoteSessions, sites } from '../src/db/schema.ts';
@@ -501,12 +502,12 @@ describe('revoking remote sessions', () => {
       return n;
     });
     const began = Date.now();
-    while (gateway().isOpen(second.id)) {
+    while (remote.sessions.get(second.id)?.revokeCalls !== 1) {
       if (Date.now() - began > 2_000) throw new Error('second session was not revoked within 2 s');
       await new Promise((r) => setTimeout(r, 10));
     }
     expect(Date.now() - began).toBeLessThanOrEqual(2_000);
-    expect(remote.sessions.get(second.id)?.revokeCalls).toBe(1);
+    expect(gateway().isOpen(second.id)).toBe(false);
     // Birinchisi hali osilgan: tick barcha boshlangan handler'lar tugashini kutadi.
     expect(hanging.revokeCalls).toBe(1);
     expect(settled).toBe(false);
@@ -514,6 +515,37 @@ describe('revoking remote sessions', () => {
     await ticking;
     const rows = await revokeRows();
     expect(rows.every((r) => r.processedAt !== null)).toBe(true);
+  });
+
+  test('socket teardown does not wait for a slow earlier revoke', async () => {
+    let release: (() => void) | undefined;
+    await withLive(async (live) => {
+      const gw = live.get<RemoteGateway>(RemoteGateway);
+      const [d1, d2] = [await device(), await device()];
+      const lesson = (await startLesson(live, teacher, roomId)).json;
+      const first = (await open(live, teacher, lesson.id, { deviceId: d1, mode: 'view' })).json;
+      const hanging = remote.sessions.get(first.id);
+      if (!hanging) throw new Error('upstream session');
+      hanging.revokeHold = new Promise<void>((r) => {
+        release = r;
+      });
+      // Birinchi sessiyaning revoke'i ishlayotgan tick ichida osiladi.
+      expect((await close(teacher, first.id, live)).status).toBe(204);
+      await until(() => hanging.revokeCalls === 1);
+
+      const second = (await open(live, teacher, lesson.id, { deviceId: d2, mode: 'view' })).json;
+      expect(gw.isOpen(second.id)).toBe(true);
+      const closedAt = Date.now();
+      expect((await close(teacher, second.id, live)).status).toBe(204);
+      await until(() => !gw.isOpen(second.id), 2_000);
+      expect(Date.now() - closedAt).toBeLessThanOrEqual(2_000);
+      // Principal revoke esa hali outbox navbatida: osilgan tick tugashini kutadi.
+      expect(remote.sessions.get(second.id)?.revokeCalls).toBe(0);
+
+      release?.();
+      await until(() => remote.sessions.get(second.id)?.revokeCalls === 1, 2_000);
+    }, true);
+    release?.();
   });
 
   test('a hanging revoke fails within its timeout', async () => {

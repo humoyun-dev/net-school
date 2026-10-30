@@ -114,6 +114,11 @@ export class RemoteGateway implements OnModuleDestroy {
     await this.#running?.broker.close(sessionId);
   }
 
+  // Faqat soketlar (1008) va cookie, upstream revoke'siz: commit bo'lgan yopilishdan keyin darhol, outbox'ni kutmasdan.
+  drop(sessionId: string): void {
+    this.#running?.registry.drop(sessionId);
+  }
+
   // RemoteSessionsService ulanadi: gateway o'zi yopgan sessiya (boshqa viewer almashtirdi, attach xatosi) DB'da yopiladi.
   onSessionEnded(listener: (sessionId: string, reason: GatewayEndReason) => void): void {
     this.#onEnded = listener;

@@ -75,9 +75,12 @@ describe('RemoteSessionBroker', () => {
       calls.push([id, reason]);
       return original(id, reason);
     };
+    const session = registry.get('rs-1');
     await broker.close('rs-1');
     expect(calls).toEqual([['rs-1', 'revoked']]);
-    expect(registry.get('rs-1')?.closed).toBe(true);
+    expect(session?.closed).toBe(true);
+    // Revoke qilingan sessiya registry'da qolmaydi; isOpen kabi tekshiruvlar uni yopiq deb ko'radi.
+    expect(registry.get('rs-1')).toBeUndefined();
     expect(upstream.sessions[0]?.revokeCalls).toBe(1);
     expect(events).toEqual([{ type: 'session_closed', sessionId: 'rs-1', reason: 'revoked' }]);
   });

@@ -135,6 +135,46 @@ describe('SessionRegistry', () => {
     expect(socket.codes).toEqual([1008]);
   });
 
+  test('a revoked session is forgotten and closing it again is a no-op', async () => {
+    const { registry, upstream, session } = setup();
+    const cookie = registry.bindCookie('s1');
+    await registry.close('s1', 'revoked');
+    expect(registry.get('s1')).toBeUndefined();
+    expect(registry.byCookie(cookie)).toBeUndefined();
+    expect(session.closed).toBe(true);
+    await expect(registry.close('s1', 'revoked')).resolves.toBeUndefined();
+    expect(() => registry.bindCookie('s1')).toThrow();
+    expect(upstream.revokeCalls).toBe(1);
+  });
+
+  test('a session whose revoke failed is kept for the retry', async () => {
+    const { registry, upstream, session } = setup();
+    upstream.revokeError = new Error('boom');
+    await expect(registry.close('s1', 'revoked')).rejects.toThrow('boom');
+    expect(registry.get('s1')).toBe(session);
+    upstream.revokeError = undefined;
+    await registry.close('s1', 'revoked');
+    expect(registry.get('s1')).toBeUndefined();
+  });
+
+  test('drop closes sockets and cookies without revoking upstream', async () => {
+    const { log, registry, upstream, session } = setup();
+    const socket = new FakeSocket(log);
+    session.sockets.add(socket);
+    const cookie = registry.bindCookie('s1');
+    registry.drop('s1');
+    registry.drop('s1');
+    registry.drop('unknown');
+    expect(socket.codes).toEqual([1008]);
+    expect(session.closed).toBe(true);
+    expect(registry.byCookie(cookie)).toBeUndefined();
+    expect(upstream.revokeCalls).toBe(0);
+    // Keyingi close() soketlarni qayta yopmaydi, faqat revoke qiladi.
+    await registry.close('s1', 'revoked');
+    expect(log).toEqual(['socket:1008', 'revoke']);
+    expect(registry.get('s1')).toBeUndefined();
+  });
+
   test('closing an unknown session is a no-op', async () => {
     await expect(new SessionRegistry().close('nope', 'revoked')).resolves.toBeUndefined();
   });
