@@ -57,15 +57,41 @@ export class FakeRemote {
         return session;
       },
     },
-    listPrincipals: async () => [],
-    revokePrincipal: async () => {},
+    listPrincipals: async () => {
+      if (this.listFailure) throw this.listFailure;
+      return this.principals.map((p) => ({ ...p }));
+    },
+    revokePrincipal: async (userId) => {
+      if (this.revokeFailures.has(userId)) throw new Error('deleteuser rejected');
+      this.revokedPrincipals.push(userId);
+      const i = this.principals.findIndex((p) => p.userId === userId);
+      if (i >= 0) this.principals.splice(i, 1);
+    },
   };
+
+  // MeshCentral'dagi `ns-sess-*` principal'lar (reconciliation testlari) va ularning o'chirilishi.
+  readonly principals: { userId: string; sessionId: string }[] = [];
+  readonly revokedPrincipals: string[] = [];
+  // Shu userId'larni o'chirish xato bilan tugaydi.
+  readonly revokeFailures = new Set<string>();
+  // Berilsa ro'yxatlash shu xato bilan tugaydi (MeshCentral ishlamayapti).
+  listFailure: Error | undefined;
+
+  addPrincipal(sessionId: string): string {
+    const userId = `user/dom-a/ns-sess-${sessionId}`;
+    this.principals.push({ userId, sessionId });
+    return userId;
+  }
 
   reset(): void {
     this.opened.length = 0;
     this.sessions.clear();
     this.failing = false;
     this.onOpen = undefined;
+    this.principals.length = 0;
+    this.revokedPrincipals.length = 0;
+    this.revokeFailures.clear();
+    this.listFailure = undefined;
   }
 }
 
