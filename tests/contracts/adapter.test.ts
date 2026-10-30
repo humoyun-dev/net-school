@@ -1,14 +1,16 @@
 import type { DeviceEvent, UpstreamDeviceRef } from '@netschool/domain';
 import {
   AdapterError,
+  generateMeshPassword,
   MeshCentralDeviceManagement,
   MeshCentralPrincipals,
   MeshControlClient,
   type MeshControlClientOptions,
+  type SessionPrincipal,
   type SiteMeshScope,
 } from '@netschool/meshcentral-adapter';
 import { makeCert } from '@netschool/test-support';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { type MeshCentralInstance, startMeshCentral } from './harness/meshcentral.ts';
 
 const scope: SiteMeshScope = { meshInstanceId: 'mc-test', meshDomainId: '' };
@@ -18,6 +20,8 @@ let mc: MeshCentralInstance;
 let admin: MeshControlClient;
 let meshid: string;
 const clients: MeshControlClient[] = [];
+const created: SessionPrincipal[] = [];
+let seq = 0;
 
 function client(overrides: Partial<MeshControlClientOptions> = {}) {
   const c = new MeshControlClient({
@@ -45,6 +49,17 @@ async function addLocalDevice(name: string) {
   await admin.request('addlocaldevice', { meshid, devicename: name, hostname: `${name}.lan`, type: 4 });
 }
 
+// Test sessiya principal'ini yaratadi va afterEach'da o'chiradi (ro'yxat testi boshqa testlar qoldig'iga tayanmasin).
+async function createPrincipal(
+  device: UpstreamDeviceRef,
+  mode: 'view' | 'control',
+  sessionId = `contract-${++seq}`,
+): Promise<SessionPrincipal> {
+  const principal = await new MeshCentralPrincipals(admin).create(device, mode, sessionId);
+  created.push(principal);
+  return principal;
+}
+
 async function deviceNamed(name: string): Promise<UpstreamDeviceRef> {
   const found = (await new MeshCentralDeviceManagement(admin, site).listDevices('site-a')).find((d) => d.name === name);
   if (!found) throw new Error(`${name} not found`);
@@ -58,6 +73,11 @@ beforeAll(async () => {
   meshid = (await admin.request<{ meshid: string }>('createmesh', { meshname: 'contract', meshtype: 3 })).meshid;
   await addLocalDevice('pc-01');
   await addLocalDevice('pc-02');
+});
+
+afterEach(async () => {
+  const principals = new MeshCentralPrincipals(admin);
+  await Promise.all(created.splice(0).map((p) => principals.revoke(p.userId)));
 });
 
 afterAll(async () => {
@@ -118,14 +138,14 @@ describe('MeshCentral adapter against pinned upstream', () => {
   });
 
   test('principal is created under strict password requirements', async () => {
-    const principal = await new MeshCentralPrincipals(admin).create(await deviceNamed('pc-01'), 'view');
+    const principal = await createPrincipal(await deviceNamed('pc-01'), 'view');
     await expect(
       client({ username: principal.username, password: principal.password }).connect(),
     ).resolves.toBeUndefined();
   });
 
   test('principal sees only the granted node', async () => {
-    const principal = await new MeshCentralPrincipals(admin).create(await deviceNamed('pc-01'), 'view');
+    const principal = await createPrincipal(await deviceNamed('pc-01'), 'view');
     const asPrincipal = client({ username: principal.username, password: principal.password });
     await asPrincipal.connect();
     const visible = await new MeshCentralDeviceManagement(asPrincipal, site).listDevices('site-a');
@@ -133,7 +153,7 @@ describe('MeshCentral adapter against pinned upstream', () => {
   });
 
   test('principal has no site rights', async () => {
-    const principal = await new MeshCentralPrincipals(admin).create(await deviceNamed('pc-02'), 'control');
+    const principal = await createPrincipal(await deviceNamed('pc-02'), 'control');
     const asPrincipal = client({ username: principal.username, password: principal.password });
     await asPrincipal.connect();
     const err = await asPrincipal
@@ -145,7 +165,7 @@ describe('MeshCentral adapter against pinned upstream', () => {
   });
 
   test('principal cannot create device groups', async () => {
-    const principal = await new MeshCentralPrincipals(admin).create(await deviceNamed('pc-01'), 'view');
+    const principal = await createPrincipal(await deviceNamed('pc-01'), 'view');
     const asPrincipal = client({ username: principal.username, password: principal.password });
     await asPrincipal.connect();
     const err = await asPrincipal.request('createmesh', { meshname: 'escape', meshtype: 2 }).catch((e: unknown) => e);
@@ -155,12 +175,42 @@ describe('MeshCentral adapter against pinned upstream', () => {
 
   test('revoked principal can no longer authenticate', async () => {
     const principals = new MeshCentralPrincipals(admin);
-    const principal = await principals.create(await deviceNamed('pc-01'), 'view');
+    const principal = await principals.create(await deviceNamed('pc-01'), 'view', 'contract-revoke');
     await client({ username: principal.username, password: principal.password }).connect();
     await principals.revoke(principal.userId);
     expect(await codeOf(client({ username: principal.username, password: principal.password }).connect())).toBe(
       'upstream_auth_failed',
     );
+  });
+
+  test('lists only session principals', async () => {
+    const device = await deviceNamed('pc-01');
+    const foreign = { username: 'someone-else', password: generateMeshPassword() };
+    await admin.request('adduser', { username: foreign.username, pass: foreign.password, siteadmin: 0 });
+    try {
+      const a = await createPrincipal(device, 'view', 'list-aaa');
+      const b = await createPrincipal(device, 'control', 'List-Bbb-2'); // MeshCentral userid'ni kichik harfga o'tkazadi
+      const principals = new MeshCentralPrincipals(admin);
+
+      const listed = await principals.listSessionPrincipals();
+      expect(listed.sort((x, y) => x.sessionId.localeCompare(y.sessionId))).toEqual([
+        { userId: a.userId, sessionId: 'list-aaa' },
+        { userId: b.userId, sessionId: 'List-Bbb-2' },
+      ]);
+
+      await principals.revoke(a.userId);
+      await principals.revoke(b.userId);
+      expect(await principals.listSessionPrincipals()).toEqual([]);
+    } finally {
+      await admin.request('deleteuser', { userid: `user/${scope.meshDomainId}/${foreign.username}` });
+    }
+  });
+
+  test('listing fails with upstream_rejected for a user without account-management rights', async () => {
+    const principal = await createPrincipal(await deviceNamed('pc-01'), 'view');
+    const asPrincipal = client({ username: principal.username, password: principal.password });
+    await asPrincipal.connect();
+    expect(await codeOf(new MeshCentralPrincipals(asPrincipal).listSessionPrincipals())).toBe('upstream_rejected');
   });
 
   test('adapter resyncs after MeshCentral restart', async () => {
