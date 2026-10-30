@@ -35,7 +35,7 @@ export class MeshCentralViewerUpstream {
   }
 
   async open(req: AuthorizedDesktopRequest): Promise<MeshCentralViewerSession> {
-    const principal = await this.#principals.create(req.device, req.mode);
+    const principal = await this.#principals.create(req.device, req.mode, req.sessionId);
     return new MeshCentralViewerSession(principal, req.mode, this.#opts, this.#principals);
   }
 }
