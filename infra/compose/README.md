@@ -10,7 +10,7 @@ Tashqariga faqat `api` chiqadi: `443 → 8443` (API) va `8444 → 8444` (remote 
 - TLS: MeshCentral root CA'sining faqat public qismi (`root-cert-public.crt`) `meshcentral-ca` volume orqali api'ga read-only beriladi; `meshcentral-data` (private key'lar) api'ga mount qilinmaydi. Sertifikat nomi `meshcentral` ga qotirilgan — API hostname tekshiruvini o'chirmaydi.
 - `api` faqat `meshcentral` healthy bo'lgach (CA fayli bor va 4430 shu CA bilan TLS javob beradi) ishga tushadi. Keyin MeshCentral uzilsa, API ishlashda davom etadi va fonda qayta ulanadi.
 - `GET /api/v1/healthz` → `{"status":"ok","db":"ok","mesh":"ok"}`; `mesh`: `ok` (ulangan) | `down` (ulanmagan — HTTP baribir 200) | `disabled` (`MESHCENTRAL_URL` berilmagan).
-- MeshCentral `trustedProxy: api` (compose `render-config.mjs`): X-Forwarded-For faqat gateway konteyneridan ishoniladi. MeshCentral `api` nomini faqat o'zi ishga tushganda DNS orqali aniqlaydi (webserver.js:7216-7217); toza `up`da `api` hali yo'q, nom aniqlanmaydi va X-Forwarded-For umuman ishonilmaydi (xavfsiz tomonga: MeshCentral barcha gateway trafigini `api` konteyner IP'sidan deb ko'radi) — `meshcentral` keyinroq qayta ishga tushganda ishonch yoqiladi.
+- Barcha servislar `hub` tarmog'ida, qat'iy subnet bilan (`HUB_SUBNET`, standart `172.31.250.0/24`; boshqa konteynerlar `HUB_DYNAMIC_RANGE`, standart `172.31.250.128/25` dan oladi). `api` qat'iy manzilda (`API_IP`, standart `172.31.250.10`) va MeshCentral `trustedProxy` aynan shu IP (`MESHCENTRAL_TRUSTED_PROXY` → `render-config.mjs`): X-Forwarded-For faqat gateway'dan ishoniladi. DNS nomi ishlatilmaydi — MeshCentral uni faqat ishga tushishda aniqlaydi, `api` esa undan keyin ko'tariladi. Maktab LAN'i bilan to'qnashsa uchala qiymatni `.env`da birga almashtiring.
 
 ## Sirlar
 

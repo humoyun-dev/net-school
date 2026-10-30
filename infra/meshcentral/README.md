@@ -19,7 +19,7 @@ node meshcentral --datapath ../../../meshcentral-data --port 8443 --redirport 80
 
 | Sozlama | Qiymat | Sabab |
 | --- | --- | --- |
-| `trustedProxy` | `127.0.0.1` (compose'da `api`) | Gateway oldinda turadi: X-Forwarded-For faqat shu manbadan ishoniladi, TLS saqlanadi (webserver.js:7353-7372). Compose'da gateway `api` konteynerida — `render-config.mjs` nomni beradi, MeshCentral uni ishga tushishda DNS orqali IP'ga aylantiradi (webserver.js:7216-7217). |
+| `trustedProxy` | `127.0.0.1` (compose'da `api` IP'si) | Gateway oldinda turadi: X-Forwarded-For faqat shu manbadan ishoniladi, TLS saqlanadi (webserver.js:7353-7372). Compose'da gateway `api` konteynerida — `render-config.mjs` `MESHCENTRAL_TRUSTED_PROXY` dagi qat'iy IP'ni yozadi. DNS nomi emas: MeshCentral nomni faqat ishga tushishda aniqlaydi (webserver.js:7216-7217), `api` esa undan keyin ko'tariladi. |
 | `desktopMultiplex` | `false` | Multiplex'da view-only'ni server tekshiradi; oddiy relay'da agent (rights bo'yicha). Bitta ma'lum yo'l qoldiriladi. |
 | `webRTC` | `false` | WebRTC brauzer-agent oqimini gateway'dan chetlab o'tadi. |
 | `allowLoginToken` | `false` | Login token brauzerga upstream credential beradi (taqiqlangan). |
@@ -33,7 +33,7 @@ node meshcentral --datapath ../../../meshcentral-data --port 8443 --redirport 80
 
 [Dockerfile](Dockerfile) ishga tushishda [entrypoint.sh](entrypoint.sh) ni bajaradi:
 
-1. `render-config.mjs` — shablon + PostgreSQL (`MESHCENTRAL_DB_PASSWORD_FILE`) + `cert`/`port` + `trustedProxy: api` → `meshcentral-data/config.json`.
+1. `render-config.mjs` — shablon + PostgreSQL (`MESHCENTRAL_DB_PASSWORD_FILE`) + `cert`/`port` + `trustedProxy` (`MESHCENTRAL_TRUSTED_PROXY`, faqat IP literal) → `meshcentral-data/config.json`.
 2. `netschool-svc` service account: DB'da yo'q bo'lsa `--createaccount … --pass=<MESHCENTRAL_SERVICE_PASSWORD_FILE>`; site administrator bo'lmasa `--adminaccount`. Ikkalasi asosiy server ishga tushishidan oldin (CLI faqat to'xtagan serverda ishlaydi). Mavjud account'ga va uning paroliga tegilmaydi; parol logga chiqmaydi.
 3. `root-cert-public.crt` paydo bo'lgach (≤ 120 s) uni `/run/meshcentral-ca` (`meshcentral-ca` volume, api'da read-only) ga atomik nusxalaydi — faqat public sertifikat.
 4. `exec node meshcentral.js`.
