@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { outbox } from '../../db/schema.ts';
@@ -20,7 +20,8 @@ type Row = typeof outbox.$inferSelect;
 // Outbox qatorlarini qayta urinish bilan bajaradi. Claim va bajarish ajratilgan: qatorlar qisqa tranzaksiyada
 // `FOR UPDATE SKIP LOCKED` bilan olinib, claim lease (`next_attempt_at = now + 30 s`) bilan commit qilinadi; handler'lar
 // tranzaksiyasiz ishlaydi (tashqi chaqiriqlar lock va ulanishni ushlamaydi). Jarayon claim'dan keyin o'lsa qator lease
-// tugagach qayta olinadi — at-least-once, handler'lar idempotent bo'lishi shart.
+// tugagach qayta olinadi — at-least-once, handler'lar idempotent bo'lishi shart. Har claim urinish hisoblanadi:
+// har safar jarayonni yiqitadigan qator ham 10 urinishdan keyin to'xtaydi.
 @Injectable()
 export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   readonly #handlers = new Map<string, Handler>();
@@ -65,15 +66,17 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   async tick(now: number): Promise<number> {
-    const claimed = await this.#claim(now);
+    const claimedUntil = new Date(now + CLAIM_LEASE_MS);
+    const claimed = await this.#claim(now, claimedUntil);
     let processed = 0;
     for (const row of claimed) {
-      if (await this.#run(row, now)) processed += 1;
+      if (await this.#run(row, now, claimedUntil)) processed += 1;
     }
     return processed;
   }
 
-  async #claim(now: number): Promise<Row[]> {
+  // Qaytgan qatorlarda `attempts` — claim'dan oldingi qiymat.
+  async #claim(now: number, claimedUntil: Date): Promise<Row[]> {
     return this.db.transaction(async (tx) => {
       const due = await tx
         .select()
@@ -91,7 +94,7 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
       if (due.length === 0) return due;
       await tx
         .update(outbox)
-        .set({ nextAttemptAt: new Date(now + CLAIM_LEASE_MS) })
+        .set({ attempts: sql`${outbox.attempts} + 1`, nextAttemptAt: claimedUntil })
         .where(
           inArray(
             outbox.id,
@@ -102,9 +105,9 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     });
   }
 
-  // Natija shartli: lease tugab qatorni boshqa tick olib bajargan bo'lsa, kechikkan natija uni qayta ochmaydi.
-  async #run(row: Row, now: number): Promise<boolean> {
-    const pending = and(eq(outbox.id, row.id), isNull(outbox.processedAt));
+  // Muvaffaqiyat har doim yoziladi (handler'lar idempotent). Xato esa faqat shu tick'ning claim'i hali amalda bo'lsa:
+  // lease tugab qatorni boshqa tick olgan bo'lsa, kechikkan xato uning lease'ini qisqartirmaydi.
+  async #run(row: Row, now: number, claimedUntil: Date): Promise<boolean> {
     try {
       const handler = this.#handlers.get(row.topic);
       if (!handler) throw new Error(`No handler for topic ${row.topic}`);
@@ -112,20 +115,21 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
       await this.db
         .update(outbox)
         .set({ processedAt: new Date(now) })
-        .where(pending);
+        .where(and(eq(outbox.id, row.id), isNull(outbox.processedAt)));
       return true;
     } catch (err) {
       const attempts = row.attempts + 1;
       const message = err instanceof Error ? err.message : String(err);
-      await this.db
+      const failed = await this.db
         .update(outbox)
         .set({
-          attempts,
           lastError: message.slice(0, 200),
           nextAttemptAt: new Date(now + Math.min(MAX_BACKOFF_MS, 1000 * 2 ** row.attempts)),
         })
-        .where(pending);
-      if (attempts >= OUTBOX_MAX_ATTEMPTS) this.#log.error(`Outbox row ${row.id} parked after ${attempts} attempts`);
+        .where(and(eq(outbox.id, row.id), isNull(outbox.processedAt), eq(outbox.nextAttemptAt, claimedUntil)))
+        .returning({ id: outbox.id });
+      if (failed.length > 0 && attempts >= OUTBOX_MAX_ATTEMPTS)
+        this.#log.error(`Outbox row ${row.id} parked after ${attempts} attempts`);
       return false;
     }
   }
