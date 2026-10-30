@@ -29,12 +29,30 @@ test('response echoes a valid correlation id and replaces an invalid one', async
 
 test('healthz reports the database state', async () => {
   const res = await app.request('GET', '/api/v1/healthz');
-  expect(res.json).toEqual({ status: 'ok', db: 'ok' });
+  expect(res.json).toEqual({ status: 'ok', db: 'ok', mesh: 'disabled' });
 
   const broken = await startTestApp();
   await broken.db.close();
   const down = await broken.request('GET', '/api/v1/healthz');
   expect(down.status).toBe(503);
-  expect(down.json).toEqual({ status: 'degraded', db: 'down' });
+  expect(down.json).toEqual({ status: 'degraded', db: 'down', mesh: 'disabled' });
   await broken.close();
+});
+
+test('health reports mesh state', async () => {
+  // MeshCentral'siz ham API ishlaydi: mesh uzilgan bo'lsa ham HTTP 200.
+  const link = { connected: true };
+  const meshed = await startTestApp({ mesh: link });
+  try {
+    const up = await meshed.request('GET', '/api/v1/healthz');
+    expect(up.status).toBe(200);
+    expect(up.json).toEqual({ status: 'ok', db: 'ok', mesh: 'ok' });
+
+    link.connected = false;
+    const down = await meshed.request('GET', '/api/v1/healthz');
+    expect(down.status).toBe(200);
+    expect(down.json).toEqual({ status: 'ok', db: 'ok', mesh: 'down' });
+  } finally {
+    await meshed.close();
+  }
 });

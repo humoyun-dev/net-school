@@ -13,6 +13,9 @@ export function renderConfig(template, { dbPassword, certName }) {
     redirPort: 0,
     selfUpdate: false,
     autoBackup: false,
+    // Gateway api konteynerida: X-Forwarded-For faqat undan ishoniladi. Bitta satrli nomni MeshCentral
+    // ishga tushishda DNS orqali IP'ga aylantiradi (webserver.js:7216-7217). Shablon (contract harness) 127.0.0.1 qoladi.
+    trustedProxy: 'api',
     // createdatabase: false — database init skriptda yaratilgan; MeshCentral `postgres` DB'ga ulanmaydi (db.js:945).
     postgres: {
       host: 'postgres',

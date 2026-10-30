@@ -4,6 +4,7 @@ import type { INestApplication, Type } from '@nestjs/common';
 import { makeCert } from '@netschool/test-support';
 import { createApp } from '../../src/app.ts';
 import type { DeviceManagementFactory } from '../../src/modules/devices/mesh.ts';
+import type { MeshLink } from '../../src/modules/health/health.controller.ts';
 import type { RemoteUpstream } from '../../src/modules/remote-sessions/remote-gateway.ts';
 import { createTestDb, type TestDb } from './db.ts';
 
@@ -49,6 +50,8 @@ export async function startTestApp(
     deviceManagement?: DeviceManagementFactory | null;
     // Soxta remote upstream; berilmasa gateway o'chiq. Gateway listener'ini test o'zi ochadi (listen).
     remote?: RemoteUpstream | null;
+    // Soxta MeshCentral ulanish holati (healthz); berilmasa `mesh: disabled`.
+    mesh?: MeshLink | null;
     // Fon workerlari (haqiqiy taymer bilan); berilmasa o'chiq — testlar tick'ni qo'lda chaqiradi.
     workers?: boolean;
   } = {},
@@ -78,6 +81,7 @@ export async function startTestApp(
       controllers: opts.controllers,
       deviceManagement: opts.deviceManagement ?? null,
       remote,
+      mesh: opts.mesh ?? null,
       workers: opts.workers ?? false,
       logger: false,
     },

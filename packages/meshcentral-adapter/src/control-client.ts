@@ -72,6 +72,11 @@ export class MeshControlClient implements MeshRequester {
     return this.#open();
   }
 
+  // serverinfo kelgan va hali uzilmagan ulanish (health uchun); reconnect paytida false.
+  get connected(): boolean {
+    return this.#ready && !this.#closed && this.#fatal === undefined;
+  }
+
   async close(): Promise<void> {
     this.#closed = true;
     clearTimeout(this.#reconnectTimer);

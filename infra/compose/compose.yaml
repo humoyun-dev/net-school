@@ -26,11 +26,31 @@ services:
       dockerfile: infra/meshcentral/Dockerfile
     environment:
       MESHCENTRAL_DB_PASSWORD_FILE: /run/secrets/meshcentral_db_password
-      MESHCENTRAL_CERT_NAME: ${MESHCENTRAL_CERT_NAME:-meshcentral}
-    secrets: [meshcentral_db_password]
+      # API `wss://meshcentral:4430` ga hostname tekshiruvi bilan ulanadi: sertifikat shu nomga chiqariladi.
+      MESHCENTRAL_CERT_NAME: meshcentral
+      # entrypoint.sh shu parol bilan `netschool-svc` service account'ini (yo'q bo'lsa) yaratadi.
+      MESHCENTRAL_SERVICE_PASSWORD_FILE: /run/secrets/meshcentral_service_password
+    secrets: [meshcentral_db_password, meshcentral_service_password]
     volumes:
       - meshcentral-data:/opt/meshcentral/meshcentral-data
       - meshcentral-files:/opt/meshcentral/meshcentral-files
+      # api bilan bo'lishiladi: faqat root-cert-public.crt (private key'lar meshcentral-data'da qoladi).
+      - meshcentral-ca:/run/meshcentral-ca
+    healthcheck:
+      # api'ga berilgan CA fayli bor va 4430 shu CA hamda cert nomi bilan TLS javob beradi (tekshiruv o'chirilmaydi).
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const ca = require('fs').readFileSync('/run/meshcentral-ca/root-cert-public.crt');
+          require('https').get({ host: '127.0.0.1', port: 4430, servername: process.env.MESHCENTRAL_CERT_NAME, ca },
+          (res) => process.exit(res.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1));
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      # Birinchi ishga tushishda sertifikatlar va service account yaratiladi.
+      start_period: 180s
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,14 +79,26 @@ services:
       TLS_CERT_FILE: /run/secrets/api_tls_cert
       TLS_KEY_FILE: /run/secrets/api_tls_key
       DATABASE_URL_FILE: /run/secrets/netschool_database_url
-    secrets: [api_tls_cert, api_tls_key, netschool_database_url]
+      MESHCENTRAL_URL: wss://meshcentral:4430/control.ashx
+      MESHCENTRAL_USERNAME: netschool-svc
+      MESHCENTRAL_PASSWORD_FILE: /run/secrets/meshcentral_service_password
+      MESHCENTRAL_CA_FILE: /run/meshcentral-ca/root-cert-public.crt
+      # Remote session gateway (ikkinchi HTTPS listener, xuddi shu TLS sertifikati bilan).
+      GATEWAY_PORT: "8444"
+      GATEWAY_PUBLIC_ORIGIN: ${GATEWAY_PUBLIC_ORIGIN:?GATEWAY_PUBLIC_ORIGIN is required, e.g. https://hub.school.lan:8444}
+    secrets: [api_tls_cert, api_tls_key, netschool_database_url, meshcentral_service_password]
+    volumes:
+      - meshcentral-ca:/run/meshcentral-ca:ro
     ports:
       - "443:8443"
+      - "8444:8444"
     depends_on:
       postgres:
         condition: service_healthy
       api-migrate:
         condition: service_completed_successfully
+      meshcentral:
+        condition: service_healthy
     restart: unless-stopped
 
 secrets:
@@ -76,6 +108,8 @@ secrets:
     file: ./secrets/netschool_db_password
   meshcentral_db_password:
     file: ./secrets/meshcentral_db_password
+  meshcentral_service_password:
+    file: ./secrets/meshcentral_service_password
   netschool_database_url:
     file: ./secrets/netschool_database_url
   api_tls_cert:
@@ -87,3 +121,4 @@ volumes:
   pgdata:
   meshcentral-data:
   meshcentral-files:
+  meshcentral-ca:

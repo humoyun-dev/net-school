@@ -64,6 +64,7 @@ jobs:
         working-directory: infra/compose
     env:
       PUBLIC_ORIGIN: https://localhost
+      GATEWAY_PUBLIC_ORIGIN: https://localhost:8444
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,19 +76,29 @@ jobs:
             openssl rand -hex 24 > "secrets/$s"
           done
           printf 'postgres://netschool:%s@postgres:5432/netschool' "$(cat secrets/netschool_db_password)" > secrets/netschool_database_url
+          printf '%s-Aa1' "$(openssl rand -hex 24)" > secrets/meshcentral_service_password
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
             -addext "subjectAltName=DNS:localhost" -keyout secrets/api_tls_key -out secrets/api_tls_cert
           chmod 644 secrets/*
       # --wait bir martalik api-migrate tugaganini xato deb hisoblashi mumkin, shuning uchun healthz kutiladi.
-      - run: docker compose up -d --build
-      - name: API is healthy over TLS with the database
+      # api meshcentral healthy bo'lishini kutadi; bo'lmasa up xato bilan tugaydi — sababi loglarda.
+      - run: docker compose up -d --build || { docker compose ps; docker compose logs meshcentral | tail -100; exit 1; }
+      # api MeshCentral healthy bo'lgach ishga tushadi va fonda ulanadi — mesh "ok" bo'lguncha kutiladi.
+      - name: API is healthy over TLS with the database and MeshCentral
         run: |
           for i in $(seq 1 90); do
-            curl --fail --silent --cacert secrets/api_tls_cert https://localhost/api/v1/healthz > health.json && break
+            curl --fail --silent --cacert secrets/api_tls_cert https://localhost/api/v1/healthz > health.json \
+              && grep -q '"mesh":"ok"' health.json && break
             sleep 2
           done
-          cat health.json || docker compose logs api api-migrate
-          grep -q '"db":"ok"' health.json
+          cat health.json || true
+          grep -q '"db":"ok"' health.json && grep -q '"mesh":"ok"' health.json \
+            || { docker compose ps; docker compose logs api api-migrate meshcentral | tail -100; exit 1; }
+      - name: Remote session gateway answers over TLS on 8444
+        run: |
+          code=$(curl --silent --output /dev/null --write-out '%{http_code}' --cacert secrets/api_tls_cert https://localhost:8444/)
+          echo "gateway: HTTP $code"
+          test "$code" != 000
       - name: MeshCentral DB user cannot reach the NetSchool database
         run: |
           if docker compose exec -T postgres psql -U meshcentral -d netschool -c 'select 1'; then
