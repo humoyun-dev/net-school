@@ -15,7 +15,7 @@ import { DevicesModule } from './modules/devices/devices.module.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory } from './modules/devices/mesh.ts';
 import { EventsModule } from './modules/events/events.module.ts';
 import { EventsApiModule } from './modules/events/events-api.module.ts';
-import { HealthController } from './modules/health/health.controller.ts';
+import { HealthController, MESH_LINK, type MeshLink } from './modules/health/health.controller.ts';
 import { IdentityModule } from './modules/identity/identity.module.ts';
 import { LessonsModule } from './modules/lessons/lessons.module.ts';
 import { OrganizationModule } from './modules/organization/organization.module.ts';
@@ -32,6 +32,8 @@ export interface CreateAppOptions {
   deviceManagement?: DeviceManagementFactory | null;
   // Remote session gateway upstream'i; null yoki berilmasa (yoki config.gateway null) — gateway o'chiq.
   remote?: RemoteUpstream | null;
+  // MeshCentral control ulanishi holati (healthz); null yoki berilmasa — `mesh: disabled`.
+  mesh?: MeshLink | null;
   // Fon workerlari (outbox, maintenance); testlar false bilan tick'ni qo'lda chaqiradi.
   workers?: boolean;
   logger?: false | ('log' | 'warn' | 'error')[];
@@ -47,10 +49,11 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       { provide: CLOCK, useValue: opts.now ?? Date.now },
       { provide: DEVICE_MANAGEMENT, useValue: opts.deviceManagement ?? null },
       { provide: REMOTE_UPSTREAM, useValue: opts.remote ?? null },
+      { provide: MESH_LINK, useValue: opts.mesh ?? null },
       Idempotency,
       { provide: WORKERS_ENABLED, useValue: opts.workers ?? false },
     ],
-    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT, REMOTE_UPSTREAM, Idempotency, WORKERS_ENABLED],
+    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT, REMOTE_UPSTREAM, MESH_LINK, Idempotency, WORKERS_ENABLED],
   })
   class CoreModule {}
 

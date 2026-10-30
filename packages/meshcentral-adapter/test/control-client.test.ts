@@ -178,6 +178,18 @@ describe('MeshControlClient', () => {
     expect(await codeOf(c.request('nodes'))).toBe('upstream_auth_failed');
   });
 
+  test('connected reflects the live link', async () => {
+    const c = makeClient();
+    expect(c.connected).toBe(false);
+    await c.connect();
+    expect(c.connected).toBe(true);
+    server.dropAll();
+    await until(() => !c.connected);
+    await until(() => c.connected);
+    await c.close();
+    expect(c.connected).toBe(false);
+  });
+
   test('close() stops reconnecting', async () => {
     const c = makeClient();
     await c.connect();

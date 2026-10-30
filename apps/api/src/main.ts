@@ -14,6 +14,7 @@ const app = await createApp(config, {
   db: pg.db,
   deviceManagement: mesh ? (scopes) => new MeshCentralDeviceManagement(mesh, scopes) : null,
   remote,
+  mesh,
   workers: true,
 });
 app.enableShutdownHooks();
