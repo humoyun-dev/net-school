@@ -241,7 +241,7 @@ describe('background schedule', () => {
   test('with workers enabled it reconciles on bootstrap and every five minutes', async () => {
     const [d0, d1] = devices as [string, string];
     const a = await openSession(d0);
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const worker = new RemoteReconciler(
       app.db.db,
       () => now,
@@ -267,6 +267,73 @@ describe('background schedule', () => {
     } finally {
       worker.onModuleDestroy();
     }
+  });
+
+  test('a failed startup listing is retried until MeshCentral answers', async () => {
+    const [d0, d1] = devices as [string, string];
+    const a = await openSession(d0);
+    // main.ts MeshCentral ulanishini kutmaydi: startdagi ro'yxatlash odatda shunday xato bilan tugaydi.
+    remote.listFailure = new AdapterError('upstream_unavailable', 'Not connected to MeshCentral');
+    const listings = vi.spyOn(remote.upstream, 'listPrincipals');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const worker = new RemoteReconciler(
+      app.db.db,
+      () => now,
+      true,
+      remote.upstream,
+      app.get<EventLog>(EventLog),
+      app.get<Outbox>(Outbox),
+      app.get<AuditWriter>(AuditWriter),
+    );
+    // vi.waitFor soxta taymerlarda vaqtni o'zi siljitadi; bu yerda soxta vaqt faqat qo'lda siljiydi.
+    const settle = async (check: () => boolean) => {
+      const deadline = performance.now() + 5_000;
+      while (!check()) {
+        if (performance.now() > deadline) throw new Error('reconciler did not settle');
+        await new Promise((r) => setImmediate(r));
+      }
+    };
+    // Keyingi o'tish rejalashtirilgunicha kutiladi, shunda soxta vaqt aniq shu taymerdan hisoblanadi.
+    const scheduled = () => settle(() => vi.getTimerCount() === 1);
+    // `ms - 1` da o'tish yo'q, `ms` da bor.
+    const passAfter = async (ms: number, calls: number) => {
+      await vi.advanceTimersByTimeAsync(ms - 1);
+      expect(listings).toHaveBeenCalledTimes(calls - 1);
+      await vi.advanceTimersByTimeAsync(1);
+      await settle(() => listings.mock.calls.length === calls);
+      await scheduled();
+    };
+    try {
+      await worker.onApplicationBootstrap();
+      expect(await row(a)).toMatchObject({ status: 'closed', closeReason: 'restart' });
+      expect(listings).toHaveBeenCalledTimes(1);
+      expect(remote.principals).toHaveLength(1);
+      await scheduled();
+
+      // Backoff: 5 s, 10 s, 20 s, 40 s, keyin 60 s chegarasi.
+      await passAfter(5_000, 2);
+      await passAfter(10_000, 3);
+      await passAfter(20_000, 4);
+      await passAfter(40_000, 5);
+      await passAfter(60_000, 6);
+      expect(remote.principals).toHaveLength(1);
+
+      // Kechikkan o'tish startdan keyin ochilgan sessiyaga tegmaydi; startdan oldingi (yopilgan) principal ketadi.
+      const b = await openSession(d1);
+      remote.listFailure = undefined;
+      await passAfter(60_000, 7);
+      expect(remote.revokedPrincipals).toEqual([userIdOf(a)]);
+      expect(remote.principals.map((p) => p.sessionId)).toEqual([b]);
+      expect((await row(b))?.status).toBe('active');
+
+      // Birinchi muvaffaqiyatdan keyin oddiy 5 daqiqalik davr (backoff qayta boshlanmaydi).
+      remote.listFailure = new AdapterError('upstream_timeout', 'MeshCentral did not answer');
+      await passAfter(5 * 60_000, 8);
+      await passAfter(5 * 60_000, 9);
+    } finally {
+      worker.onModuleDestroy();
+    }
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   test('with workers disabled bootstrap does nothing', async () => {
