@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { sha256 } from './hash.ts';
-import type { UpstreamViewerSession } from './types.ts';
+import type { GatewayCloseReason, UpstreamViewerSession } from './types.ts';
 
 export interface GatewaySession {
   id: string;
@@ -47,7 +47,7 @@ export class SessionRegistry {
   // Avval socketlar (1008), keyin upstream.revoke(). revoke xatosi qayta otiladi, sessiya baribir yopiq.
   // Takroriy chaqiruv: revoke jarayonda bo'lsa o'sha va'da; muvaffaqiyatli bo'lgan bo'lsa hech nima.
   // Muvaffaqiyatsiz revoke keyingi close()da qayta uriniladi.
-  close(id: string, _reason: 'revoked' | 'superseded'): Promise<void> {
+  close(id: string, _reason: GatewayCloseReason): Promise<void> {
     const session = this.#sessions.get(id);
     if (!session || this.#revoked.has(id)) return Promise.resolve();
     const inFlight = this.#revoking.get(id);

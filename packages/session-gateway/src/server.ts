@@ -120,9 +120,10 @@ export function createGateway(opts: GatewayOptions): Gateway {
     } catch (err) {
       if (session.closed) return reply(res, 403, 'Forbidden'); // attach yopilish sababli yiqildi
       emit({ type: 'upstream_error', sessionId: session.id, message: messageOf(err) });
-      registry.close(session.id, 'revoked').catch((closeErr: unknown) => {
+      registry.close(session.id, 'attach_failed').catch((closeErr: unknown) => {
         emit({ type: 'upstream_error', sessionId: session.id, message: messageOf(closeErr) });
       });
+      emit({ type: 'session_closed', sessionId: session.id, reason: 'attach_failed' });
       return reply(res, 502, 'Bad Gateway');
     }
 

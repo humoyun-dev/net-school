@@ -13,6 +13,7 @@ export const closeReasonSchema = z.enum([
   'lease_expired',
   'upstream_failed',
   'restart',
+  'superseded',
 ]);
 
 export const openRemoteSessionRequestSchema = z.strictObject({

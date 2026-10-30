@@ -57,6 +57,13 @@
       "when": 1793353136213,
       "tag": "0007_remote_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793360649886,
+      "tag": "0008_remote_sessions_superseded",
+      "breakpoints": true
     }
   ]
 }

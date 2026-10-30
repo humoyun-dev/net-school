@@ -22,7 +22,9 @@ export type CloseReason =
   | 'device_left'
   | 'lease_expired'
   | 'upstream_failed'
-  | 'restart';
+  | 'restart'
+  // Shu brauzerda boshqa sessiya ochildi (gateway'da bitta brauzerga bitta viewer).
+  | 'superseded';
 
 // Control sessiyasi lease muddati; teacher shu oraliqda yangilab turmasa sessiya yopiladi.
 export const CONTROL_LEASE_MS = 30_000;

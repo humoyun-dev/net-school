@@ -53,6 +53,7 @@ describe('remote session contracts', () => {
     expect(remoteSessionSchema.safeParse(session).success).toBe(true);
     const closed = { ...session, status: 'closed', closedAt: at, closeReason: 'lease_expired', lease: null };
     expect(remoteSessionSchema.safeParse(closed).success).toBe(true);
+    expect(remoteSessionSchema.safeParse({ ...closed, closeReason: 'superseded' }).success).toBe(true);
     expect(remoteSessionSchema.safeParse({ ...session, status: 'paused' }).success).toBe(false);
     expect(remoteSessionSchema.safeParse({ ...session, closeReason: 'because' }).success).toBe(false);
     expect(remoteSessionSchema.safeParse({ ...session, lease: { fencing: '42' } }).success).toBe(false);

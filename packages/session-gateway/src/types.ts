@@ -33,4 +33,8 @@ export type GatewayEvent =
       reason: string;
     }
   | { type: 'upstream_error'; sessionId: string; message: string }
-  | { type: 'session_closed'; sessionId: string; reason: 'revoked' | 'superseded' };
+  | { type: 'session_closed'; sessionId: string; reason: GatewayCloseReason };
+
+// `revoked` — tashqaridan (API) yopilgan; qolganlari gateway o'zi yopgan: `superseded` — shu brauzerda boshqa
+// sessiya redeem qilindi, `attach_failed` — redeem paytida upstream'ga ulanib bo'lmadi.
+export type GatewayCloseReason = 'revoked' | 'superseded' | 'attach_failed';

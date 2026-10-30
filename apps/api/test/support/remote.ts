@@ -12,8 +12,12 @@ export class FakeViewerSession implements UpstreamViewerSession {
   revokeFailures = 0;
   // Berilsa revoke shu va'dani kutadi (timeout testlari).
   revokeHold: Promise<void> | undefined;
+  // Berilsa redeem paytidagi attach shu xato bilan tugaydi.
+  attachError: Error | undefined;
 
-  async attach(): Promise<void> {}
+  async attach(): Promise<void> {
+    if (this.attachError) throw this.attachError;
+  }
   routeHttp() {
     return { ok: false as const, reason: 'unused' };
   }

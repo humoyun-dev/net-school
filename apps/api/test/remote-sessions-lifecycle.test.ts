@@ -1,3 +1,4 @@
+import { request as httpsRequest } from 'node:https';
 import { remoteSessionSchema } from '@netschool/contracts';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
@@ -79,6 +80,57 @@ const closeAudits = () =>
 const outboxTick = (at = now) => app.get<OutboxWorker>(OutboxWorker).tick(at);
 const gateway = () => app.get<RemoteGateway>(RemoteGateway);
 const auditCount = async () => (await app.db.db.select().from(auditEvents)).length;
+const ticket = (target: TestApp, cookie: string, sessionId: string) =>
+  target.request('POST', `/api/v1/remote-sessions/${sessionId}/ticket`, { cookie });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const eventually = async (check: () => Promise<boolean>, ms = 2_000) => {
+  const until = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > until) throw new Error('timed out');
+    await sleep(10);
+  }
+};
+// Gateway listener'iga brauzer kabi redeem: javob holati va o'rnatilgan gateway cookie'si (`name=value`).
+function redeem(target: TestApp, port: number, ticketUrl: string, cookie?: string) {
+  const { pathname, search } = new URL(ticketUrl);
+  return new Promise<{ status: number; cookie: string | undefined }>((resolve, reject) => {
+    const req = httpsRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        servername: 'localhost',
+        ca: target.ca,
+        method: 'GET',
+        path: `${pathname}${search}`,
+        headers: cookie ? { cookie } : {},
+      },
+      (res) => {
+        res.resume();
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, cookie: res.headers['set-cookie']?.[0]?.split(';')[0] }),
+        );
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+// Gateway listener'i bilan alohida ilova (umumiy DB va soxta upstream'lar bilan).
+async function withLive(run: (live: TestApp, port: number) => Promise<void>, workers = false) {
+  const live = await startTestApp({
+    db: app.db,
+    now: () => now,
+    deviceManagement: mesh.factory,
+    remote: remote.upstream,
+    workers,
+  });
+  try {
+    const port = await live.get<RemoteGateway>(RemoteGateway).listen(0, '127.0.0.1');
+    await run(live, port);
+  } finally {
+    await live.close();
+  }
+}
 
 describe('renewing remote sessions', () => {
   test('renew extends the session and the lease', async () => {
@@ -167,6 +219,73 @@ describe('renewing remote sessions', () => {
     const res = await renew(teacher, other.id);
     expect(res.status).toBe(409);
     expect(res.json.error.code).toBe('conflict');
+  });
+});
+
+describe('gateway-initiated closes', () => {
+  test('renew conflicts when the gateway no longer has the session', async () => {
+    const d = await device();
+    const lesson = await lessonIn();
+    const s = (await open(app, teacher, lesson.id, { deviceId: d, mode: 'control' })).json;
+    // Gateway sessiyani unutgan, DB qatori hali faol (masalan F1 hook'i ishlamay qolgan).
+    await gateway().close(s.id);
+    expect((await sessionRow(s.id))?.status).toBe('active');
+
+    now = start + 10_000;
+    const res = await renew(teacher, s.id, { fencing: s.lease.fencing });
+    expect(res.status).toBe(409);
+    expect(res.json.error.code).toBe('conflict');
+    expect((await sessionRow(s.id))?.expiresAt.getTime()).toBe(start + 30_000);
+    const [lease] = await app.db.db.select().from(controlLeases);
+    expect(lease?.expiresAt.getTime()).toBe(start + 30_000);
+  });
+
+  test('a second viewer in the same browser closes the first session', async () => {
+    await withLive(async (live, port) => {
+      const [d1, d2] = [await device(), await device()];
+      const lesson = (await startLesson(live, teacher, roomId)).json;
+      const a = (await open(live, teacher, lesson.id, { deviceId: d1, mode: 'control' })).json;
+      const b = (await open(live, teacher, lesson.id, { deviceId: d2, mode: 'view' })).json;
+
+      // Bitta brauzer (bitta cookie): avval A, keyin B redeem qilinadi — gateway A'ni almashtiradi.
+      const first = await redeem(live, port, (await ticket(live, teacher, a.id)).json.url);
+      expect(first.status).toBe(303);
+      const second = await redeem(live, port, (await ticket(live, teacher, b.id)).json.url, first.cookie);
+      expect(second.status).toBe(303);
+
+      await eventually(async () => (await sessionRow(a.id))?.status === 'closed');
+      expect(await sessionRow(a.id)).toMatchObject({ status: 'closed', closeReason: 'superseded', closedBy: null });
+      expect((await sessionRow(b.id))?.status).toBe('active');
+      expect(await app.db.db.select().from(controlLeases)).toHaveLength(0);
+      const [audit] = await closeAudits();
+      expect(audit).toMatchObject({ actorUserId: null, targetId: a.id });
+      expect(audit?.details).toEqual({ reason: 'superseded' });
+      const closedEvents = await app.db.db.select().from(events).where(eq(events.type, 'remote_session.closed'));
+      expect(closedEvents.map((e) => e.data)).toEqual([
+        { sessionId: a.id, deviceId: d1, mode: 'control', reason: 'superseded' },
+      ]);
+
+      // A tugagan: renew va ticket 409, qurilma boshqa controller uchun bo'sh.
+      expect((await renew(teacher, a.id, { fencing: a.lease.fencing })).status).toBe(409);
+      expect((await ticket(live, teacher, a.id)).status).toBe(409);
+      expect((await open(live, admin, lesson.id, { deviceId: d1, mode: 'control' })).status).toBe(201);
+    });
+  });
+
+  test('a failed attach on redeem closes the session as upstream_failed', async () => {
+    await withLive(async (live, port) => {
+      const d = await device();
+      const lesson = (await startLesson(live, teacher, roomId)).json;
+      const s = (await open(live, teacher, lesson.id, { deviceId: d, mode: 'control' })).json;
+      const upstream = remote.sessions.get(s.id);
+      if (!upstream) throw new Error('upstream session');
+      upstream.attachError = new Error('login refused');
+
+      expect((await redeem(live, port, (await ticket(live, teacher, s.id)).json.url)).status).toBe(502);
+      await eventually(async () => (await sessionRow(s.id))?.status === 'closed');
+      expect(await sessionRow(s.id)).toMatchObject({ closeReason: 'upstream_failed', closedBy: null });
+      expect(await app.db.db.select().from(controlLeases)).toHaveLength(0);
+    });
   });
 });
 
