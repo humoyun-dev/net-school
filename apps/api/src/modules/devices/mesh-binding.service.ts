@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { CapabilityReport, Device, MeshNode } from '@netschool/contracts';
 import { and, eq, isNull } from 'drizzle-orm';
 import { Access } from '../../common/access.ts';
+import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isForeignKeyViolation, isUniqueViolation, isUuid } from '../../common/db-errors.ts';
 import { ApiError } from '../../common/errors.ts';
 import type { RequestContext } from '../../common/request-context.ts';
@@ -9,6 +10,8 @@ import { API_CONFIG, type ApiConfig } from '../../config/config.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { deviceCapabilities, devices, meshBindings, sites } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
+import { EventLog, Outbox } from '../events/event-log.ts';
+import { closeRemoteSessions } from '../remote-sessions/closing.ts';
 import { DevicesService } from './devices.service.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort, upstream } from './mesh.ts';
 
@@ -24,6 +27,9 @@ export class MeshBindingService {
     @Inject(Access) private readonly access: Access,
     @Inject(AuditWriter) private readonly audit: AuditWriter,
     @Inject(DevicesService) private readonly devices: DevicesService,
+    @Inject(EventLog) private readonly events: EventLog,
+    @Inject(Outbox) private readonly outbox: Outbox,
+    @Inject(CLOCK) private readonly now: Clock,
   ) {}
 
   async configureDomain(ctx: RequestContext, siteId: string, meshDomainId: string) {
@@ -144,13 +150,26 @@ export class MeshBindingService {
     return view;
   }
 
+  // Bog'lanish bilan qurilmaning masofaviy sessiyalari ham yopiladi: principal eski node'ga huquqini saqlamaydi va node
+  // boshqa qurilmaga bog'lansa begona xona qurilmasiga kirib qolmaydi. Chaqiruvchi commit'dan keyin kick (remote.revoke).
   async unbind(ctx: RequestContext, deviceId: string): Promise<void> {
     const device = await this.devices.manageable(ctx, deviceId);
     await this.db.transaction(async (tx) => {
       const [removed] = await tx.delete(meshBindings).where(eq(meshBindings.deviceId, device.id)).returning();
       if (!removed) throw new ApiError('conflict', 'Device is not bound');
+      const actorUserId = this.access.actor(ctx).userId;
+      await closeRemoteSessions(
+        tx,
+        { deviceId: device.id },
+        'device_left',
+        new Date(this.now()),
+        actorUserId,
+        ctx.correlationId,
+        { events: this.events, outbox: this.outbox, audit: this.audit },
+      );
       await this.devices.ok(tx, ctx, 'device.unbind', device, { meshNodeId: removed.meshNodeId });
     });
+    this.outbox.kick();
   }
 
   async #site(ctx: RequestContext, siteId: string, action: 'site.configure_mesh' | 'device.manage'): Promise<SiteRow> {
