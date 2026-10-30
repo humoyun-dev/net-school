@@ -39,7 +39,7 @@ import { AuditWriter } from '../audit/audit.writer.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort, upstream } from '../devices/mesh.ts';
 import { EventLog, Outbox } from '../events/event-log.ts';
 import { closeRemoteSessions } from './closing.ts';
-import { RemoteGateway } from './remote-gateway.ts';
+import { type GatewayEndReason, RemoteGateway } from './remote-gateway.ts';
 
 type SessionRow = typeof remoteSessions.$inferSelect;
 type LessonRow = typeof lessons.$inferSelect;
@@ -115,7 +115,9 @@ export class RemoteSessionsService {
     @Inject(EventLog) private readonly events: EventLog,
     @Inject(Outbox) private readonly outbox: Outbox,
     @Inject(RemoteGateway) private readonly gateway: RemoteGateway,
-  ) {}
+  ) {
+    gateway.onSessionEnded((sessionId, reason) => void this.#closeEnded(sessionId, reason));
+  }
 
   // Darvoza tartibi: ruxsat → a'zolik (403) → MeshCentral sozlanganligi → capability → agent online → lease.
   // MeshCentral chaqiruvlari tranzaksiyadan tashqarida: tranzaksiya faqat qatorlarni yozadi.
@@ -213,6 +215,8 @@ export class RemoteSessionsService {
     await this.access.require(ctx, action, lessonTarget({ ...session, teacherUserId: lesson.teacherUserId }), on);
     const fencing = input.fencing;
     if (session.mode === 'control' && fencing === undefined) throw new ApiError('validation_failed');
+    // Gateway'da yo'q sessiya uzaymaydi: DB'da yopilmay qolgan bo'lsa ham muddati tugab sweep yopadi.
+    if (!this.gateway.isOpen(session.id)) throw new ApiError('conflict', 'Remote session is not open');
     return this.db.transaction(async (tx) => {
       const at = new Date(this.now());
       const until = new Date(at.getTime() + CONTROL_LEASE_MS);
@@ -459,6 +463,21 @@ export class RemoteSessionsService {
       await this.gateway.close(sessionId);
     } catch {
       this.#log.warn(`Revoking remote session ${sessionId} failed; it will be retried`);
+    }
+  }
+
+  // Gateway o'zi yopgan sessiya (`superseded`, attach xatosi — `upstream_failed`): lease bo'shaydi, ticket va renew 409.
+  // Xato faqat logga: renew gateway'ni tekshiradi, sessiya muddati tugab yopiladi.
+  async #closeEnded(sessionId: string, reason: GatewayEndReason): Promise<void> {
+    try {
+      const closed = await this.db.transaction((tx) =>
+        closeRemoteSessions(tx, { sessionId }, reason, new Date(this.now()), null, null, this.#closeDeps()),
+      );
+      if (closed.length > 0) this.outbox.kick();
+    } catch (err) {
+      this.#log.error(
+        `Closing remote session ${sessionId} (${reason}) failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

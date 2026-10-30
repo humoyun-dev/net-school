@@ -554,7 +554,7 @@ export const remoteSessions = pgTable(
     check('remote_sessions_status', sql`${t.status} in ('opening', 'active', 'closed')`),
     check(
       'remote_sessions_close_reason',
-      sql`${t.closeReason} in ('teacher', 'admin', 'lesson_ended', 'device_left', 'lease_expired', 'upstream_failed', 'restart')`,
+      sql`${t.closeReason} in ('teacher', 'admin', 'lesson_ended', 'device_left', 'lease_expired', 'upstream_failed', 'restart', 'superseded')`,
     ),
     check(
       'remote_sessions_closed_consistent',

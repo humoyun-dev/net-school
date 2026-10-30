@@ -516,6 +516,7 @@ describe('lesson invariants', () => {
       'lease_expired',
       'upstream_failed',
       'restart',
+      'superseded',
     ]) {
       await expect(
         session(s, l, d, { status: 'closed', closedAt: new Date(), closeReason: reason }),

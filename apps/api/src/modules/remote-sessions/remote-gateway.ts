@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
-import type { AuthorizedDesktopRequest } from '@netschool/domain';
+import type { AuthorizedDesktopRequest, CloseReason } from '@netschool/domain';
 import { MeshCentralPrincipals, MeshCentralViewerUpstream, type MeshRequester } from '@netschool/meshcentral-adapter';
 import {
   createGateway,
@@ -39,6 +39,9 @@ export function buildRemoteUpstream(mesh: MeshRequester, config: ApiConfig): Rem
 // RemoteUpstream | null; null — MeshCentral sozlanmagan, gateway o'chiq.
 export const REMOTE_UPSTREAM = Symbol('REMOTE_UPSTREAM');
 
+// Gateway o'zi yopgan sessiyaning DB'dagi yopilish sababi.
+export type GatewayEndReason = Extract<CloseReason, 'superseded' | 'upstream_failed'>;
+
 interface Running {
   broker: RemoteSessionBroker;
   tickets: TicketStore;
@@ -55,6 +58,7 @@ export class RemoteGateway implements OnModuleDestroy {
   readonly #log = new Logger('RemoteGateway');
   readonly #running: Running | undefined;
   #listening = false;
+  #onEnded: ((sessionId: string, reason: GatewayEndReason) => void) | undefined;
 
   constructor(
     @Inject(API_CONFIG) config: ApiConfig,
@@ -64,7 +68,13 @@ export class RemoteGateway implements OnModuleDestroy {
     const { gateway, mesh } = config;
     this.enabled = upstream !== null && gateway !== null && mesh !== null;
     if (!upstream || !gateway || !mesh) return;
-    const onEvent = (e: GatewayEvent) => this.#logEvent(e);
+    const onEvent = (e: GatewayEvent) => {
+      this.#logEvent(e);
+      // `revoked` — API'ning o'z yopishi; qolganini gateway o'zi yopdi va DB sessiyasi ham yopilishi kerak.
+      if (e.type === 'session_closed' && e.reason !== 'revoked') {
+        this.#onEnded?.(e.sessionId, e.reason === 'superseded' ? 'superseded' : 'upstream_failed');
+      }
+    };
     const tickets = new TicketStore({ now });
     const registry = new SessionRegistry();
     const broker = new RemoteSessionBroker({ upstream: upstream.viewer, tickets, registry, onEvent });
@@ -102,6 +112,11 @@ export class RemoteGateway implements OnModuleDestroy {
   // Soketlar 1008 bilan yopiladi, keyin principal o'chiriladi; takroriy chaqiruv xavfsiz.
   async close(sessionId: string): Promise<void> {
     await this.#running?.broker.close(sessionId);
+  }
+
+  // RemoteSessionsService ulanadi: gateway o'zi yopgan sessiya (boshqa viewer almashtirdi, attach xatosi) DB'da yopiladi.
+  onSessionEnded(listener: (sessionId: string, reason: GatewayEndReason) => void): void {
+    this.#onEnded = listener;
   }
 
   isOpen(sessionId: string): boolean {

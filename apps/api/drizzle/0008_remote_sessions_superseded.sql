@@ -1,0 +1,2 @@
+ALTER TABLE "remote_sessions" DROP CONSTRAINT "remote_sessions_close_reason";--> statement-breakpoint
+ALTER TABLE "remote_sessions" ADD CONSTRAINT "remote_sessions_close_reason" CHECK ("remote_sessions"."close_reason" in ('teacher', 'admin', 'lesson_ended', 'device_left', 'lease_expired', 'upstream_failed', 'restart', 'superseded'));
