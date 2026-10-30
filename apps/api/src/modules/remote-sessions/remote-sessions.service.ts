@@ -1,5 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { CapabilityReport, OpenRemoteSessionRequest, RemoteSession, RemoteTicket } from '@netschool/contracts';
+import type {
+  CapabilityReport,
+  OpenRemoteSessionRequest,
+  RemoteSession,
+  RemoteTicket,
+  RenewRemoteSessionRequest,
+} from '@netschool/contracts';
 import {
   type Action,
   type AuthorizedDesktopRequest,
@@ -10,7 +16,7 @@ import {
   remoteAction,
   type UpstreamDeviceRef,
 } from '@netschool/domain';
-import { and, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
 import { Access, type AuditTarget } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isUuid } from '../../common/db-errors.ts';
@@ -180,6 +186,72 @@ export class RemoteSessionsService {
     return { url, expiresAt: new Date(expiresAt).toISOString() };
   }
 
+  // Faqat egasi; sessiya va (control) lease birga uzayadi yoki hech biri. Eskirgan fencing, muddati o'tgan yoki
+  // yopilgan sessiya — 409: eski controller hech narsani uzaytira olmaydi.
+  async renew(ctx: RequestContext, sessionId: string, input: RenewRemoteSessionRequest): Promise<RemoteSession> {
+    const { session, lesson } = await this.#find(ctx, sessionId, 'remote.view');
+    const action = remoteAction(session.mode as RemoteMode);
+    const on: AuditTarget = { targetType: 'remote_session', targetId: session.id };
+    if (session.actorUserId !== this.access.actor(ctx).userId) return this.access.deny(ctx, action, on, session.siteId);
+    await this.access.require(ctx, action, lessonTarget({ ...session, teacherUserId: lesson.teacherUserId }), on);
+    const fencing = input.fencing;
+    if (session.mode === 'control' && fencing === undefined) throw new ApiError('validation_failed');
+    return this.db.transaction(async (tx) => {
+      const at = new Date(this.now());
+      const until = new Date(at.getTime() + CONTROL_LEASE_MS);
+      const renewed = await tx
+        .update(remoteSessions)
+        .set({ expiresAt: until })
+        .where(
+          and(eq(remoteSessions.id, session.id), eq(remoteSessions.status, 'active'), gt(remoteSessions.expiresAt, at)),
+        )
+        .returning({ id: remoteSessions.id });
+      if (renewed.length !== 1) throw new ApiError('conflict', 'Remote session is not open');
+      if (session.mode === 'control') {
+        // numeric bilan solishtiriladi: 19 xonali, bigint'dan katta qiymat ham xatosiz mos kelmaydi.
+        const lease = await tx
+          .update(controlLeases)
+          .set({ expiresAt: until })
+          .where(
+            and(
+              eq(controlLeases.deviceId, session.deviceId),
+              eq(controlLeases.sessionId, session.id),
+              sql`${controlLeases.fencing} = ${fencing}::numeric`,
+              gt(controlLeases.expiresAt, at),
+            ),
+          )
+          .returning({ deviceId: controlLeases.deviceId });
+        // Throw tranzaksiyani qaytaradi: sessiya muddati ham uzaymaydi.
+        if (lease.length !== 1) throw new ApiError('conflict', 'Control lease is not held');
+      }
+      return this.view(tx, session.id);
+    });
+  }
+
+  // Egasi (`teacher`) yoki remote.manage (`admin`). Allaqachon yopilgan sessiya o'zgarmaydi.
+  async close(ctx: RequestContext, sessionId: string): Promise<void> {
+    const { session, lesson } = await this.#find(ctx, sessionId, 'remote.manage');
+    const actor = this.access.actor(ctx);
+    const own = session.actorUserId === actor.userId;
+    const action: Action = own ? remoteAction(session.mode as RemoteMode) : 'remote.manage';
+    await this.access.require(ctx, action, lessonTarget({ ...session, teacherUserId: lesson.teacherUserId }), {
+      targetType: 'remote_session',
+      targetId: session.id,
+    });
+    const closed = await this.db.transaction((tx) =>
+      closeRemoteSessions(
+        tx,
+        { sessionId: session.id },
+        own ? 'teacher' : 'admin',
+        new Date(this.now()),
+        actor.userId,
+        ctx.correlationId,
+        this.#closeDeps(),
+      ),
+    );
+    if (closed.length > 0) this.outbox.kick();
+  }
+
   async get(ctx: RequestContext, sessionId: string): Promise<RemoteSession> {
     const { session, lesson } = await this.#find(ctx, sessionId, 'remote.manage');
     const own = session.actorUserId === this.access.actor(ctx).userId;
@@ -321,6 +393,7 @@ export class RemoteSessionsService {
           this.#closeDeps(),
         ),
       );
+      this.outbox.kick();
       throw err;
     }
     let activated: boolean;

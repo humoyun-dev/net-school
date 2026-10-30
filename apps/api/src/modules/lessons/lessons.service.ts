@@ -11,6 +11,7 @@ import { DB, type Db } from '../../db/client.ts';
 import { commands, commandTargets, devices, lessonDevices, lessons, rooms } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import { EventLog, Outbox } from '../events/event-log.ts';
+import { closeRemoteSessions } from '../remote-sessions/closing.ts';
 
 export type LessonRow = typeof lessons.$inferSelect;
 export type EndReason = 'teacher' | 'admin' | 'timeout';
@@ -143,12 +144,15 @@ export class LessonsService {
       { targetType: 'lesson', targetId: lesson.id },
     );
     const reason: EndReason = actor.userId === lesson.teacherUserId ? 'teacher' : 'admin';
-    return this.idempotency.run(ctx, `POST /lessons/${lesson.id}/end`, key, {}, 200, (tx) =>
+    const result = await this.idempotency.run(ctx, `POST /lessons/${lesson.id}/end`, key, {}, 200, (tx) =>
       this.endLesson(tx, lesson.id, reason, actor.userId, ctx.correlationId),
     );
+    this.outbox.kick();
+    return result;
   }
 
-  // Bitta tranzaksiyada: dars yopiladi, qurilmalar bo'shaydi, ochiq buyruq target'lari bekor qilinadi.
+  // Bitta tranzaksiyada: dars yopiladi, qurilmalar bo'shaydi, ochiq buyruq target'lari va masofaviy sessiyalar yopiladi.
+  // Chaqiruvchi commit'dan keyin Outbox.kick() qiladi (remote.revoke).
   async endLesson(tx: Db, lessonId: string, reason: EndReason, endedBy: string | null, correlationId: string) {
     const at = new Date(this.now());
     const [lesson] = await tx
@@ -169,6 +173,12 @@ export class LessonsService {
       .where(and(inArray(commandTargets.commandId, lessonCommands), inArray(commandTargets.status, OPEN_STATUSES)))
       .returning({ commandId: commandTargets.commandId });
     const deviceIds = released.map((r) => r.deviceId).sort();
+    // Xona voqeasidan oldin: sessiya qatorlari xona lock'idan oldin olinadi (closing.ts dagi lock tartibi).
+    await closeRemoteSessions(tx, { lessonId: lesson.id }, 'lesson_ended', at, endedBy, correlationId, {
+      events: this.events,
+      outbox: this.outbox,
+      audit: this.audit,
+    });
     await this.events.append(tx, {
       organizationId: lesson.organizationId,
       siteId: lesson.siteId,

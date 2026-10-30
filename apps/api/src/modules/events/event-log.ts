@@ -54,10 +54,23 @@ export interface OutboxPayload {
 // Tashqi effektlar (uyg'otish, keyin MeshCentral) worker orqali, qayta urinish bilan.
 @Injectable()
 export class Outbox {
+  #onKick: (() => void) | undefined;
+
   constructor(@Inject(CLOCK) private readonly now: Clock) {}
 
   async enqueue(tx: Db, organizationId: string, topic: OutboxTopic, payload: OutboxPayload): Promise<void> {
     const at = new Date(this.now());
     await tx.insert(outbox).values({ organizationId, topic, payload, createdAt: at, nextAttemptAt: at });
+  }
+
+  // Shoshilinch qatorlar (remote.revoke) yozilgan tranzaksiya commit bo'lgach chaqiriladi: worker intervalni kutmaydi.
+  // Tranzaksiya ichida chaqirilmaydi — commit'gacha worker qatorni ko'rmaydi.
+  kick(): void {
+    this.#onKick?.();
+  }
+
+  // OutboxWorker o'zini ulaydi (modul sikli bo'lmasligi uchun xizmatlar worker'ni emas, Outbox'ni biladi).
+  onKick(listener: () => void): void {
+    this.#onKick = listener;
   }
 }

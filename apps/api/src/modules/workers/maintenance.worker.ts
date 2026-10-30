@@ -5,8 +5,10 @@ import { CLOCK, type Clock } from '../../common/clock.ts';
 import { ApiError } from '../../common/errors.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { commands, commandTargets, events, idempotencyKeys, lessons, outbox } from '../../db/schema.ts';
+import { AuditWriter } from '../audit/audit.writer.ts';
 import { EventLog, Outbox } from '../events/event-log.ts';
 import { LessonsService } from '../lessons/lessons.service.ts';
+import { closeRemoteSessions } from '../remote-sessions/closing.ts';
 import { WORKERS_ENABLED } from './outbox.worker.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -15,7 +17,7 @@ const INTERVAL_MS = 1_000;
 const PURGE_EVERY_MS = 60_000;
 const OPEN = ['pending', 'sent', 'acknowledged'];
 
-// Muddat va tozalash: eskirgan target'lar, vaqti tugagan darslar, eski yozuvlar.
+// Muddat va tozalash: eskirgan target'lar, vaqti tugagan darslar, yangilanmagan masofaviy sessiyalar, eski yozuvlar.
 @Injectable()
 export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestroy {
   readonly #log = new Logger('MaintenanceWorker');
@@ -30,6 +32,7 @@ export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestro
     @Inject(LessonsService) private readonly lessons: LessonsService,
     @Inject(EventLog) private readonly events: EventLog,
     @Inject(Outbox) private readonly outbox: Outbox,
+    @Inject(AuditWriter) private readonly audit: AuditWriter,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -41,9 +44,12 @@ export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestro
     clearInterval(this.#timer);
   }
 
-  async tick(now: number): Promise<{ expiredTargets: number; endedLessons: number; purged: number }> {
+  async tick(
+    now: number,
+  ): Promise<{ expiredTargets: number; endedLessons: number; expiredSessions: number; purged: number }> {
     const expiredTargets = await this.#expire(now);
     const endedLessons = await this.#endOverdue(now);
+    const expiredSessions = await this.#expireSessions(now);
     // Tozalash og'ir: daqiqada bir marta.
     let purged = 0;
     // Soat orqaga ketsa (now < oxirgi) ham tozalash to'xtab qolmaydi.
@@ -52,7 +58,7 @@ export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestro
       purged = await this.#purge(now);
       this.#lastPurge = now;
     }
-    return { expiredTargets, endedLessons, purged };
+    return { expiredTargets, endedLessons, expiredSessions, purged };
   }
 
   // Shartli: receipt yoki dars tugashi bilan terminal bo'lgan target'ga tegilmaydi.
@@ -126,7 +132,23 @@ export class MaintenanceWorker implements OnApplicationBootstrap, OnModuleDestro
         if (!(err instanceof ApiError && err.code === 'conflict')) throw err;
       }
     }
+    if (ended > 0) this.outbox.kick();
     return ended;
+  }
+
+  // Renew qilinmagan sessiya (control'da lease ham) muddati tugagach yopiladi. Takeover qilingan eski sessiya ham shu
+  // yerda yopiladi: uning muddati lease bilan birga o'tgan.
+  async #expireSessions(now: number): Promise<number> {
+    const at = new Date(now);
+    const closed = await this.db.transaction((tx) =>
+      closeRemoteSessions(tx, { expiredAt: at }, 'lease_expired', at, null, `maintenance-${randomUUID()}`, {
+        events: this.events,
+        outbox: this.outbox,
+        audit: this.audit,
+      }),
+    );
+    if (closed.length > 0) this.outbox.kick();
+    return closed.length;
   }
 
   async #purge(now: number): Promise<number> {

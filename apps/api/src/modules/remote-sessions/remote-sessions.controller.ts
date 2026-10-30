@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
-import { openRemoteSessionRequestSchema } from '@netschool/contracts';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
+import { openRemoteSessionRequestSchema, renewRemoteSessionRequestSchema } from '@netschool/contracts';
 import type { Request, Response } from 'express';
 import { idempotencyKeyOf } from '../../common/idempotency.ts';
 import { requestContext } from '../../common/request-context.ts';
@@ -35,5 +35,18 @@ export class RemoteSessionsController {
   @Get('remote-sessions/:sessionId')
   get(@Param('sessionId') sessionId: string, @Req() req: Request) {
     return this.sessions.get(requestContext(req), sessionId);
+  }
+
+  // Client har 10 s'da chaqiradi (lease 30 s).
+  @Post('remote-sessions/:sessionId/renew')
+  @HttpCode(200)
+  renew(@Param('sessionId') sessionId: string, @Body() body: unknown, @Req() req: Request) {
+    return this.sessions.renew(requestContext(req), sessionId, parseBody(renewRemoteSessionRequestSchema, body));
+  }
+
+  @Delete('remote-sessions/:sessionId')
+  @HttpCode(204)
+  async close(@Param('sessionId') sessionId: string, @Req() req: Request): Promise<void> {
+    await this.sessions.close(requestContext(req), sessionId);
   }
 }

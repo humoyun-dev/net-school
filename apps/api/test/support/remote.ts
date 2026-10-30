@@ -8,6 +8,10 @@ import type { RemoteUpstream } from '../../src/modules/remote-sessions/remote-ga
 export class FakeViewerSession implements UpstreamViewerSession {
   readonly entryPath = '/viewer/entry';
   revokeCalls = 0;
+  // Keyingi shuncha revoke xato bilan tugaydi (qayta urinish testlari).
+  revokeFailures = 0;
+  // Berilsa revoke shu va'dani kutadi (timeout testlari).
+  revokeHold: Promise<void> | undefined;
 
   async attach(): Promise<void> {}
   routeHttp() {
@@ -25,6 +29,11 @@ export class FakeViewerSession implements UpstreamViewerSession {
   }
   async revoke(): Promise<void> {
     this.revokeCalls++;
+    if (this.revokeHold) await this.revokeHold;
+    if (this.revokeFailures > 0) {
+      this.revokeFailures--;
+      throw new Error('revoke rejected');
+    }
   }
 }
 

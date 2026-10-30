@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { outbox } from '../src/db/schema.ts';
+import { Outbox } from '../src/modules/events/event-log.ts';
 import { DEVICE_NOTIFIER, type Notifier, ROOM_NOTIFIER } from '../src/modules/events/notifier.ts';
+import { RemoteGateway } from '../src/modules/remote-sessions/remote-gateway.ts';
 import { OutboxWorker } from '../src/modules/workers/outbox.worker.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { setCapabilities, setHeartbeat } from './support/caps.ts';
@@ -47,9 +49,18 @@ const eventually = async (check: () => Promise<boolean>, ms = 2_000) => {
     await sleep(10);
   }
 };
-// workers: true bilan, lekin interval ishga tushirilmagan (onApplicationBootstrap chaqirilmaydi).
-const enabledWorker = () =>
-  new OutboxWorker(app.db.db, () => now, true, app.get<Notifier>(DEVICE_NOTIFIER), app.get<Notifier>(ROOM_NOTIFIER));
+// workers: true bilan, lekin interval ishga tushirilmagan (onApplicationBootstrap chaqirilmaydi). O'z Outbox'i:
+// ilovaning kick'ini egallab olmaydi.
+const enabledWorker = (signal = new Outbox(() => now)) =>
+  new OutboxWorker(
+    app.db.db,
+    () => now,
+    true,
+    app.get<Notifier>(DEVICE_NOTIFIER),
+    app.get<Notifier>(ROOM_NOTIFIER),
+    signal,
+    app.get<RemoteGateway>(RemoteGateway),
+  );
 
 describe('outbox worker', () => {
   test('outbox rows wake waiting devices and rooms', async () => {
@@ -191,6 +202,29 @@ describe('outbox worker', () => {
     expect(r?.nextAttemptAt.getTime()).toBe(now + 30_001 + 30_000);
   });
 
+  test('rows whose claim lease passed mid-batch are left for the next claim', async () => {
+    const seen: string[] = [];
+    worker.register('test.batch', (p) => {
+      const name = (p as { name: string }).name;
+      seen.push(name);
+      // Birinchi handler butun claim lease'ini yeydi.
+      if (name === 'first') now += 30_000;
+    });
+    const first = await enqueue('test.batch', { name: 'first' });
+    const second = await enqueue('test.batch', { name: 'second' });
+    const claimedAt = now;
+    expect(await worker.tick(now)).toBe(1);
+    expect(seen).toEqual(['first']);
+    expect((await rowOf(first.id))?.processedAt).not.toBeNull();
+    // Ikkinchisi bajarilmagan va natijasi yozilmagan: lease tugagach qayta olinadi.
+    const left = await rowOf(second.id);
+    expect(left).toMatchObject({ attempts: 1, processedAt: null, lastError: null });
+    expect(left?.nextAttemptAt.getTime()).toBe(claimedAt + 30_000);
+    expect(await worker.tick(now)).toBe(1);
+    expect(seen).toEqual(['first', 'second']);
+    expect(await rowOf(second.id)).toMatchObject({ attempts: 2, lastError: null });
+  });
+
   test('kick runs a tick without waiting for the interval', async () => {
     let calls = 0;
     worker.register('test.kick', () => {
@@ -203,11 +237,13 @@ describe('outbox worker', () => {
     expect(calls).toBe(0);
     expect((await rowOf(off.id))?.processedAt).toBeNull();
 
-    const on = enabledWorker();
+    // Xizmatlar commit'dan keyin Outbox.kick() chaqiradi — worker shu signalga ulangan.
+    const signal = new Outbox(() => now);
+    const on = enabledWorker(signal);
     on.register('test.kick', () => {
       calls += 1;
     });
-    on.kick();
+    signal.kick();
     await eventually(async () => (await rowOf(off.id))?.processedAt != null);
     expect(calls).toBe(1);
   });

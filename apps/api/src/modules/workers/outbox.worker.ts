@@ -3,8 +3,9 @@ import { and, asc, eq, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { outbox } from '../../db/schema.ts';
-import type { OutboxPayload } from '../events/event-log.ts';
+import { Outbox, type OutboxPayload } from '../events/event-log.ts';
 import { DEVICE_NOTIFIER, type Notifier, ROOM_NOTIFIER } from '../events/notifier.ts';
+import { RemoteGateway } from '../remote-sessions/remote-gateway.ts';
 
 export const WORKERS_ENABLED = Symbol('WORKERS_ENABLED');
 export const OUTBOX_MAX_ATTEMPTS = 10;
@@ -13,9 +14,31 @@ const INTERVAL_MS = 250;
 const MAX_BACKOFF_MS = 60_000;
 // Claim lease: shu muddatda natija yozilmasa (jarayon o'lgan) qator qayta olinadi.
 const CLAIM_LEASE_MS = 30_000;
+// Revoke claim lease ichida tugashi shart: osilib qolgan upstream chaqiruvi xato bo'lib qayta uriniladi.
+export const REVOKE_TIMEOUT_MS = 10_000;
 
 type Handler = (payload: OutboxPayload) => void | Promise<void>;
 type Row = typeof outbox.$inferSelect;
+
+// Gateway soketlari (1008) va principal yopiladi. Noma'lum yoki allaqachon yopilgan sessiya — muvaffaqiyat, gateway
+// o'chiq — no-op. Vaqt tugasa broker'dagi revoke to'xtamaydi: keyingi urinish o'sha jarayondagi revoke'ni kutadi.
+// Revoke'dan keyin yaratilgan principal (kechikkan aktivatsiya) reconciliation'da tozalanadi.
+export async function revokeRemoteSession(
+  gateway: RemoteGateway,
+  sessionId: string,
+  timeoutMs = REVOKE_TIMEOUT_MS,
+): Promise<void> {
+  if (!gateway.enabled) return;
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Revoke timed out after ${timeoutMs} ms`)), timeoutMs);
+  });
+  try {
+    await Promise.race([gateway.close(sessionId), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Outbox qatorlarini qayta urinish bilan bajaradi. Claim va bajarish ajratilgan: qatorlar qisqa tranzaksiyada
 // `FOR UPDATE SKIP LOCKED` bilan olinib, claim lease (`next_attempt_at = now + 30 s`) bilan commit qilinadi; handler'lar
@@ -37,9 +60,16 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     @Inject(WORKERS_ENABLED) private readonly enabled: boolean,
     @Inject(DEVICE_NOTIFIER) devices: Notifier,
     @Inject(ROOM_NOTIFIER) rooms: Notifier,
+    @Inject(Outbox) outbox: Outbox,
+    @Inject(RemoteGateway) gateway: RemoteGateway,
   ) {
     this.register('notify.devices', (p) => devices.wake(p.deviceIds ?? []));
     this.register('notify.rooms', (p) => rooms.wake(p.roomIds ?? []));
+    this.register('remote.revoke', (p) => {
+      if (!p.sessionId) throw new Error('remote.revoke without sessionId');
+      return revokeRemoteSession(gateway, p.sessionId);
+    });
+    outbox.onKick(() => this.kick());
   }
 
   register(topic: string, handler: Handler): void {
@@ -70,6 +100,9 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     const claimed = await this.#claim(now, claimedUntil);
     let processed = 0;
     for (const row of claimed) {
+      // Bitta claim 100 tagacha qatorni ketma-ket bajaradi: lease tugagan bo'lsa qolganlarini boshqa tick qayta olgan
+      // bo'lishi mumkin — natija yozilmaydi, ular lease tugagani uchun keyingi claim'da bajariladi.
+      if (this.now() >= claimedUntil.getTime()) break;
       if (await this.#run(row, now, claimedUntil)) processed += 1;
     }
     return processed;
