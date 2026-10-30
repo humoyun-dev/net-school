@@ -56,6 +56,9 @@ importers:
       '@netschool/meshcentral-adapter':
         specifier: workspace:*
         version: link:../../packages/meshcentral-adapter
+      '@netschool/session-gateway':
+        specifier: workspace:*
+        version: link:../../packages/session-gateway
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@electric-sql/pglite@0.5.12)(@types/pg@8.23.1)(pg@8.23.1)
