@@ -400,6 +400,29 @@ describe('closing remote sessions', () => {
     expect(remote.sessions.get(c.id)?.revokeCalls).toBe(0);
   });
 
+  test('unbinding a device closes its remote sessions', async () => {
+    const d = await device();
+    const other = await device();
+    const lesson = await lessonIn();
+    const control = (await open(app, teacher, lesson.id, { deviceId: d, mode: 'control' })).json;
+    const view = (await open(app, admin, lesson.id, { deviceId: d, mode: 'view' })).json;
+    const stays = (await open(app, teacher, lesson.id, { deviceId: other, mode: 'view' })).json;
+
+    expect((await app.request('DELETE', `/api/v1/devices/${d}/mesh-binding`, { cookie: admin })).status).toBe(204);
+    for (const id of [control.id, view.id]) {
+      expect(await sessionRow(id)).toMatchObject({ status: 'closed', closeReason: 'device_left', closedBy: adminId });
+      expect(gateway().isOpen(id)).toBe(false);
+    }
+    expect((await sessionRow(stays.id))?.status).toBe('active');
+    expect(await app.db.db.select().from(controlLeases)).toHaveLength(0);
+    expect(await closeAudits()).toHaveLength(2);
+
+    await outboxTick();
+    expect(remote.sessions.get(control.id)?.revokeCalls).toBe(1);
+    expect(remote.sessions.get(view.id)?.revokeCalls).toBe(1);
+    expect(remote.sessions.get(stays.id)?.revokeCalls).toBe(0);
+  });
+
   test('unrenewed session expires and frees the device', async () => {
     const d = await device();
     const lesson = await lessonIn();
