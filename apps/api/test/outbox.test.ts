@@ -141,6 +141,56 @@ describe('outbox worker', () => {
     expect((await rowOf(row.id))?.processedAt?.getTime()).toBe(now + 30_001);
   });
 
+  test('a handler that crashes every time is parked after the attempt limit', async () => {
+    let calls = 0;
+    // Har claim'dan keyin jarayon o'lganini taqlid qiladi: natija hech qachon yozilmaydi.
+    worker.register('test.crash', () => {
+      calls += 1;
+      return new Promise<void>(() => {});
+    });
+    const row = await enqueue('test.crash');
+    let at = now;
+    for (let i = 1; i <= 10; i++) {
+      void worker.tick(at);
+      await eventually(async () => calls === i);
+      at += 30_001;
+    }
+    const parked = await rowOf(row.id);
+    expect(parked).toMatchObject({ attempts: 10, processedAt: null });
+    expect(await worker.tick(at + 3_600_000)).toBe(0);
+    expect(calls).toBe(10);
+  });
+
+  test('a late failure does not reset a newer claim', async () => {
+    let calls = 0;
+    let fail!: () => void;
+    const gate = new Promise<void>((r) => {
+      fail = r;
+    });
+    let claimed!: () => void;
+    const firstCall = new Promise<void>((r) => {
+      claimed = r;
+    });
+    worker.register('test.slowfail', async () => {
+      calls += 1;
+      if (calls > 1) return new Promise<void>(() => {});
+      claimed();
+      await gate;
+      throw new Error('late boom');
+    });
+    const row = await enqueue('test.slowfail');
+    const stale = worker.tick(now);
+    await firstCall;
+    // Lease tugadi: boshqa tick qatorni qayta oldi va handler hali ishlamoqda.
+    void worker.tick(now + 30_001);
+    await eventually(async () => calls === 2);
+    fail();
+    expect(await stale).toBe(0);
+    const r = await rowOf(row.id);
+    expect(r).toMatchObject({ attempts: 2, processedAt: null, lastError: null });
+    expect(r?.nextAttemptAt.getTime()).toBe(now + 30_001 + 30_000);
+  });
+
   test('kick runs a tick without waiting for the interval', async () => {
     let calls = 0;
     worker.register('test.kick', () => {

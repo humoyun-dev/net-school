@@ -146,7 +146,7 @@ describe.skipIf(!realPg)('concurrency on real PostgreSQL', () => {
     expect(lockError).toBeUndefined();
     expect(processed).toBe(1);
     const [after] = await app.db.db.select().from(outbox).where(eq(outbox.id, row.id));
-    expect(after).toMatchObject({ attempts: 0, lastError: null });
+    expect(after).toMatchObject({ attempts: 1, lastError: null });
     expect(after?.processedAt?.getTime()).toBe(now);
   });
 });
