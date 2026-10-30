@@ -1,17 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import type { CloseReason } from '@netschool/domain';
-import { and, asc, eq, inArray, lte, ne, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, ne, type SQL, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { controlLeases, remoteSessions } from '../../db/schema.ts';
 import type { AuditWriter } from '../audit/audit.writer.ts';
 import type { EventLog, Outbox } from '../events/event-log.ts';
 
-export type SessionFilter = { lessonId: string } | { deviceId: string } | { sessionId: string } | { expiredAt: Date };
+export type SessionFilter =
+  | { lessonId: string }
+  | { deviceId: string }
+  | { sessionId: string }
+  | { expiredAt: Date }
+  // Hamma yopilmagan sessiyalar: qayta ishga tushishda (gateway xotirasi bo'sh).
+  | { all: true };
 
 function matching(filter: SessionFilter): SQL {
   if ('lessonId' in filter) return eq(remoteSessions.lessonId, filter.lessonId);
   if ('deviceId' in filter) return eq(remoteSessions.deviceId, filter.deviceId);
   if ('sessionId' in filter) return eq(remoteSessions.id, filter.sessionId);
+  if ('all' in filter) return sql`true`;
   return lte(remoteSessions.expiresAt, filter.expiredAt);
 }
 
