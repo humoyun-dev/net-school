@@ -35,7 +35,8 @@ const originSchema = z
   .url({ protocol: /^https$/ })
   .refine((v) => URL.canParse(v) && new URL(v).origin === v, 'must be a bare origin');
 
-// *_FILE (Docker secrets) bo'lsa fayldan o'qiladi; oxiridagi bo'sh joy kesiladi.
+// *_FILE (Docker secrets) bo'lsa fayldan o'qiladi; boshi va oxiridagi bo'sh joy (\r\n ham) kesiladi — MeshCentral
+// entrypoint.sh service parolini aynan shunday (String.prototype.trim) o'qiydi.
 function read(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const file = env[`${name}_FILE`];
   if (file) return readFileSync(file, 'utf8').trim();

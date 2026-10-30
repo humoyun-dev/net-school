@@ -25,7 +25,7 @@ node meshcentral --datapath ../../../meshcentral-data --port 8443 --redirport 80
 | `allowLoginToken` | `false` | Login token brauzerga upstream credential beradi (taqiqlangan). |
 | `allowFraming` | `false` | `X-Frame-Options` default `sameorigin`; framing yoqilmaydi. |
 | `cookieIpCheck` | `strict` | Sessiya cookie'si IP'ga bog'lanadi (webserver.js:11184). |
-| `maxInvalidLogin` | `10 / 10 / 10`, `blocking: ip`, `exclude: 127.0.0.1,::1` | Default `iprange` (/24) o'rniga aniq IP; gateway loopback'dan keladi, shuning uchun istisno (webserver.js:10892-10971). |
+| `maxInvalidLogin` | `10 / 10 / 10`, `blocking: ip`, `exclude: 127.0.0.1,::1` | Default `iprange` (/24) o'rniga aniq IP (webserver.js:10892-10971). Istisno faqat loopback (konteyner ichidagi CLI/healthcheck). Compose'da gateway trafigi va service account login'i `api` IP'sidan (`API_IP`) keladi — u istisno emas: brauzer so'rovlari `trustedProxy` orqali X-Forwarded-For dagi mijoz IP'siga yoziladi, service account'ning noto'g'ri login'lari esa `api` IP'siga hisoblanib, 10 tadan keyin uni 10 daqiqaga bloklaydi. |
 | `domains[''].newAccounts` | `false` | Ro'yxatdan o'tish yopiq; `newAccountsUserGroups`/`newAccountsRights` berilmaydi. |
 | `domains[''].passwordRequirements` | `min 16, max 128`, har sinfdan 1, `loginTokens: false` | `adduser` bu talablarni siteadmin uchun ham tekshiradi (meshuser.js:6376). |
 
