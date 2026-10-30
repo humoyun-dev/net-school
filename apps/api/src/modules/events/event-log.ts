@@ -38,10 +38,11 @@ export class EventLog {
   }
 }
 
-export type OutboxTopic = 'notify.devices' | 'notify.rooms';
+export type OutboxTopic = 'notify.devices' | 'notify.rooms' | 'remote.revoke';
 export interface OutboxPayload {
   deviceIds?: string[];
   roomIds?: string[];
+  sessionId?: string;
 }
 
 // Tashqi effektlar (uyg'otish, keyin MeshCentral) worker orqali, qayta urinish bilan.

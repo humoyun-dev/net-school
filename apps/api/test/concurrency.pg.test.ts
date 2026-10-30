@@ -1,7 +1,8 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import { commandTargets, events, lessons } from '../src/db/schema.ts';
+import { commandTargets, events, lessons, outbox } from '../src/db/schema.ts';
 import { EventLog } from '../src/modules/events/event-log.ts';
+import { OutboxWorker } from '../src/modules/workers/outbox.worker.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { setCapabilities, setHeartbeat } from './support/caps.ts';
 import { type DeviceKey, deviceRequest, makeDeviceKey, seedDevice } from './support/device.ts';
@@ -114,5 +115,38 @@ describe.skipIf(!realPg)('concurrency on real PostgreSQL', () => {
       (e) => e.type === 'command.target_updated' && (e.data as { status: string }).status === 'sent',
     );
     expect(sent).toEqual([]);
+  });
+
+  test('outbox handlers run outside the claim transaction', async () => {
+    const worker = app.get<OutboxWorker>(OutboxWorker);
+    const [row] = await app.db.db
+      .insert(outbox)
+      .values({
+        organizationId: orgId,
+        topic: 'test.lock',
+        payload: {},
+        createdAt: new Date(now),
+        nextAttemptAt: new Date(now),
+      })
+      .returning();
+    if (!row) throw new Error('outbox');
+    let lockError: unknown;
+    // Handler boshqa pool ulanishidan shu qatorni NOWAIT bilan qulflaydi: claim tranzaksiyasi ochiq bo'lsa 55P03.
+    worker.register('test.lock', async () => {
+      try {
+        await app.db.db.transaction((tx) =>
+          tx.execute(sql`select id from outbox where id = ${row.id} for update nowait`),
+        );
+      } catch (err) {
+        lockError = err;
+        throw err;
+      }
+    });
+    const processed = await worker.tick(now);
+    expect(lockError).toBeUndefined();
+    expect(processed).toBe(1);
+    const [after] = await app.db.db.select().from(outbox).where(eq(outbox.id, row.id));
+    expect(after).toMatchObject({ attempts: 0, lastError: null });
+    expect(after?.processedAt?.getTime()).toBe(now);
   });
 });
