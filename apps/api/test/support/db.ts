@@ -42,7 +42,8 @@ export async function createTestDb(): Promise<TestDb> {
   await admin.end();
   const target = new URL(url);
   target.pathname = `/${name}`;
-  const conn = connectPg(target.toString());
+  // Idle taymersiz: pool'ning setTimeout'lari soxta taymerli testlarda (vi.useFakeTimers) begona taymer bo'lib qolmasin.
+  const conn = connectPg(target.toString(), { idleTimeoutMillis: 0 });
   await migrateDb(conn.db, 'pg');
   return {
     db: conn.db,
