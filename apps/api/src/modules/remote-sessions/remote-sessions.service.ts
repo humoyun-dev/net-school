@@ -16,7 +16,7 @@ import {
   remoteAction,
   type UpstreamDeviceRef,
 } from '@netschool/domain';
-import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, lte, ne, sql } from 'drizzle-orm';
 import { Access, type AuditTarget } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isUuid } from '../../common/db-errors.ts';
@@ -43,6 +43,7 @@ import { RemoteGateway } from './remote-gateway.ts';
 
 type SessionRow = typeof remoteSessions.$inferSelect;
 type LessonRow = typeof lessons.$inferSelect;
+type LeaseRow = typeof controlLeases.$inferSelect;
 
 const lessonTarget = (l: Pick<LessonRow, 'organizationId' | 'siteId' | 'roomId' | 'teacherUserId'>) => ({
   organizationId: l.organizationId,
@@ -50,6 +51,22 @@ const lessonTarget = (l: Pick<LessonRow, 'organizationId' | 'siteId' | 'roomId' 
   roomId: l.roomId,
   ownerUserId: l.teacherUserId,
 });
+
+function toRemoteSession(s: SessionRow, lease: LeaseRow | null): RemoteSession {
+  return {
+    id: s.id,
+    lessonId: s.lessonId,
+    deviceId: s.deviceId,
+    actorUserId: s.actorUserId,
+    mode: s.mode as RemoteMode,
+    status: s.status as RemoteSessionStatus,
+    openedAt: s.openedAt.toISOString(),
+    expiresAt: s.expiresAt.toISOString(),
+    closedAt: s.closedAt?.toISOString() ?? null,
+    closeReason: (s.closeReason as CloseReason | null) ?? null,
+    lease: lease ? { fencing: String(lease.fencing), expiresAt: lease.expiresAt.toISOString() } : null,
+  };
+}
 
 // Qurilmaning control lease'i: bo'sh yoki muddati o'tgan bo'lsa shu sessiyaga o'tadi (har safar yangi fencing),
 // aks holda null. Parallel olishda PK (device_id) to'qnashuvi commit'gacha kutadi va qayta tekshiriladi.
@@ -270,20 +287,18 @@ export class RemoteSessionsService {
       .leftJoin(controlLeases, eq(controlLeases.sessionId, remoteSessions.id))
       .where(eq(remoteSessions.id, sessionId));
     if (!row) throw new Error('remote session missing');
-    const { session: s, lease } = row;
-    return {
-      id: s.id,
-      lessonId: s.lessonId,
-      deviceId: s.deviceId,
-      actorUserId: s.actorUserId,
-      mode: s.mode as RemoteMode,
-      status: s.status as RemoteSessionStatus,
-      openedAt: s.openedAt.toISOString(),
-      expiresAt: s.expiresAt.toISOString(),
-      closedAt: s.closedAt?.toISOString() ?? null,
-      closeReason: (s.closeReason as CloseReason | null) ?? null,
-      lease: lease ? { fencing: String(lease.fencing), expiresAt: lease.expiresAt.toISOString() } : null,
-    };
+    return toRemoteSession(row.session, row.lease);
+  }
+
+  // Dars ochiq (yopilmagan) sessiyalari, ochilgan vaqt bo'yicha: events snapshot'i uchun, bitta so'rovda.
+  async openOfLesson(db: Db, lessonId: string): Promise<RemoteSession[]> {
+    const rows = await db
+      .select({ session: remoteSessions, lease: controlLeases })
+      .from(remoteSessions)
+      .leftJoin(controlLeases, eq(controlLeases.sessionId, remoteSessions.id))
+      .where(and(eq(remoteSessions.lessonId, lessonId), ne(remoteSessions.status, 'closed')))
+      .orderBy(asc(remoteSessions.openedAt), asc(remoteSessions.id));
+    return rows.map((r) => toRemoteSession(r.session, r.lease));
   }
 
   // Topilmagan yoki begona sessiya — bir xil audit qilingan 403.
