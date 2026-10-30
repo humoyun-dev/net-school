@@ -10,6 +10,8 @@ import { RemoteGateway } from '../remote-sessions/remote-gateway.ts';
 export const WORKERS_ENABLED = Symbol('WORKERS_ENABLED');
 export const OUTBOX_MAX_ATTEMPTS = 10;
 const BATCH = 100;
+// Bitta batch'da bir vaqtda bajariladigan handler'lar: osilgan revoke (≤ 10 s) qolgan qatorlarni ushlab turmaydi.
+const CONCURRENCY = 16;
 const INTERVAL_MS = 250;
 const MAX_BACKOFF_MS = 60_000;
 // Claim lease: shu muddatda natija yozilmasa (jarayon o'lgan) qator qayta olinadi.
@@ -99,12 +101,20 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     const claimedUntil = new Date(now + CLAIM_LEASE_MS);
     const claimed = await this.#claim(now, claimedUntil);
     let processed = 0;
-    for (const row of claimed) {
-      // Bitta claim 100 tagacha qatorni ketma-ket bajaradi: lease tugagan bo'lsa qolganlarini boshqa tick qayta olgan
-      // bo'lishi mumkin — natija yozilmaydi, ular lease tugagani uchun keyingi claim'da bajariladi.
-      if (this.now() >= claimedUntil.getTime()) break;
-      if (await this.#run(row, now, claimedUntil)) processed += 1;
-    }
+    let next = 0;
+    // Pool: har yo'lak bo'shagach navbatdagi qatorni oladi; tick barcha boshlangan handler'lar tugagach qaytadi.
+    const lane = async (): Promise<void> => {
+      for (let row = claimed[next++]; row; row = claimed[next++]) {
+        // Claim 100 tagacha qatorni qamraydi: lease tugagan bo'lsa qolganlarini boshqa tick qayta olgan bo'lishi
+        // mumkin — natija yozilmaydi, ular lease tugagani uchun keyingi claim'da bajariladi.
+        if (this.now() >= claimedUntil.getTime()) return;
+        if (await this.#run(row, now, claimedUntil)) processed += 1;
+      }
+    };
+    // Natija yozuvidagi DB xatosi ham boshqa yo'laklar tugashini kutadi, keyin tick xatosi bo'lib chiqadi.
+    const lanes = await Promise.allSettled(Array.from({ length: Math.min(CONCURRENCY, claimed.length) }, lane));
+    const failed = lanes.find((l) => l.status === 'rejected');
+    if (failed) throw failed.reason;
     return processed;
   }
 
