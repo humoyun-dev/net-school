@@ -19,7 +19,7 @@ import { HealthController } from './modules/health/health.controller.ts';
 import { IdentityModule } from './modules/identity/identity.module.ts';
 import { LessonsModule } from './modules/lessons/lessons.module.ts';
 import { OrganizationModule } from './modules/organization/organization.module.ts';
-import { REMOTE_GATEWAY, type RemoteUpstream } from './modules/remote-sessions/remote-gateway.ts';
+import { REMOTE_UPSTREAM, type RemoteUpstream } from './modules/remote-sessions/remote-gateway.ts';
 import { RemoteSessionsModule } from './modules/remote-sessions/remote-sessions.module.ts';
 import { WORKERS_ENABLED } from './modules/workers/outbox.worker.ts';
 import { WorkersModule } from './modules/workers/workers.module.ts';
@@ -46,11 +46,11 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       { provide: DB, useValue: opts.db },
       { provide: CLOCK, useValue: opts.now ?? Date.now },
       { provide: DEVICE_MANAGEMENT, useValue: opts.deviceManagement ?? null },
-      { provide: REMOTE_GATEWAY, useValue: opts.remote ?? null },
+      { provide: REMOTE_UPSTREAM, useValue: opts.remote ?? null },
       Idempotency,
       { provide: WORKERS_ENABLED, useValue: opts.workers ?? false },
     ],
-    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT, REMOTE_GATEWAY, Idempotency, WORKERS_ENABLED],
+    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT, REMOTE_UPSTREAM, Idempotency, WORKERS_ENABLED],
   })
   class CoreModule {}
 

@@ -20,7 +20,7 @@ export interface RemoteUpstream {
 }
 
 // RemoteUpstream | null; null — MeshCentral sozlanmagan, gateway o'chiq.
-export const REMOTE_GATEWAY = Symbol('REMOTE_GATEWAY');
+export const REMOTE_UPSTREAM = Symbol('REMOTE_UPSTREAM');
 
 interface Running {
   broker: RemoteSessionBroker;
@@ -41,7 +41,7 @@ export class RemoteGateway implements OnModuleDestroy {
 
   constructor(
     @Inject(API_CONFIG) config: ApiConfig,
-    @Inject(REMOTE_GATEWAY) upstream: RemoteUpstream | null,
+    @Inject(REMOTE_UPSTREAM) upstream: RemoteUpstream | null,
     @Inject(CLOCK) now: Clock,
   ) {
     const { gateway, mesh } = config;
