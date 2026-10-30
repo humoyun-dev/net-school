@@ -38,6 +38,18 @@ const enqueue = (topic: string, payload: Record<string, unknown> = {}) =>
       return row;
     });
 const rowOf = async (id: number) => (await app.db.db.select().from(outbox).where(eq(outbox.id, id)))[0];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Haqiqiy taymer bilan kutish: kick tick'ni fonda ishga tushiradi.
+const eventually = async (check: () => Promise<boolean>, ms = 2_000) => {
+  const until = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > until) throw new Error('timed out');
+    await sleep(10);
+  }
+};
+// workers: true bilan, lekin interval ishga tushirilmagan (onApplicationBootstrap chaqirilmaydi).
+const enabledWorker = () =>
+  new OutboxWorker(app.db.db, () => now, true, app.get<Notifier>(DEVICE_NOTIFIER), app.get<Notifier>(ROOM_NOTIFIER));
 
 describe('outbox worker', () => {
   test('outbox rows wake waiting devices and rooms', async () => {
@@ -104,6 +116,82 @@ describe('outbox worker', () => {
     expect(parked?.lastError).toMatch(/nobody\.listens/);
     expect(await worker.tick(at + 3_600_000)).toBe(0);
     expect((await rowOf(row.id))?.attempts).toBe(10);
+  });
+
+  test('a crashed claim is retried after the claim lease', async () => {
+    let calls = 0;
+    let claimed!: () => void;
+    const firstCall = new Promise<void>((r) => {
+      claimed = r;
+    });
+    worker.register('test.hang', () => {
+      calls += 1;
+      if (calls > 1) return;
+      claimed();
+      // Jarayon claim'dan keyin o'lganini taqlid qiladi: natija hech qachon yozilmaydi.
+      return new Promise<void>(() => {});
+    });
+    const row = await enqueue('test.hang');
+    void worker.tick(now);
+    await firstCall;
+    expect(await worker.tick(now + 29_000)).toBe(0);
+    expect(calls).toBe(1);
+    expect(await worker.tick(now + 30_001)).toBe(1);
+    expect(calls).toBe(2);
+    expect((await rowOf(row.id))?.processedAt?.getTime()).toBe(now + 30_001);
+  });
+
+  test('kick runs a tick without waiting for the interval', async () => {
+    let calls = 0;
+    worker.register('test.kick', () => {
+      calls += 1;
+    });
+    const off = await enqueue('test.kick');
+    // workers: false (testlar) — kick hech narsa qilmaydi.
+    worker.kick();
+    await sleep(100);
+    expect(calls).toBe(0);
+    expect((await rowOf(off.id))?.processedAt).toBeNull();
+
+    const on = enabledWorker();
+    on.register('test.kick', () => {
+      calls += 1;
+    });
+    on.kick();
+    await eventually(async () => (await rowOf(off.id))?.processedAt != null);
+    expect(calls).toBe(1);
+  });
+
+  test('a kick during a running tick is not lost', async () => {
+    const on = enabledWorker();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started!: () => void;
+    const running = new Promise<void>((r) => {
+      started = r;
+    });
+    const seen: string[] = [];
+    on.register('test.slow', async () => {
+      seen.push('slow');
+      started();
+      await gate;
+    });
+    on.register('test.late', () => {
+      seen.push('late');
+    });
+    await enqueue('test.slow');
+    on.kick();
+    await running;
+    // Tick davom etmoqda: yangi qator va kick ustma-ust tick ochmaydi, lekin yo'qolmaydi.
+    const late = await enqueue('test.late');
+    on.kick();
+    await sleep(50);
+    expect(seen).toEqual(['slow']);
+    release();
+    await eventually(async () => (await rowOf(late.id))?.processedAt != null);
+    expect(seen).toEqual(['slow', 'late']);
   });
 
   test('issued command reaches a long-polling device through the worker', async () => {
