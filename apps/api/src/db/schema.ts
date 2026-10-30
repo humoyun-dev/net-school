@@ -534,6 +534,11 @@ export const remoteSessions = pgTable(
       foreignColumns: [lessons.siteId, lessons.id],
     }),
     foreignKey({
+      name: 'remote_sessions_room_fk',
+      columns: [t.siteId, t.roomId],
+      foreignColumns: [rooms.siteId, rooms.id],
+    }),
+    foreignKey({
       name: 'remote_sessions_device_fk',
       columns: [t.siteId, t.deviceId],
       foreignColumns: [devices.siteId, devices.id],
@@ -543,6 +548,8 @@ export const remoteSessions = pgTable(
       columns: [t.organizationId, t.actorUserId],
       foreignColumns: [users.organizationId, users.id],
     }),
+    // control_leases (session_id, device_id) FK nishoni.
+    unique('remote_sessions_id_device').on(t.id, t.deviceId),
     check('remote_sessions_mode', sql`${t.mode} in ('view', 'control')`),
     check('remote_sessions_status', sql`${t.status} in ('opening', 'active', 'closed')`),
     check(
@@ -572,7 +579,17 @@ export const controlLeases = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   },
   (t) => [
-    foreignKey({ name: 'control_leases_session_fk', columns: [t.sessionId], foreignColumns: [remoteSessions.id] }),
+    // Lease faqat o'z sessiyasining qurilmasi uchun bo'lishi mumkin.
+    foreignKey({
+      name: 'control_leases_session_fk',
+      columns: [t.sessionId, t.deviceId],
+      foreignColumns: [remoteSessions.id, remoteSessions.deviceId],
+    }),
+    foreignKey({
+      name: 'control_leases_device_fk',
+      columns: [t.organizationId, t.deviceId],
+      foreignColumns: [devices.organizationId, devices.id],
+    }),
   ],
 );
 
