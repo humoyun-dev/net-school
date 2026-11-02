@@ -20,6 +20,10 @@ export interface FakeNode {
 export class FakeMesh {
   readonly nodes = new Map<string, FakeNode>();
   failing = false;
+  // Faqat shu domain'lar uchun listDevices xato beradi (bitta site uzilgan).
+  readonly failingDomains = new Set<string>();
+  // listDevices chaqiruvlari soni (site bo'yicha).
+  readonly listCalls = new Map<string, number>();
   // Quvvat so'rovlari (yuborilish tartibida); powerFailing — requestPowerAction javob bermaydi (timeout).
   readonly powerRequests: Array<{ siteId: string; nodeId: string; type: PowerActionType }> = [];
   readonly wakeResults = new Map<string, PowerRequestResult>();
@@ -48,8 +52,10 @@ export class FakeMesh {
     const list = async (siteId: string): Promise<DeviceSnapshot[]> => {
       await this.beforeList?.();
       if (this.failing) throw new Error('upstream down');
+      this.listCalls.set(siteId, (this.listCalls.get(siteId) ?? 0) + 1);
       const scope = scopes.get(siteId);
       if (!scope) throw new Error(`no scope for ${siteId}`);
+      if (this.failingDomains.has(scope.meshDomainId)) throw new Error('site upstream down');
       return [...this.nodes]
         .filter(([, n]) => n.domain === scope.meshDomainId)
         .map(([id, n]) => ({

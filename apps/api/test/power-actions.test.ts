@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { auditEvents, powerActions, powerActionTargets, sites } from '../src/db/schema.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
@@ -236,5 +236,40 @@ describe('power actions', () => {
     const mine = await app.request('GET', `/api/v1/power-actions/${list.json.actions[0].id}`, { cookie: it });
     expect(mine.json.targets).toHaveLength(1);
     expect(mine.json.targets[0]).toMatchObject({ deviceId: own.deviceId, hostname: 'pc-01', status: 'pending' });
+  });
+  test('a runAt older than the grace is rejected', async () => {
+    const { deviceId } = await bound(siteId);
+    const scope = { kind: 'devices', deviceIds: [deviceId] };
+    const stale = await create({ type: 'reboot', scope, runAt: new Date(NOW - 11 * 60_000).toISOString() });
+    expect(stale.status).toBe(400);
+    expect(stale.json.error.code).toBe('validation_failed');
+    const recent = await create({ type: 'reboot', scope, runAt: new Date(NOW - 60_000).toISOString() });
+    expect(recent.status).toBe(202);
+    expect(recent.json.status).toBe('running');
+  });
+
+  test('an organization action with thousands of devices is created', async () => {
+    await app.db.db.execute(sql`
+      insert into devices (organization_id, site_id, hostname, public_key, key_fingerprint)
+      select ${orgId}, ${siteId}, 'bulk-' || g, convert_to('bulk-key-' || g, 'UTF8'), 'bulk-fp-' || g
+      from generate_series(1, 9000) as g`);
+    const res = await create({ type: 'shutdown', scope: { kind: 'organization' }, confirmDeviceCount: 9000 });
+    expect(res.status, JSON.stringify(res.json)).toBe(202);
+    expect(res.json.summary.failed).toBe(9000);
+  });
+
+  test('list shows a site admin their own actions beyond the newest 500 of the organization', async () => {
+    await seedUser(app.db.db, orgId, 'it1', [{ role: 'it_support', siteId }]);
+    const it = await loginAs(app, 'it1');
+    const own = await bound(siteId);
+    const mine = await create({ type: 'reboot', scope: { kind: 'devices', deviceIds: [own.deviceId] } });
+    expect(mine.status).toBe(202);
+    await app.db.db.execute(sql`
+      insert into power_actions (organization_id, type, scope, site_ids, status, run_at, created_at)
+      select ${orgId}, 'shutdown', '{"kind":"organization"}'::jsonb, array[${otherSiteId}]::uuid[], 'completed',
+             now(), ${new Date(NOW + 60_000)}::timestamptz + (g || ' seconds')::interval
+      from generate_series(1, 600) as g`);
+    const list = await app.request('GET', '/api/v1/power-actions?limit=10', { cookie: it });
+    expect(list.json.actions.map((a: { id: string }) => a.id)).toEqual([mine.json.id]);
   });
 });

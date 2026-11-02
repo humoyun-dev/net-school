@@ -171,4 +171,14 @@ describe('power schedules', () => {
       .where(and(eq(auditEvents.action, 'power.manage'), eq(auditEvents.result, 'denied')));
     expect(denials).toHaveLength(3);
   });
+  test('one failing due schedule does not block the others', async () => {
+    await bound();
+    const good = await schedule(1);
+    const bad = await schedule(1);
+    // Buzilgan vaqt mintaqasi (masalan, ICU yangilanishidan keyin): nextOccurrence xato beradi.
+    await app.db.db.update(powerSchedules).set({ timezone: 'Mars/Base' }).where(eq(powerSchedules.id, bad.json.id));
+    now = MON_19;
+    await worker().tick(now);
+    expect(await actionsOf(good.json.id)).toHaveLength(1);
+  });
 });

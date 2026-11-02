@@ -664,6 +664,10 @@ export const powerSchedules = pgTable(
     }),
     check('power_schedules_type', sql`${t.type} in ('shutdown', 'reboot', 'sleep', 'wake')`),
     check('power_schedules_time', sql`${t.timeOfDay} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`),
+    check(
+      'power_schedules_days',
+      sql`cardinality(${t.daysOfWeek}) between 1 and 7 and ${t.daysOfWeek} <@ array[1, 2, 3, 4, 5, 6, 7]`,
+    ),
     check('power_schedules_next_run', sql`${t.enabled} or ${t.nextRunAt} is null`),
     index('power_schedules_due').on(t.nextRunAt).where(sql`${t.enabled}`),
   ],
@@ -712,6 +716,9 @@ export const powerActionTargets = pgTable(
     reason: text('reason'),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     offlineSeenAt: timestamp('offline_seen_at', { withTimezone: true }),
+    // Site snapshot'i olinmadi: target shu vaqtgacha kechiktiriladi; deferred_since'dan 10 daqiqa o'tsa — failed.
+    retryAt: timestamp('retry_at', { withTimezone: true }),
+    deferredSince: timestamp('deferred_since', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
