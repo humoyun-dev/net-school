@@ -1,4 +1,8 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
+
+// Real API + PGlite: to'liq suite yuklamasida hook'lar sekinlashadi.
+vi.setConfig({ hookTimeout: 60_000, testTimeout: 60_000 });
+
 import { ThumbnailStore } from '../../../apps/api/src/modules/thumbnails/thumbnail-store.ts';
 import { startTestApp, type TestApp } from '../../../apps/api/test/support/app.ts';
 import { setCapabilities } from '../../../apps/api/test/support/caps.ts';
@@ -98,6 +102,7 @@ describe('PoC hub control and verification', () => {
     const report = await verify(c, { room: 'Lab-1', timeoutMs: 10_000 });
     const byId = Object.fromEntries(report.steps.map((s: { id: string; status: string }) => [s.id, s.status]));
     expect(byId).toEqual({
+      device_found: 'passed',
       device_enrolled: 'passed',
       capabilities: 'passed',
       agent_bound: 'passed',

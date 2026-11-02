@@ -44,7 +44,11 @@ export function renderConfig(template, { dbPassword, certName, trustedProxy, age
       createdatabase: false,
     },
     // PoC/pilot: agentlar faqat alohida agent portiga ulanadi (admin UI 4430 ichkarida qoladi).
-    ...(agent ? { agentPort: agent.port, agentAliasDNS: agent.aliasDns, agentAliasPort: agent.aliasPort } : {}),
+    // Intel AMT MPS server'i ham standart 4433'ni oladi (meshcentral.js:1686): u o'chiriladi, aks holda ishga tushish
+    // tartibiga qarab agent server 4434'ga suriladi va .msh'dagi 4433 AMT TLS server'iga tushadi.
+    ...(agent
+      ? { agentPort: agent.port, agentAliasDNS: agent.aliasDns, agentAliasPort: agent.aliasPort, mpsPort: 0 }
+      : {}),
   };
   return config;
 }

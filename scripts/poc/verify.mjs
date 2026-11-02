@@ -53,17 +53,25 @@ export async function verify(c, opts) {
     }
   };
 
+  let lessonId = null;
   const room = await findRoom(c, opts.room);
-  const device = await step('device_enrolled', "Companion ro'yxatdan o'tgan va onlayn", async () => {
+  // Qurilma onlayn bo'lmasa ham topiladi (masalan `--power wake` o'chiq kompyuterda).
+  const found = await step('device_found', 'Qurilma xonada', async () => {
     const devices = (await c.get(`/api/v1/rooms/${room.id}/devices`)).devices;
-    const d = opts.hostname ? devices.find((x) => x.hostname === opts.hostname) : devices[0];
-    if (!d) throw new Error(`no device in room ${room.name}`);
-    report.device = { id: d.id, hostname: d.hostname };
-    if (d.companion.presence !== 'online') throw new Error(`Companion is ${d.companion.presence}`);
-    return { deviceId: d.id, hostname: d.hostname, lastHeartbeatAt: d.companion.lastHeartbeatAt, _device: d };
+    const dev = opts.hostname ? devices.find((x) => x.hostname === opts.hostname) : devices[0];
+    if (!dev) throw new Error(`no device in room ${room.name}`);
+    report.device = { id: dev.id, hostname: dev.hostname };
+    return { deviceId: dev.id, hostname: dev.hostname, _device: dev };
   });
-  const d = device?._device ?? null;
-  if (device) delete device._device;
+  const d = found?._device ?? null;
+  if (found) delete found._device;
+  if (opts.power) return finish(await powerStep(c, report, step, d, opts));
+
+  await step('device_enrolled', "Companion ro'yxatdan o'tgan va onlayn", async () => {
+    if (!d) throw new Error('no device');
+    if (d.companion.presence !== 'online') throw new Error(`Companion is ${d.companion.presence}`);
+    return { lastHeartbeatAt: d.companion.lastHeartbeatAt };
+  });
 
   await step('capabilities', 'Capability hisoboti', async () => {
     if (!d) throw new Error('no device');
@@ -87,7 +95,6 @@ export async function verify(c, opts) {
     return { agent: d.agent };
   });
 
-  let lessonId = null;
   const lesson = async () => {
     if (lessonId) return lessonId;
     const active = (await c.get(`/api/v1/rooms/${room.id}/lessons/active`)).lesson;
@@ -116,9 +123,16 @@ export async function verify(c, opts) {
   });
   await step('overlay', 'Bloklash va ochish', async () => {
     if (!d) throw new Error('no device');
-    const lock = await command({ type: 'overlay.lock', payload: { message: 'PoC' } });
-    const unlock = await command({ type: 'overlay.unlock', payload: {} });
-    return { lock, unlock };
+    let unlocked = false;
+    try {
+      const lock = await command({ type: 'overlay.lock', payload: { message: 'PoC' } });
+      const unlock = await command({ type: 'overlay.unlock', payload: {} });
+      unlocked = true;
+      return { lock, unlock };
+    } finally {
+      // O'quvchi ekrani qulflangan holda qolmasin (lease 120 s kutilmaydi).
+      if (!unlocked) await command({ type: 'overlay.unlock', payload: {} }).catch(() => {});
+    }
   });
   await step('thumbnail', 'Miniatura (oxirgi kadr ≤2 s)', async () => {
     if (!d) throw new Error('no device');
@@ -133,59 +147,75 @@ export async function verify(c, opts) {
     );
     const frameAt = Date.parse(String(res.headers['x-ns-frame-at']));
     const ageMs = Date.parse(String(res.headers.date)) - frameAt;
-    if (ageMs > THUMBNAIL_MAX_AGE_MS) throw new Error(`latest frame is ${ageMs} ms old`);
+    // Header yo'q yoki noto'g'ri bo'lsa ageMs NaN: bu ham muvaffaqiyatsizlik.
+    if (!(ageMs <= THUMBNAIL_MAX_AGE_MS)) throw new Error(`latest frame age is ${ageMs} ms`);
     return { bytes: res.raw.length, contentType: res.headers['content-type'], ageMs };
   });
   await step('remote', "Ko'rish, boshqarish, control_busy va yopish", async () => {
     if (!d) throw new Error('no device');
     const id = await lesson();
-    const open = (mode) => c.send('POST', `/api/v1/lessons/${id}/remote-sessions`, { deviceId: d.id, mode });
-    const view = await open('view');
-    const ticket = await c.send('POST', `/api/v1/remote-sessions/${view.id}/ticket`);
-    await c.send('DELETE', `/api/v1/remote-sessions/${view.id}`);
-    const control = await open('control');
-    const second = await c.raw('POST', `/api/v1/lessons/${id}/remote-sessions`, { deviceId: d.id, mode: 'control' });
-    if (second.status !== 409 || second.json?.error?.code !== 'control_busy') {
-      throw new Error(`a second control session was not refused (HTTP ${second.status})`);
-    }
-    await c.send('DELETE', `/api/v1/remote-sessions/${control.id}`);
-    const closed = await c.get(`/api/v1/remote-sessions/${control.id}`);
-    if (closed.status !== 'closed') throw new Error(`control session is ${closed.status} after DELETE`);
-    return {
-      viewSession: view.id,
-      ticketHost: new URL(ticket.url).host,
-      controlSession: control.id,
-      secondControl: 409,
+    const opened = [];
+    const open = async (mode) => {
+      const s = await c.send('POST', `/api/v1/lessons/${id}/remote-sessions`, { deviceId: d.id, mode });
+      opened.push(s.id);
+      return s;
     };
+    try {
+      const view = await open('view');
+      const ticket = await c.send('POST', `/api/v1/remote-sessions/${view.id}/ticket`);
+      await c.send('DELETE', `/api/v1/remote-sessions/${view.id}`);
+      const control = await open('control');
+      const second = await c.raw('POST', `/api/v1/lessons/${id}/remote-sessions`, { deviceId: d.id, mode: 'control' });
+      if (second.status !== 409 || second.json?.error?.code !== 'control_busy') {
+        throw new Error(`a second control session was not refused (HTTP ${second.status})`);
+      }
+      await c.send('DELETE', `/api/v1/remote-sessions/${control.id}`);
+      const closed = await c.get(`/api/v1/remote-sessions/${control.id}`);
+      if (closed.status !== 'closed') throw new Error(`control session is ${closed.status} after DELETE`);
+      return {
+        viewSession: view.id,
+        ticketHost: new URL(ticket.url).host,
+        controlSession: control.id,
+        secondControl: 409,
+      };
+    } finally {
+      // Xato bo'lsa ham remote principal'lar ochiq qolmaydi (ADR 0003); DELETE idempotent.
+      for (const sid of opened) await c.send('DELETE', `/api/v1/remote-sessions/${sid}`).catch(() => {});
+    }
   });
 
-  if (opts.power) {
-    await step(`power_${opts.power}`, `Quvvat: ${opts.power}`, async () => {
-      if (!d) throw new Error('no device');
-      const action = await c.send('POST', '/api/v1/power-actions', {
-        type: opts.power,
-        scope: { kind: 'devices', deviceIds: [d.id] },
-      });
-      const done = await until(
-        async () => {
-          const a = await c.get(`/api/v1/power-actions/${action.id}`);
-          return a.status === 'completed' ? a : null;
-        },
-        opts.powerTimeoutMs ?? 12 * 60_000,
-        `power ${opts.power}`,
-      );
-      const t = done.targets?.[0];
-      if (t?.status !== 'succeeded') throw new Error(`power ${opts.power}: target ${t?.status} (${t?.reason ?? '-'})`);
-      return { actionId: action.id, status: t.status };
-    });
-  }
+  return finish(report);
 
-  report.finishedAt = new Date().toISOString();
-  report.lessonId = lessonId;
-  if (opts.out) {
-    mkdirSync(dirname(opts.out), { recursive: true });
-    writeFileSync(opts.out, `${JSON.stringify(report, null, 2)}\n`);
+  function finish(r) {
+    r.finishedAt = new Date().toISOString();
+    r.lessonId = lessonId;
+    if (opts.out) {
+      mkdirSync(dirname(opts.out), { recursive: true });
+      writeFileSync(opts.out, `${JSON.stringify(r, null, 2)}\n`);
+    }
+    return r;
   }
+}
+
+async function powerStep(c, report, step, d, opts) {
+  await step(`power_${opts.power}`, `Quvvat: ${opts.power}`, async () => {
+    if (!d) throw new Error('no device');
+    const action = await c.send('POST', '/api/v1/power-actions', {
+      type: opts.power,
+      scope: { kind: 'devices', deviceIds: [d.id] },
+    });
+    const done = await until(
+      async () => {
+        const a = await c.get(`/api/v1/power-actions/${action.id}`);
+        return a.status === 'completed' ? a : null;
+      },
+      opts.powerTimeoutMs ?? 12 * 60_000,
+      `power ${opts.power}`,
+    );
+    const t = done.targets?.[0];
+    if (t?.status !== 'succeeded') throw new Error(`power ${opts.power}: target ${t?.status} (${t?.reason ?? '-'})`);
+    return { actionId: action.id, status: t.status };
+  });
   return report;
 }
 

@@ -10,7 +10,7 @@ Natijalar `docs/poc/results/` ga yoziladi:
 
 1. **LAN manzili.** Mac'ning LAN manzilini aniqlang: `ipconfig getifaddr en0` yoki routerda qat'iy IP yoki DNS nomi. Quyida `HUB` deb yozilgan.
 2. **TLS sertifikati.**
-   - `HUB` nomi uchun sertifikat (SAN'da `HUB` bo'lsin) va uning CA'si kerak. Test uchun o'z-o'zidan imzolangan sertifikat ham bo'ladi; uning o'zi CA bo'ladi.
+   - `HUB` nomi uchun sertifikat va uning CA'si kerak. SAN'da `HUB` bo'lsin: nom bo'lsa `DNS:HUB`, IP bo'lsa `IP:HUB`. Test uchun o'z-o'zidan imzolangan sertifikat ham bo'ladi; uning o'zi CA bo'ladi.
    - Sertifikat `infra/compose/secrets/api_tls_cert`ga, kalit `infra/compose/secrets/api_tls_key`ga yoziladi.
    - Boshqa sirlar `infra/compose/README.md`dagidek.
 3. **`infra/compose/.env`:**
@@ -18,20 +18,25 @@ Natijalar `docs/poc/results/` ga yoziladi:
    PUBLIC_ORIGIN=https://HUB
    GATEWAY_PUBLIC_ORIGIN=https://HUB:8444
    MESH_AGENT_HOST=HUB
+   # Har `docker compose` buyrug'i overlay bilan: oddiy `up` agent portini va nuqtali nomni yo'qotmasin.
+   COMPOSE_FILE=compose.yaml:compose.poc.yaml
    ```
-4. **Agentlar va stack:**
+4. **Agentlar va stack.** Compose buyruqlari subshell ichida, repo ildizida qolasiz:
    ```bash
    pnpm meshcentral:agents
-   cd infra/compose
-   docker compose -f compose.yaml -f compose.poc.yaml up -d --build
-   docker compose run --rm api-migrate node dist/cli.mjs bootstrap --org "PoC" --site "Bosh bino" --admin admin
+   (cd infra/compose && docker compose up -d --build)
+   (cd infra/compose && docker compose run --rm api-migrate node dist/cli.mjs bootstrap --org "PoC" --site "Bosh bino" --admin admin)
+   (cd infra/compose && docker compose logs meshcentral | grep -E "agent-only|AMT")
    ```
+   Logda `agent-only server running on port 4433` bo'lishi va AMT haqida xato bo'lmasligi kerak. Shu qatorni qo'lda tekshiruv yozuviga ham ko'chiring.
 5. **Admin paroli.** Brauzerda `https://HUB` ni oching, `admin` bilan kiring va parolni almashtiring. Yangi parolni `NETSCHOOL_PASSWORD` sifatida ishlatasiz.
-6. **Skriptlar uchun qisqa nom:**
+6. **Skriptlar uchun muhit** (zsh va bash'da bir xil ishlaydi):
    ```bash
+   export NETSCHOOL_HUB_ORIGIN=https://HUB
+   export NETSCHOOL_HUB_CA=$PWD/infra/compose/secrets/api_tls_cert
+   export NETSCHOOL_HUB_USER=admin
    export NETSCHOOL_PASSWORD='<yangi parol>'
-   H="--origin https://HUB --ca infra/compose/secrets/api_tls_cert --user admin"
-   node scripts/poc/hubctl.mjs $H room create Lab-1 --site "Bosh bino"
+   node scripts/poc/hubctl.mjs room create Lab-1 --site "Bosh bino"
    ```
 
 **Kutilgan natija:** `curl --cacert infra/compose/secrets/api_tls_cert https://HUB/api/v1/healthz` → `"mesh":"ok"`.
@@ -48,20 +53,19 @@ Natijalar `docs/poc/results/` ga yoziladi:
 
 ## 3. MeshAgent
 
-1. **O'rnatuvchini olish (Mac'da):**
+1. **O'rnatuvchini olish (Mac'da, repo ildizidan):**
    ```bash
-   cd infra/compose
-   docker compose exec api node dist/cli.mjs mesh-agent-installer --site "Bosh bino" --arch <x64|arm64> --out /tmp/agent.exe
-   docker compose cp api:/tmp/agent.exe ./meshagent-<arch>.exe
+   (cd infra/compose && docker compose exec api node dist/cli.mjs mesh-agent-installer --site "Bosh bino" --arch <x64|arm64> --out /tmp/agent.exe)
+   (cd infra/compose && docker compose cp api:/tmp/agent.exe ../../meshagent-<arch>.exe)
    ```
 2. **O'rnatish.** `meshagent-<arch>.exe` ni Windows'ga ko'chiring va administrator sifatida ishga tushiring → **Install**.
-3. **Ulanganini tekshirish (Mac'da):** `node scripts/poc/hubctl.mjs $H mesh nodes --site "Bosh bino"` chiqarganda Windows kompyuter `online` holatida ko'rinadi.
+3. **Ulanganini tekshirish (Mac'da):** `node scripts/poc/hubctl.mjs mesh nodes --site "Bosh bino"` chiqarganda Windows kompyuter `online` holatida ko'rinadi.
 
 ## 4. Companion
 
 1. **Paket (Mac'da):** `pnpm --filter @netschool/companion pack:win --arch <x64|arm64>` → `apps/companion/out/netschool-companion-win32-<arch>.zip`.
 2. **Yoyish.** Zip'ni Windows'da `C:\NetSchool\companion\` ga yoying.
-3. **Enrollment token (Mac'da):** `node scripts/poc/hubctl.mjs $H enrollment create --room Lab-1`.
+3. **Enrollment token (Mac'da):** `node scripts/poc/hubctl.mjs enrollment create --room Lab-1`.
 4. **Ro'yxatdan o'tkazish (Windows, administrator `cmd`):**
    ```
    set NETSCHOOL_ENROLL_TOKEN=nse_...
@@ -69,16 +73,16 @@ Natijalar `docs/poc/results/` ga yoziladi:
    ```
    Chiqish kodi `0` bo'lishi kerak.
 5. **Ishga tushirish.** Oddiy foydalanuvchi sessiyasida `start.cmd` ni oching. Tray'da NetSchool belgisi chiqadi.
-6. **Bog'lash (Mac'da):** `node scripts/poc/hubctl.mjs $H mesh bind <Windows hostname> <nodeId>`. `nodeId` 3-bo'limdagi `mesh nodes` chiqishidan olinadi.
+6. **Bog'lash (Mac'da):** `node scripts/poc/hubctl.mjs mesh bind <Windows hostname> <nodeId>`. `nodeId` 3-bo'limdagi `mesh nodes` chiqishidan olinadi.
 
 ## 5. Avtomatik tekshiruv
 
 ```bash
-node scripts/poc/verify.mjs $H --room Lab-1 --agent-host HUB:4433 \
+node scripts/poc/verify.mjs --room Lab-1 --agent-host HUB:4433 \
   --out docs/poc/results/windows-<arch>-$(date +%F).json
 ```
 
-`verify` quyidagilarni tekshiradi: `device_enrolled`, `capabilities`, `agent_bound`, `message`, `overlay`, `thumbnail`, `remote`. Hammasi `PASS` bo'lishi kerak. `FAIL` bo'lsa xatoda sabab va keyingi qadam yoziladi (masalan `Test-NetConnection`).
+`verify` quyidagilarni tekshiradi: `device_found`, `device_enrolled`, `capabilities`, `agent_bound`, `message`, `overlay`, `thumbnail`, `remote`. Hammasi `PASS` bo'lishi kerak. `FAIL` bo'lsa xatoda sabab va keyingi qadam yoziladi (masalan `Test-NetConnection`).
 
 ## 6. Qo'lda tekshiruv (o'qituvchi panelida)
 
@@ -104,17 +108,19 @@ Panelga `https://HUB` orqali kiring. Dars `verify` ochgan holda qoladi. Har band
 Har biri alohida, kompyuter qayta yoqilgach keyingisi:
 
 ```bash
-node scripts/poc/verify.mjs $H --room Lab-1 --power reboot   --out docs/poc/results/windows-<arch>-<sana>-reboot.json
-node scripts/poc/verify.mjs $H --room Lab-1 --power sleep    --out docs/poc/results/windows-<arch>-<sana>-sleep.json
-node scripts/poc/verify.mjs $H --room Lab-1 --power shutdown --out docs/poc/results/windows-<arch>-<sana>-shutdown.json
+node scripts/poc/verify.mjs --room Lab-1 --power reboot   --out docs/poc/results/windows-<arch>-<sana>-reboot.json
+node scripts/poc/verify.mjs --room Lab-1 --power sleep    --out docs/poc/results/windows-<arch>-<sana>-sleep.json
+node scripts/poc/verify.mjs --room Lab-1 --power shutdown --out docs/poc/results/windows-<arch>-<sana>-shutdown.json
 # keyin Windows'ni o'chirilgan holda qoldirib:
-node scripts/poc/verify.mjs $H --room Lab-1 --power wake     --out docs/poc/results/windows-<arch>-<sana>-wake.json
+node scripts/poc/verify.mjs --room Lab-1 --power wake     --out docs/poc/results/windows-<arch>-<sana>-wake.json
 ```
 
 - `shutdown` va `sleep` ≤3 daqiqada, `reboot` ≤10 daqiqada natija berishi kerak.
 - **Uxlatish:** uyg'otishni qo'lda qiling.
 - **Yoqish (WoL)** faqat BIOS/NIC qo'llasa va o'sha LAN segmentida boshqa yoqiq agent bo'lsa ishlaydi. VM'da odatda ishlamaydi: natija `wake_unsupported` yoki `unknown` bo'ladi. Buni matrix'da `failed` yoki `partial` qilib izoh bilan yozing.
 - **Kompyuterni qayta yoqish:** shutdown'dan keyin o'zingiz yoqasiz. `verify` buni kutmaydi.
+- `--power` ishga tushirilganda faqat qurilma qidiriladi va quvvat qadami bajariladi; boshqa qadamlar o'tkazib yuboriladi (kompyuter o'chiq bo'lishi mumkin).
+- `verify` natijani oxirida yozadi: kutish paytida Ctrl-C bosilsa dalil saqlanmaydi.
 
 ## 8. Qo'lda tekshiruv shabloni
 
@@ -130,6 +136,6 @@ Windows versiyasi: …  ·  VM/fizik: …  ·  Monitorlar: …
 
 ## 9. Tozalash
 
-1. Darsni tugating. `docker compose exec api` ichida principal'lar qolmaganini tekshiring (ADR 0003).
+1. Darsni tugating (panelda "Darsni tugatish"). Shundan keyin ochiq remote sessiya qolmasligi kerak: `verify` sessiyalarni o'zi yopadi, dars tugashi qolganlarini yopadi (ADR 0008).
 2. Windows'da MeshAgent'ni o'chiring: `meshagent-<arch>.exe` → **Uninstall**. `C:\NetSchool` va `%ProgramData%\NetSchool` ni ham o'chiring.
-3. Mac'da `docker compose -f compose.yaml -f compose.poc.yaml down`. Ma'lumotni ham o'chirish uchun `-v` qo'shing.
+3. Mac'da `(cd infra/compose && docker compose down)`. Ma'lumotni ham o'chirish uchun `-v` qo'shing.

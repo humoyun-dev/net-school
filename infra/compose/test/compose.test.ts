@@ -223,6 +223,8 @@ describe('meshcentral config rendering', () => {
       agent: { port: 4433, aliasDns: 'hub.school.lan', aliasPort: 4433 },
     });
     expect(config.settings).toMatchObject({ agentPort: 4433, agentAliasDNS: 'hub.school.lan', agentAliasPort: 4433 });
+    // Intel AMT MPS server'i ham standart 4433'ni oladi (meshcentral.js:1686): u o'chiriladi, port agentniki.
+    expect(config.settings.mpsPort).toBe(0);
   });
 
   test('agents need a dotted certificate name, otherwise MeshCentral silently goes LAN-only', () => {

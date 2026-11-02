@@ -55,4 +55,23 @@ describe('capability matrix check', () => {
     expect(checkMatrix(md, real)).toEqual([]);
     expect(md).toMatch(/\| `remote\.control` \|/);
   });
+  test('evidence must be a results file: not .gitkeep, a directory, another doc or outside docs/poc', () => {
+    writeFileSync(join(base, 'results', '.gitkeep'), '');
+    writeFileSync(join(base, 'capability-matrix.md'), '# x');
+    for (const ref of ['results/.gitkeep', 'capability-matrix.md', '../../package.json', 'results/']) {
+      expect(checkMatrix(table(`passed (${ref})`), base), ref).toHaveLength(1);
+    }
+  });
+
+  test('passed needs a json step or a manual record', () => {
+    writeFileSync(join(base, 'results', 'notes.txt'), 'x');
+    expect(checkMatrix(table('passed (results/notes.txt)'), base)).toHaveLength(1);
+    expect(checkMatrix(table('passed (results/win.json)'), base)).toHaveLength(1);
+    expect(checkMatrix(table('partial (results/notes.txt)'), base)).toEqual([]);
+  });
+
+  test('a broken evidence json is reported, not thrown', () => {
+    writeFileSync(join(base, 'results', 'bad.json'), '{');
+    expect(checkMatrix(table('passed (results/bad.json#remote)'), base)[0]).toMatch(/bad\.json/);
+  });
 });

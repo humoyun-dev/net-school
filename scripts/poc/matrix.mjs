@@ -1,8 +1,8 @@
 // Capability matrix tekshiruvi (spec §7: hech bir OS sinovsiz "qo'llanadi" deb belgilanmaydi).
 // Katak: `not_tested` | `passed (dalil)` | `partial (dalil)` | `failed (dalil)`; dalil — docs/poc ichidagi fayl,
 // JSON bo'lsa `#qadam` bilan. `passed` uchun dalil majburiy va JSON qadami `passed` bo'lishi shart.
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { basename, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const STATUSES = new Set(['not_tested', 'passed', 'partial', 'failed']);
@@ -16,11 +16,26 @@ function checkCell(cell, where, baseDir) {
   if (!evidence) return `${where}: ${status} needs evidence`;
   const [rawFile, rawStep] = evidence.split('#');
   const file = rawFile.trim();
-  const path = join(baseDir, file);
-  if (!existsSync(path)) return `${where}: evidence ${file} does not exist`;
-  if (!file.endsWith('.json') || !rawStep) return null;
-  const stepId = rawStep.trim();
-  const step = JSON.parse(readFileSync(path, 'utf8')).steps?.find((s) => s.id === stepId);
+  const stepId = rawStep?.trim();
+  // Dalil faqat docs/poc/results/ ichidagi oddiy fayl (`.gitkeep`, katalog, boshqa hujjat yoki tashqi yo'l emas).
+  const results = resolve(baseDir, 'results');
+  const path = resolve(baseDir, file);
+  if (!path.startsWith(results + sep) || basename(path) === '.gitkeep') {
+    return `${where}: evidence ${file} must be a file in results/`;
+  }
+  if (!existsSync(path) || !statSync(path).isFile()) return `${where}: evidence ${file} does not exist`;
+  const json = file.endsWith('.json');
+  if (status === 'passed' && !(json && stepId) && !file.endsWith('-manual.md')) {
+    return `${where}: passed needs a results/*.json#step or a results/*-manual.md record`;
+  }
+  if (!json || !stepId) return null;
+  let steps;
+  try {
+    steps = JSON.parse(readFileSync(path, 'utf8')).steps;
+  } catch {
+    return `${where}: evidence ${file} is not valid JSON`;
+  }
+  const step = steps?.find((s) => s.id === stepId);
   if (!step) return `${where}: step ${stepId} missing in ${file}`;
   if (status === 'passed' && step.status !== 'passed') return `${where}: step ${stepId} is ${step.status}, not passed`;
   return null;

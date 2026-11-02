@@ -35,6 +35,8 @@ cp .env.example .env   # PUBLIC_ORIGIN va GATEWAY_PUBLIC_ORIGIN ni moslang
 
 ## Ishga tushirish
 
+MeshCentral image'i pin qilingan agent keshini talab qiladi, shuning uchun build oldidan repo ildizida bir marta `pnpm meshcentral:agents` ni ishga tushiring.
+
 ```bash
 docker compose up -d --build
 docker compose run --rm api-migrate node dist/cli.mjs bootstrap --org "Maktab" --site "Asosiy bino" --admin admin
@@ -54,7 +56,8 @@ pnpm meshcentral:agents                       # pin qilingan agentlar (image'ga 
 docker compose -f compose.yaml -f compose.poc.yaml up -d --build
 ```
 
-- MeshCentral `agentPort` 4433'da faqat agent ulanishlarini qabul qiladi. Admin UI (4430) ochilmaydi.
+- MeshCentral `agentPort` 4433 agent yo'llarini beradi: `agent.ashx`, relay va agent o'rnatuvchisini yuklab olish. Admin UI va `control.ashx` (4430) ochilmaydi. O'rnatuvchini `meshid`ni bilgan LAN foydalanuvchisi ham ola oladi, lekin node faqat admin bog'lagandan keyin NetSchool qurilmasi bo'ladi.
+- Intel AMT MPS server'i o'chiriladi (`mpsPort: 0`), chunki u ham standart 4433'ni oladi.
 - Sertifikat nomi `meshcentral.hub.internal`, nuqtali bo'lishi shart. Nuqtasiz nomda MeshCentral LAN-only rejimga o'tadi va agentga `MeshServer=local` yozadi (`meshcentral.js:1906`). API ham shu nom bilan ulanadi.
 - `MESH_AGENT_HOST` agent `.msh` fayliga yoziladi (`agentAliasDNS`). DHCP'da o'zgaradigan IP ishlatmang.
 - Agent serverni sertifikat hash'i (`ServerID`) bo'yicha taniydi, shuning uchun `MESH_AGENT_HOST` sertifikat nomiga mos kelishi shart emas.
