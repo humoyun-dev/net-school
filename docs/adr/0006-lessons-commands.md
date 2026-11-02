@@ -26,7 +26,7 @@ Teacher xonada dars ochib-yopadi, darsdagi qurilmalarga typed buyruq yuboradi va
 ## P1c'da yo'q (ongli ravishda)
 
 - Control lease va `409 control_busy`, remote session'ni darsga ulash — P1d'da bajarildi ([ADR 0008](0008-remote-sessions.md)).
-- Power/reboot buyruqlari (MeshCentral orqali) va `unknown` natija — keyingi bosqich.
+- Power/reboot buyruqlari (MeshCentral orqali) va `unknown` natija — P1h'da alohida modul sifatida bajarildi ([ADR 0010](0010-power-management.md)).
 - Help request, chat, guruhlar, dars davomida qurilma qo'shish/olib tashlash.
 - Companion klienti (overlay'ni ko'rsatish, lease'ni hisoblash) — P1e'da bajarildi ([ADR 0009](0009-companion.md)); teacher paneli — P1f.
 
