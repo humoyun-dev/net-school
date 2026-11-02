@@ -52,7 +52,20 @@ IT admin markazdan kompyuterlarni o'chiradi, qayta yuklaydi, uxlatadi va (WoL qo
   - qayta yuklash: avval offline, keyin yana online;
   - yoqish: online.
   Muddat tugasa (o'chirish va uxlatish 180 s, qayta yuklash 600 s, yoqish 300 s) natija `unknown`. `pending`/`sent` targeti qolmagan amal `completed` bo'ladi, audit `power.completed` (summary, actor `null`).
-- **MeshCentral uzilgan.** Hech narsa yuborilmaydi. `run_at`dan 10 daqiqa o'tgan `pending` targetlar → `failed: upstream_unavailable`.
+- **Kech yuborilmaydi.** Darsda kutilmagan o'chirish yoki qayta yuklash bo'lmasligi uchun kechikish ikki joyda nazorat qilinadi:
+  - To'lqin jadvali 10 daqiqadan ko'p eskirgan bo'lsa (`next_wave_at < now − 10 min`), amalning qolgan `pending` targetlari `failed: upstream_unavailable` bo'ladi. Sabab: hub o'chiq bo'lgan yoki MeshCentral uzilgan, ya'ni to'lqinlar yurmagan. Kechikish `run_at`dan emas, oxirgi to'lqindan hisoblanadi, shuning uchun 10 daqiqadan uzun katta amal to'xtamaydi.
+  - Bitta site snapshot'i olinmasa (domain bog'lanmagan yoki MeshCentral javob bermadi), faqat o'sha site targetlari kechiktiriladi (`retry_at`, `deferred_since`; migratsiya `0011`). Boshqa site'lar davom etadi. `deferred_since`dan 10 daqiqa o'tsa → `failed: upstream_unavailable`.
+- **Eskirgan `runAt`.** Grace'dan (10 daqiqa) eski `runAt` 400 `validation_failed` bilan rad etiladi: kechagi so'rovning qayta urinishi hozir bajarilmaydi.
+- **Izolyatsiya va hajm:**
+  - Har jadval va har boshlanayotgan amal o'z tranzaksiyasida ishlaydi, bittasining xatosi boshqalarini to'smaydi.
+  - Targetlar 1000 tadan bo'lib insert qilinadi (PostgreSQL parametr limiti, minglab qurilmali universitet).
+  - To'lqin `(site, device)` tartibida olinadi. Har site snapshot'i tick ichida bir marta olinadi (claim va kuzatuv umumiy). Site qatorlari tick boshida yuklanadi.
+  - Rad etilgan wake faqat o'z amalining targetini o'zgartiradi.
+- **Ro'yxat** ruxsat bo'yicha SQL'da filtrlanadi:
+  - org admin hammasini ko'radi;
+  - site admin va IT faqat ko'lamining hamma site'i o'ziniki bo'lgan amallarni ko'radi;
+  - `organization` ko'lamidagi amallar faqat org admin'ga ko'rinadi.
+  Shuning uchun bandroq tashkilotda ham site admin o'z amallarini ko'radi.
 - **Kechikish (`missed`).** Vaqtidan 10 daqiqadan ko'p kechikkan amal yoki jadval vaqti bajarilmaydi: ertalab kechagi o'chirish bo'lmaydi.
   - Amal `missed`, audit `power.missed`, jadvalning keyingi vaqti hisoblanadi.
   - Bitta jadval vaqtiga bitta amal: unique `(schedule_id, run_at)`, `ON CONFLICT DO NOTHING`.
@@ -70,6 +83,14 @@ IT admin markazdan kompyuterlarni o'chiradi, qayta yuklaydi, uxlatadi va (WoL qo
 - **Agent offline'ligi o'chganini isbotlamaydi.** Tarmoq uzilishi ham `succeeded` ko'rinadi. `powerState` faqat MeshCentral bergan holat.
 - Faqat default MeshCentral domain'i tekshirilgan (ADR 0008 bilan bir xil).
 - Hub'ning in-process notifier'i ishlatilmaydi. Natijalar UI so'rovi bilan ko'rinadi (P1f).
+- **Yakuniy review'dan keyin qoldirilgan mayda ishlar:**
+  - node snapshot'da yo'q bo'lsa sabab `device_offline` (`node_missing` emas);
+  - yakunlangan amalni bekor qilish 200 qaytaradi va audit yozadi; bekor qilingan running amal oxiri `completed`;
+  - tasdiqlangan son tranzaksiyadan tashqarida tekshiriladi;
+  - MeshCentral holati har replikada alohida;
+  - `running` amalda `next_wave_at` va target/amal `organization_id` mosligi uchun DB check yo'q;
+  - fall-back (takrorlanadigan soat) vaqti uchun test yo'q.
+- Jadval yaratgan admin huquqini yo'qotsa ham jadval ishlayveradi. Ko'lamni ko'ra oladigan boshqa admin uni o'chiradi.
 
 ## Dalillar
 

@@ -16,6 +16,7 @@ const link = { connected: true };
 let app: TestApp;
 let orgId: string;
 let siteId: string;
+let otherSiteId: string;
 let adminId: string;
 let admin: string;
 
@@ -30,9 +31,12 @@ beforeEach(async () => {
   mesh.wakeResults.clear();
   mesh.powerFailing = false;
   mesh.failing = false;
+  mesh.failingDomains.clear();
+  mesh.listCalls.clear();
   await app.db.reset();
-  ({ orgId, siteId } = await seedOrg(app.db.db));
+  ({ orgId, siteId, otherSiteId } = await seedOrg(app.db.db));
   await setSiteDomain(app.db.db, siteId, '');
+  await setSiteDomain(app.db.db, otherSiteId, 'dom-b');
   adminId = await seedUser(app.db.db, orgId, 'admin1', [{ role: 'school_admin', siteId: null }]);
   admin = await loginAs(app, 'admin1');
 });
@@ -41,8 +45,14 @@ afterAll(async () => {
 });
 
 const worker = (a: TestApp = app) => a.get<PowerWorker>(PowerWorker);
-const bound = (online = true) =>
-  seedBoundDevice(app.db.db, mesh, { orgId, siteId, domain: '', boundBy: adminId, online });
+const bound = (online = true, site = siteId) =>
+  seedBoundDevice(app.db.db, mesh, {
+    orgId,
+    siteId: site,
+    domain: site === siteId ? '' : 'dom-b',
+    boundBy: adminId,
+    online,
+  });
 async function act(type: string, count: number, extra: Record<string, unknown> = {}) {
   const res = await app.request('POST', '/api/v1/power-actions', {
     body: { type, scope: { kind: 'sites', siteIds: [siteId] }, confirmDeviceCount: count, ...extra },
@@ -192,5 +202,78 @@ describe('power worker', () => {
     expect(mesh.powerRequests.filter((r) => r.type === 'reboot')).toHaveLength(0);
     const missed = await app.db.db.select().from(auditEvents).where(eq(auditEvents.action, 'power.missed'));
     expect(missed).toHaveLength(1);
+  });
+  test('an action left behind by a hub outage never sends late', async () => {
+    await bound();
+    const id = await act('reboot', 1);
+    // Hub 3 soat ishlamadi: birinchi tick shundan keyin.
+    await worker().tick(T0 + 3 * 3_600_000);
+    expect(mesh.powerRequests).toHaveLength(0);
+    expect(await target(id)).toMatchObject({ status: 'failed', reason: 'upstream_unavailable' });
+  });
+
+  test('a site whose snapshot fails holds only its own targets and gives up after 10 minutes', async () => {
+    const a = await bound(true, siteId);
+    const b = await bound(true, otherSiteId);
+    mesh.failingDomains.add('dom-b');
+    const res = await app.request('POST', '/api/v1/power-actions', {
+      body: { type: 'shutdown', scope: { kind: 'organization' }, confirmDeviceCount: 2 },
+      cookie: admin,
+      headers: { 'idempotency-key': randomUUID() },
+    });
+    const id = res.json.id as string;
+    await worker().tick(T0);
+    expect(mesh.powerRequests.map((r) => r.nodeId)).toEqual([a.nodeId]);
+    for (let t = T0 + 5_000; t <= T0 + 600_000; t += 60_000) await worker().tick(t);
+    const byDevice = () => targets(id).then((rows) => new Map(rows.map((r) => [r.deviceId, r])));
+    expect((await byDevice()).get(b.deviceId)).toMatchObject({ status: 'pending' });
+    await worker().tick(T0 + 600_001);
+    expect((await byDevice()).get(b.deviceId)).toMatchObject({ status: 'failed', reason: 'upstream_unavailable' });
+    mesh.failingDomains.clear();
+    await worker().tick(T0 + 700_000);
+    expect(mesh.powerRequests.map((r) => r.nodeId)).toEqual([a.nodeId]);
+  });
+
+  test('a long action keeps sending past 10 minutes while waves progress', async () => {
+    for (let i = 0; i < 3; i++) await bound();
+    const id = await act('shutdown', 3);
+    // To'lqinlar o'z vaqtida: kechikish runAt'dan emas, oxirgi to'lqindan hisoblanadi.
+    await app.db.db
+      .update(powerActions)
+      .set({ nextWaveAt: new Date(T0 + 700_000) })
+      .where(eq(powerActions.id, id));
+    await worker().tick(T0 + 700_000);
+    expect(mesh.powerRequests).toHaveLength(3);
+  });
+
+  test("a rejected wake does not touch another action's targets", async () => {
+    const d = await bound(true);
+    const shutdown = await act('shutdown', 1);
+    await worker().tick(T0);
+    expect(await target(shutdown)).toMatchObject({ status: 'sent' });
+    // Kompyuter o'chdi; shu tick'da wake yuboriladi va rad etiladi, shutdown esa kuzatuvda succeeded bo'lishi kerak.
+    setOnline(d.nodeId, false);
+    mesh.wakeResults.set(d.nodeId, { accepted: false, reason: 'wake_unsupported' });
+    const wake = await act('wake', 1);
+    await worker().tick(T0 + 1);
+    expect(await target(wake)).toMatchObject({ status: 'failed', reason: 'wake_unsupported' });
+    expect(await target(shutdown)).toMatchObject({ status: 'succeeded', reason: null });
+  });
+
+  test('a wave stays within one site and one snapshot serves the whole tick', async () => {
+    for (let i = 0; i < 30; i++) await bound(true, siteId);
+    for (let i = 0; i < 30; i++) await bound(true, otherSiteId);
+    const res = await app.request('POST', '/api/v1/power-actions', {
+      body: { type: 'reboot', scope: { kind: 'organization' }, confirmDeviceCount: 60 },
+      cookie: admin,
+      headers: { 'idempotency-key': randomUUID() },
+    });
+    expect(res.status).toBe(202);
+    const first = [siteId, otherSiteId].sort()[0];
+    await worker().tick(T0);
+    const sites = mesh.powerRequests.map((r) => r.siteId);
+    expect(sites.slice(0, 30).every((s) => s === first)).toBe(true);
+    // Bitta tick: har site uchun ko'pi bilan bitta listDevices (claim va reconcile umumiy).
+    expect([...mesh.listCalls.values()].every((n) => n === 1)).toBe(true);
   });
 });

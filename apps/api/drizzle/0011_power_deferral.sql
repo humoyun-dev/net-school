@@ -1,0 +1,3 @@
+ALTER TABLE "power_action_targets" ADD COLUMN "retry_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "power_action_targets" ADD COLUMN "deferred_since" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "power_schedules" ADD CONSTRAINT "power_schedules_days" CHECK (cardinality("power_schedules"."days_of_week") between 1 and 7 and "power_schedules"."days_of_week" <@ array[1, 2, 3, 4, 5, 6, 7]);

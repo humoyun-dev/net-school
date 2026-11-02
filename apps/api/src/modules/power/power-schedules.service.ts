@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type {
   CreatePowerScheduleRequest,
   PowerSchedule,
@@ -29,6 +29,8 @@ const ruleOf = (row: ScheduleRow): WeeklyRule => ({
 
 @Injectable()
 export class PowerSchedulesService {
+  readonly #log = new Logger('PowerSchedules');
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(CLOCK) private readonly now: Clock,
@@ -136,64 +138,83 @@ export class PowerSchedulesService {
   // Vaqti kelgan jadvallar: bitta vaqtga bitta amal (unique (schedule_id, run_at)). Kechikkan → missed, ertalab
   // kechagi o'chirish bajarilmaydi. Ko'lam ishga tushish paytidagi holatda olinadi.
   async runDue(now: number): Promise<void> {
+    const due = await this.db
+      .select({ id: powerSchedules.id })
+      .from(powerSchedules)
+      .where(and(eq(powerSchedules.enabled, true), lte(powerSchedules.nextRunAt, new Date(now))))
+      .orderBy(asc(powerSchedules.nextRunAt))
+      .limit(DUE_PER_TICK);
+    // Har jadval o'z tranzaksiyasida: bittasining xatosi (masalan buzilgan mintaqa) boshqalarini to'smaydi.
+    for (const { id } of due) {
+      try {
+        await this.#runOne(id, now);
+      } catch (err) {
+        this.#log.error(`power schedule ${id} failed: ${err instanceof Error ? err.message : 'unknown'}`);
+      }
+    }
+  }
+
+  async #runOne(id: string, now: number): Promise<void> {
     await this.db.transaction(async (tx) => {
-      const due = await tx
+      const [schedule] = await tx
         .select()
         .from(powerSchedules)
-        .where(and(eq(powerSchedules.enabled, true), lte(powerSchedules.nextRunAt, new Date(now))))
-        .orderBy(asc(powerSchedules.nextRunAt))
-        .limit(DUE_PER_TICK)
+        .where(
+          and(
+            eq(powerSchedules.id, id),
+            eq(powerSchedules.enabled, true),
+            lte(powerSchedules.nextRunAt, new Date(now)),
+          ),
+        )
         .for('update', { skipLocked: true });
-      for (const schedule of due) {
-        const runAt = schedule.nextRunAt;
-        if (!runAt) continue;
-        const scope = schedule.scope as PowerScope;
-        const siteIds =
-          scope.kind === 'organization'
-            ? (
-                await tx.select({ id: sites.id }).from(sites).where(eq(sites.organizationId, schedule.organizationId))
-              ).map((s) => s.id)
-            : schedule.siteIds;
-        const missed = now - runAt.getTime() > POWER_MISSED_GRACE_MS;
-        const [action] = await tx
-          .insert(powerActions)
-          .values({
+      const runAt = schedule?.nextRunAt;
+      if (!schedule || !runAt) return;
+      const scope = schedule.scope as PowerScope;
+      const siteIds =
+        scope.kind === 'organization'
+          ? (
+              await tx.select({ id: sites.id }).from(sites).where(eq(sites.organizationId, schedule.organizationId))
+            ).map((s) => s.id)
+          : schedule.siteIds;
+      const missed = now - runAt.getTime() > POWER_MISSED_GRACE_MS;
+      const [action] = await tx
+        .insert(powerActions)
+        .values({
+          organizationId: schedule.organizationId,
+          type: schedule.type,
+          scope,
+          siteIds,
+          status: missed ? 'missed' : 'scheduled',
+          runAt,
+          scheduleId: schedule.id,
+          requestedBy: null,
+          createdAt: new Date(now),
+          completedAt: missed ? new Date(now) : null,
+        })
+        .onConflictDoNothing({ target: [powerActions.scheduleId, powerActions.runAt] })
+        .returning();
+      if (action && missed) {
+        await this.audit.write(
+          tx,
+          {
             organizationId: schedule.organizationId,
-            type: schedule.type,
-            scope,
-            siteIds,
-            status: missed ? 'missed' : 'scheduled',
-            runAt,
-            scheduleId: schedule.id,
-            requestedBy: null,
-            createdAt: new Date(now),
-            completedAt: missed ? new Date(now) : null,
-          })
-          .onConflictDoNothing({ target: [powerActions.scheduleId, powerActions.runAt] })
-          .returning();
-        if (action && missed) {
-          await this.audit.write(
-            tx,
-            {
-              organizationId: schedule.organizationId,
-              siteId: siteIds.length === 1 ? (siteIds[0] ?? null) : null,
-              actorUserId: null,
-              action: 'power.missed',
-              targetType: 'power_action',
-              targetId: action.id,
-              result: 'succeeded',
-              details: { type: schedule.type, scheduleId: schedule.id, runAt: runAt.toISOString() },
-            },
-            `power-${action.id}`,
-          );
-        } else if (action) {
-          await this.power.materialize(tx, action.id, now);
-        }
-        await tx
-          .update(powerSchedules)
-          .set({ nextRunAt: new Date(nextOccurrence(ruleOf(schedule), now)), updatedAt: new Date(now) })
-          .where(eq(powerSchedules.id, schedule.id));
+            siteId: siteIds.length === 1 ? (siteIds[0] ?? null) : null,
+            actorUserId: null,
+            action: 'power.missed',
+            targetType: 'power_action',
+            targetId: action.id,
+            result: 'succeeded',
+            details: { type: schedule.type, scheduleId: schedule.id, runAt: runAt.toISOString() },
+          },
+          `power-${action.id}`,
+        );
+      } else if (action) {
+        await this.power.materialize(tx, action.id, now);
       }
+      await tx
+        .update(powerSchedules)
+        .set({ nextRunAt: new Date(nextOccurrence(ruleOf(schedule), now)), updatedAt: new Date(now) })
+        .where(eq(powerSchedules.id, schedule.id));
     });
   }
 

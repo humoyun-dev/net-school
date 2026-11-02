@@ -78,6 +78,13 @@
       "when": 1793613006311,
       "tag": "0010_power",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793614039911,
+      "tag": "0011_power_deferral",
+      "breakpoints": true
     }
   ]
 }

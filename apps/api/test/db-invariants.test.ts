@@ -710,6 +710,11 @@ describe('lesson invariants', () => {
     await rejects(
       t.db.update(powerSchedules).set({ timeOfDay: '24:00' }).where(sql`${powerSchedules.id} = ${schedule.id}`),
     );
+    for (const days of [[], [0], [8], [1, 9]]) {
+      await rejects(
+        t.db.update(powerSchedules).set({ daysOfWeek: days }).where(sql`${powerSchedules.id} = ${schedule.id}`),
+      );
+    }
   });
 
   test('fencing values increase', async () => {

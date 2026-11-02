@@ -7,8 +7,14 @@ import type {
   PowerTarget,
   PreviewPowerRequest,
 } from '@netschool/contracts';
-import { POWER_MAX_LEAD_MS, POWER_TARGET_STATUSES, type PowerTargetStatus } from '@netschool/domain';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import {
+  type Actor,
+  POWER_MAX_LEAD_MS,
+  POWER_MISSED_GRACE_MS,
+  POWER_TARGET_STATUSES,
+  type PowerTargetStatus,
+} from '@netschool/domain';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { Access } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isUuid } from '../../common/db-errors.ts';
@@ -23,7 +29,20 @@ import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort } from '..
 import { authorizeScope, canManage, resolveScope, type ScopeDevice, scopeSummary } from './power-scope.ts';
 
 type ActionRow = typeof powerActions.$inferSelect;
-const LIST_SCAN = 500;
+const TARGET_INSERT_CHUNK = 1_000;
+
+// Ro'yxat SQL'da filtrlanadi: org admin — hammasi; site admin/IT — faqat ko'lami o'z site'larida bo'lganlar.
+export function visibleSitesFilter(actor: Actor): string[] | null {
+  const own = actor.assignments.filter((a) => a.organizationId === actor.organizationId);
+  if (own.some((a) => a.role === 'school_admin' && a.siteId === null)) return null;
+  return [
+    ...new Set(
+      own
+        .filter((a) => (a.role === 'school_admin' || a.role === 'it_support') && a.siteId !== null)
+        .map((a) => a.siteId as string),
+    ),
+  ];
+}
 
 // Ko'p qurilmali amal: admin ko'rgan son joriy songa aynan teng bo'lishi shart (spec §7.1).
 export function requireConfirmation(count: number, confirmed: number | undefined): void {
@@ -93,6 +112,8 @@ export class PowerService {
     const now = this.now();
     const runAtMs = input.runAt === undefined ? now : Date.parse(input.runAt);
     if (runAtMs > now + POWER_MAX_LEAD_MS) throw new ApiError('validation_failed', 'runAt is too far ahead');
+    // Eskirgan vaqt (masalan kechagi so'rovning qayta urinishi) hozir bajarilmaydi.
+    if (runAtMs < now - POWER_MISSED_GRACE_MS) throw new ApiError('validation_failed', 'runAt is in the past');
     const siteIds = await authorizeScope(this.db, this.access, ctx, input.scope, {
       targetType: 'power_scope',
       targetId: input.scope.kind,
@@ -150,9 +171,10 @@ export class PowerService {
     if (!action) throw new Error('power action missing');
     const found = await resolveScope(tx, action.organizationId, action.scope as PowerScope);
     const at = new Date(now);
-    if (found.length > 0) {
+    // Bo'laklab: PostgreSQL bitta so'rovda ≤ 65 535 parametr (butun universitet — minglab qurilma).
+    for (let i = 0; i < found.length; i += TARGET_INSERT_CHUNK) {
       await tx.insert(powerActionTargets).values(
-        found.map((d) => ({
+        found.slice(i, i + TARGET_INSERT_CHUNK).map((d) => ({
           actionId,
           deviceId: d.id,
           organizationId: action.organizationId,
@@ -169,15 +191,26 @@ export class PowerService {
 
   async list(ctx: RequestContext, limit: number): Promise<PowerAction[]> {
     const actor = this.access.actor(ctx);
+    const allowed = visibleSitesFilter(actor);
+    if (allowed !== null && allowed.length === 0) return [];
     const rows = await this.db
       .select()
       .from(powerActions)
-      .where(eq(powerActions.organizationId, actor.organizationId))
+      .where(
+        and(
+          eq(powerActions.organizationId, actor.organizationId),
+          allowed === null
+            ? undefined
+            : sql`${powerActions.scope} ->> 'kind' <> 'organization' and ${powerActions.siteIds} <@ array[${sql.join(
+                allowed.map((id) => sql`${id}`),
+                sql`, `,
+              )}]::uuid[]`,
+        ),
+      )
       .orderBy(desc(powerActions.createdAt), desc(powerActions.id))
-      .limit(LIST_SCAN);
-    const visible = rows
-      .filter((r) => canManage(actor, r.organizationId, r.scope as PowerScope, r.siteIds))
-      .slice(0, limit);
+      .limit(limit);
+    // SQL filtri bilan bir xil qoida (authorize) — ikkinchi himoya.
+    const visible = rows.filter((r) => canManage(actor, r.organizationId, r.scope as PowerScope, r.siteIds));
     return Promise.all(visible.map((r) => this.view(this.db, r.id, false)));
   }
 
