@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { HelpRequest } from '@netschool/contracts';
 import type { HelpClearReason } from '@netschool/domain';
-import { and, asc, eq, isNull, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, type SQL } from 'drizzle-orm';
 import { Access } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { isUuid } from '../../common/db-errors.ts';
@@ -15,6 +15,17 @@ import { EventLog, Outbox } from '../events/event-log.ts';
 type HelpRow = typeof helpRequests.$inferSelect;
 
 export type HelpScope = { lessonId: string; deviceId?: string };
+
+// Yopilgan qator: event va uyg'otish uchun kerakli maydonlar (announceCleared).
+export interface ClearedHelp {
+  id: string;
+  organizationId: string;
+  siteId: string;
+  roomId: string;
+  lessonId: string;
+  deviceId: string;
+  reason: HelpClearReason;
+}
 
 function toHelpRequest(r: HelpRow): HelpRequest {
   return {
@@ -142,19 +153,45 @@ export class HelpRequestsService {
     );
   }
 
-  // Chaqiruvchining tranzaksiyasida, xona voqeasidan OLDIN (ADR 0008): endLesson va qurilma chiqishi.
+  // Chaqiruvchining tranzaksiyasida: faqat qator lock'i (FOR UPDATE, id tartibida) va UPDATE; xona lock'i ham,
+  // event ham yo'q. Chaqiruvchi avval boshqa qator lock'larini (closeRemoteSessions) oladi, keyin announceCleared
+  // chaqiradi (ADR 0008: hamma qator lock'lari xona lock'idan oldin, aks holda sessiya yopilishi bilan deadlock).
   async clearOpen(
     tx: Db,
     scope: HelpScope,
     reason: Extract<HelpClearReason, 'lesson_ended' | 'device_left'>,
     clearedBy: string | null,
-  ): Promise<number> {
+  ): Promise<ClearedHelp[]> {
     const where = and(
       eq(helpRequests.lessonId, scope.lessonId),
       scope.deviceId ? eq(helpRequests.deviceId, scope.deviceId) : undefined,
       isNull(helpRequests.clearedAt),
     );
-    return this.#close(tx, where, reason, clearedBy);
+    return this.#release(tx, where, reason, clearedBy);
+  }
+
+  // Xona lock'i ushlangandan keyin: har yopilgan so'rov uchun bitta event va xonalarni uyg'otish.
+  async announceCleared(tx: Db, cleared: ClearedHelp[]): Promise<void> {
+    if (cleared.length === 0) return;
+    await this.events.lockRooms(
+      tx,
+      cleared.map((r) => r.roomId),
+    );
+    const rooms = new Map<string, Set<string>>();
+    for (const r of cleared) {
+      await this.events.append(tx, {
+        organizationId: r.organizationId,
+        siteId: r.siteId,
+        roomId: r.roomId,
+        lessonId: r.lessonId,
+        type: 'help_request.cleared',
+        data: { helpRequestId: r.id, deviceId: r.deviceId, reason: r.reason },
+      });
+      rooms.set(r.organizationId, (rooms.get(r.organizationId) ?? new Set()).add(r.roomId));
+    }
+    for (const [organizationId, roomIds] of rooms) {
+      await this.outbox.enqueue(tx, organizationId, 'notify.rooms', { roomIds: [...roomIds].sort() });
+    }
   }
 
   // Dars ochiq so'rovlari, ko'tarilgan vaqt bo'yicha: events snapshot'i uchun.
@@ -178,36 +215,38 @@ export class HelpRequestsService {
     return row ? { id: row.id, raisedAt: row.raisedAt.toISOString() } : null;
   }
 
-  // Qatorlar tartib bilan qulflanadi, keyin xona lock'i (EventLog.append); har yopilgan so'rov uchun bitta event.
-  async #close(tx: Db, where: SQL | undefined, reason: HelpClearReason, clearedBy: string | null): Promise<number> {
+  // Qator lock'i, keyin xona lock'i: faqat boshqa qator lock'i olmaydigan chaqiruvchilar (withdraw, clear).
+  async #close(tx: Db, where: SQL | undefined, reason: HelpClearReason, clearedBy: string | null): Promise<void> {
+    await this.announceCleared(tx, await this.#release(tx, where, reason, clearedBy));
+  }
+
+  // Qatorlar id tartibida qulflanadi va yopiladi. READ COMMITTED: kutishdan keyin allaqachon yopilgan qator tushmaydi.
+  async #release(
+    tx: Db,
+    where: SQL | undefined,
+    reason: HelpClearReason,
+    clearedBy: string | null,
+  ): Promise<ClearedHelp[]> {
     const open = await tx.select().from(helpRequests).where(where).orderBy(asc(helpRequests.id)).for('update');
-    if (open.length === 0) return 0;
+    if (open.length === 0) return [];
     const at = new Date(this.now());
-    for (const r of open) {
-      await tx
-        .update(helpRequests)
-        .set({ clearedAt: at, clearReason: reason, clearedBy })
-        .where(eq(helpRequests.id, r.id));
-    }
-    await this.events.lockRooms(
-      tx,
-      open.map((r) => r.roomId),
-    );
-    const rooms = new Map<string, Set<string>>();
-    for (const r of open) {
-      await this.events.append(tx, {
-        organizationId: r.organizationId,
-        siteId: r.siteId,
-        roomId: r.roomId,
-        lessonId: r.lessonId,
-        type: 'help_request.cleared',
-        data: { helpRequestId: r.id, deviceId: r.deviceId, reason },
-      });
-      rooms.set(r.organizationId, (rooms.get(r.organizationId) ?? new Set()).add(r.roomId));
-    }
-    for (const [organizationId, roomIds] of rooms) {
-      await this.outbox.enqueue(tx, organizationId, 'notify.rooms', { roomIds: [...roomIds].sort() });
-    }
-    return open.length;
+    await tx
+      .update(helpRequests)
+      .set({ clearedAt: at, clearReason: reason, clearedBy })
+      .where(
+        inArray(
+          helpRequests.id,
+          open.map((r) => r.id),
+        ),
+      );
+    return open.map((r) => ({
+      id: r.id,
+      organizationId: r.organizationId,
+      siteId: r.siteId,
+      roomId: r.roomId,
+      lessonId: r.lessonId,
+      deviceId: r.deviceId,
+      reason,
+    }));
   }
 }

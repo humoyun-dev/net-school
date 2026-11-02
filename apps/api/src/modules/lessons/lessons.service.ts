@@ -175,13 +175,15 @@ export class LessonsService {
       .where(and(inArray(commandTargets.commandId, lessonCommands), inArray(commandTargets.status, OPEN_STATUSES)))
       .returning({ commandId: commandTargets.commandId });
     const deviceIds = released.map((r) => r.deviceId).sort();
-    // Xona voqeasidan oldin: sessiya va yordam qatorlari xona lock'idan oldin olinadi (closing.ts dagi lock tartibi).
-    await this.help.clearOpen(tx, { lessonId: lesson.id }, 'lesson_ended', endedBy);
+    // Xona voqeasidan oldin: qator lock'lari (yordam, sessiya) xona lock'idan oldin olinadi (closing.ts dagi lock tartibi);
+    // yordam voqealari sessiyalardan keyin.
+    const clearedHelp = await this.help.clearOpen(tx, { lessonId: lesson.id }, 'lesson_ended', endedBy);
     await closeRemoteSessions(tx, { lessonId: lesson.id }, 'lesson_ended', at, endedBy, correlationId, {
       events: this.events,
       outbox: this.outbox,
       audit: this.audit,
     });
+    await this.help.announceCleared(tx, clearedHelp);
     await this.events.append(tx, {
       organizationId: lesson.organizationId,
       siteId: lesson.siteId,
