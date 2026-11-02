@@ -38,6 +38,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      # Capability matrix: dalilsiz `passed` yo'q (spec §7).
+      - run: node scripts/poc/matrix.mjs
 
   contract:
     runs-on: ubuntu-latest
