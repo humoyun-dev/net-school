@@ -11,6 +11,7 @@ import {
   sites,
 } from '../src/db/schema.ts';
 import { EventLog } from '../src/modules/events/event-log.ts';
+import { PowerWorker } from '../src/modules/power/power.worker.ts';
 import { OutboxWorker } from '../src/modules/workers/outbox.worker.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { setCapabilities, setHeartbeat } from './support/caps.ts';
@@ -18,6 +19,7 @@ import { type DeviceKey, deviceRequest, makeDeviceKey, seedDevice } from './supp
 import { endLesson, idem, issueCommand, startLesson } from './support/lesson.ts';
 import { loginAs } from './support/login.ts';
 import { FakeMesh } from './support/mesh.ts';
+import { seedBoundDevice } from './support/power.ts';
 import { FakeRemote, seedBinding } from './support/remote.ts';
 import { seedOrg, seedRoom, seedUser } from './support/seed.ts';
 
@@ -295,6 +297,36 @@ describe.skipIf(!realPg)('concurrency on real PostgreSQL', () => {
       }
     } finally {
       mesh.beforeList = null;
+    }
+  });
+  test('concurrent workers send each target once', async () => {
+    const adminId = await seedUser(app.db.db, orgId, 'poweradmin', [{ role: 'school_admin', siteId: null }]);
+    const cookie = await loginAs(app, 'poweradmin');
+    mesh.powerRequests.length = 0;
+    for (let i = 0; i < 60; i++) {
+      await seedBoundDevice(app.db.db, mesh, { orgId, siteId, domain: 'dom-a', boundBy: adminId });
+    }
+    const res = await app.request('POST', '/api/v1/power-actions', {
+      body: { type: 'reboot', scope: { kind: 'sites', siteIds: [siteId] }, confirmDeviceCount: 61 },
+      cookie,
+      headers: { 'idempotency-key': `power-${now}` },
+    });
+    expect(res.status, JSON.stringify(res.json)).toBe(202);
+    const link = { connected: true };
+    const a = await startTestApp({ db: app.db, deviceManagement: mesh.factory, mesh: link, now: () => now });
+    const b = await startTestApp({ db: app.db, deviceManagement: mesh.factory, mesh: link, now: () => now });
+    try {
+      for (const at of [now, now + 5_000, now + 10_000]) {
+        await Promise.all([a.get<PowerWorker>(PowerWorker).tick(at), b.get<PowerWorker>(PowerWorker).tick(at)]);
+      }
+      const perNode = new Map<string, number>();
+      for (const r of mesh.powerRequests) perNode.set(r.nodeId, (perNode.get(r.nodeId) ?? 0) + 1);
+      // 60 yangi + beforeEach'dagi bog'langan qurilma (agenti online bo'lsa u ham yuboriladi).
+      expect(perNode.size).toBeGreaterThanOrEqual(60);
+      expect([...perNode.values()].every((n) => n === 1)).toBe(true);
+    } finally {
+      await a.close();
+      await b.close();
     }
   });
 });
