@@ -1,0 +1,13 @@
+{
+  "name": "@netschool/remote-viewer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./renew-worker": "./src/renew-worker.ts"
+  },
+  "dependencies": {
+    "@netschool/contracts": "workspace:*"
+  }
+}

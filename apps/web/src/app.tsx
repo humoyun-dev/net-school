@@ -5,7 +5,7 @@ import { createApi } from './api/client.ts';
 import { LoginPage } from './auth/login-page.tsx';
 import { PasswordPage } from './auth/password-page.tsx';
 import { SessionProvider, useSession } from './auth/session.tsx';
-import { RoomPage } from './classroom/room-page.tsx';
+import { ClassroomRoute } from './classroom/classroom-route.tsx';
 import { LocaleProvider, useT } from './i18n/i18n.tsx';
 import { Shell } from './layout/shell.tsx';
 import { RoomsPage } from './rooms/rooms-page.tsx';
@@ -36,7 +36,7 @@ function Pages() {
               children: [
                 { index: true, element: <Navigate to="/rooms" replace /> },
                 { path: '/rooms', element: <RoomsPage /> },
-                { path: '/rooms/:roomId', element: <RoomPage /> },
+                { path: '/rooms/:roomId', element: <ClassroomRoute /> },
                 { path: '*', element: <Navigate to="/rooms" replace /> },
               ],
             },

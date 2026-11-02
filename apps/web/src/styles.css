@@ -266,3 +266,43 @@ label {
 .site {
   margin-bottom: 1rem;
 }
+.tile-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.tile-actions button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+.remote-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 20, 30, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+.remote-panel {
+  width: min(1280px, 96vw);
+  height: min(860px, 92vh);
+  background: var(--card);
+  border-radius: 10px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+.remote-panel header {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+.remote-panel .spacer {
+  flex: 1;
+}
+.remote-panel iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}

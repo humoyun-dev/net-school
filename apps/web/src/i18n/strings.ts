@@ -81,6 +81,16 @@ export const uz = {
   'help.raised': "Yordam so'rayapti",
   'help.clear': "Yordam so'rovini yopish",
   'tile.noFrame': "Rasm yo'q",
+  'remote.view': "Ko'rish",
+  'remote.control': 'Boshqarish',
+  'remote.opening': 'Ulanmoqda…',
+  'remote.title': '{name}: ekran',
+  'remote.close': 'Yopish',
+  'remote.closed.closed': 'Sessiya yopildi',
+  'remote.closed.control_busy': 'Kompyuterni boshqa foydalanuvchi boshqaryapti',
+  'remote.closed.expired': 'Sessiya muddati tugadi',
+  'remote.closed.lesson_ended': 'Dars tugadi yoki kompyuter darsdan chiqdi',
+  'remote.closed.error': "Ulanib bo'lmadi",
 };
 
 export type StringKey = keyof typeof uz;
@@ -168,6 +178,16 @@ const ru: Strings = {
   'help.raised': 'Просит помощь',
   'help.clear': 'Закрыть запрос помощи',
   'tile.noFrame': 'Нет изображения',
+  'remote.view': 'Смотреть',
+  'remote.control': 'Управлять',
+  'remote.opening': 'Подключение…',
+  'remote.title': '{name}: экран',
+  'remote.close': 'Закрыть',
+  'remote.closed.closed': 'Сеанс закрыт',
+  'remote.closed.control_busy': 'Компьютером управляет другой пользователь',
+  'remote.closed.expired': 'Сеанс истёк',
+  'remote.closed.lesson_ended': 'Урок завершён или компьютер вышел из урока',
+  'remote.closed.error': 'Не удалось подключиться',
 };
 
 const en: Strings = {
@@ -252,6 +272,16 @@ const en: Strings = {
   'help.raised': 'Asking for help',
   'help.clear': 'Dismiss help request',
   'tile.noFrame': 'No picture',
+  'remote.view': 'View',
+  'remote.control': 'Control',
+  'remote.opening': 'Connecting…',
+  'remote.title': '{name}: screen',
+  'remote.close': 'Close',
+  'remote.closed.closed': 'Session closed',
+  'remote.closed.control_busy': 'Another user is controlling this computer',
+  'remote.closed.expired': 'The session expired',
+  'remote.closed.lesson_ended': 'The lesson ended or the computer left it',
+  'remote.closed.error': 'Could not connect',
 };
 
 export type Locale = 'uz' | 'ru' | 'en';

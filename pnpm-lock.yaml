@@ -130,6 +130,9 @@ importers:
       '@netschool/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@netschool/remote-viewer':
+        specifier: workspace:*
+        version: link:../../packages/remote-viewer
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -188,6 +191,12 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+
+  packages/remote-viewer:
+    dependencies:
+      '@netschool/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/session-gateway:
     dependencies:
