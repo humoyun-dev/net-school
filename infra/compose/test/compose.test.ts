@@ -218,13 +218,23 @@ describe('meshcentral config rendering', () => {
   test('agent alias settings are rendered', () => {
     const config = renderConfig(template, {
       dbPassword: 'x',
-      certName: 'meshcentral',
+      certName: 'meshcentral.hub.internal',
       trustedProxy: '172.31.250.10',
       agent: { port: 4433, aliasDns: 'hub.school.lan', aliasPort: 4433 },
     });
     expect(config.settings).toMatchObject({ agentPort: 4433, agentAliasDNS: 'hub.school.lan', agentAliasPort: 4433 });
-    // API hali ichki `meshcentral` nomi bilan ulanadi (hostname tekshiruvi o'zgarmaydi).
-    expect(config.settings.cert).toBe('meshcentral');
+  });
+
+  test('agents need a dotted certificate name, otherwise MeshCentral silently goes LAN-only', () => {
+    // meshcentral.js:1906 — CommonName'da nuqta bo'lmasa lanonly: .msh'ga MeshServer=local yoziladi.
+    expect(() =>
+      renderConfig(template, {
+        dbPassword: 'x',
+        certName: 'meshcentral',
+        trustedProxy: '172.31.250.10',
+        agent: { port: 4433, aliasDns: 'hub.school.lan', aliasPort: 4433 },
+      }),
+    ).toThrow(/MESHCENTRAL_CERT_NAME/);
   });
 
   test('an alias with a port or path is rejected', () => {
@@ -233,7 +243,7 @@ describe('meshcentral config rendering', () => {
         () =>
           renderConfig(template, {
             dbPassword: 'x',
-            certName: 'meshcentral',
+            certName: 'meshcentral.hub.internal',
             trustedProxy: '172.31.250.10',
             agent: { port: 4433, aliasDns, aliasPort: 4433 },
           }),
@@ -260,7 +270,12 @@ describe('meshcentral config rendering', () => {
       MESHCENTRAL_AGENT_ALIAS_PORT: '${MESH_AGENT_PORT:-4433}',
     });
     expect(mc.environment?.MESHCENTRAL_AGENT_ALIAS_DNS).toMatch(/^\$\{MESH_AGENT_HOST:\?/);
-    // Overlay boshqa servislarga port qo'shmaydi.
-    expect(Object.keys(poc.services)).toEqual(['meshcentral']);
+    // Sertifikat nomi nuqtali (aks holda LAN-only), API shu nom bilan ulanadi; overlay boshqa port qo'shmaydi.
+    expect(mc.environment?.MESHCENTRAL_CERT_NAME).toBe('meshcentral.hub.internal');
+    expect(mc.networks).toEqual({ hub: { aliases: ['meshcentral.hub.internal'] } });
+    const api = poc.services.api as Service;
+    expect(api.environment).toEqual({ MESHCENTRAL_URL: 'wss://meshcentral.hub.internal:4430/control.ashx' });
+    expect(api.ports).toBeUndefined();
+    expect(Object.keys(poc.services).sort()).toEqual(['api', 'meshcentral']);
   });
 });

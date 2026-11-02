@@ -26,6 +26,7 @@ export {
   MeshCentralViewerUpstream,
   type MeshCentralViewerUpstreamOptions,
 } from './desktop/viewer-upstream.ts';
+export { agentDownloadPath, ensureDeviceGroup } from './device-groups.ts';
 export { MeshCentralDeviceManagement } from './device-management.ts';
 export { AdapterError, type AdapterErrorCode } from './errors.ts';
 export type { SiteMeshScope } from './node-id.ts';
