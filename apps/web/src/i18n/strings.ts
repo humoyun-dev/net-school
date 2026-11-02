@@ -1,5 +1,17 @@
 // Panel matnlari. uz — asosiy; ru va en shu kalitlar bilan tiplanadi (kalit yetishmasa typecheck yiqiladi).
 export const uz = {
+  'nav.manage': 'Boshqaruv',
+  'nav.account': 'Hisob',
+  'login.subtitle': 'Sinf kompyuterlarini boshqarish paneli',
+  'rooms.subtitle': 'Darsni boshlash uchun xonani tanlang',
+  'lesson.remaining': '{n} daq qoldi',
+  'lesson.overtime': 'Vaqt tugadi',
+  'lesson.startHint': "Dars boshlangach o'quvchilar ekranlari shu yerda ko'rinadi",
+  'grid.count': '{n} ta kompyuter darsda',
+  'cmd.messagePlaceholder': 'Xabar yozing…',
+  'cmd.lockPlaceholder': 'Bloklash matni',
+  'remote.connectHint': 'Ekran ochilmasa, oyna ichidagi «Connect» tugmasini bosing',
+  'power.subtitle': "Kompyuterlarni o'chirish, qayta yuklash, uxlatish va yoqish",
   'app.title': 'NetSchool',
   'nav.rooms': 'Xonalar',
   'nav.power': 'Quvvat',
@@ -158,6 +170,18 @@ export type StringKey = keyof typeof uz;
 export type Strings = Record<StringKey, string>;
 
 const ru: Strings = {
+  'nav.manage': 'Управление',
+  'nav.account': 'Аккаунт',
+  'login.subtitle': 'Панель управления компьютерами класса',
+  'rooms.subtitle': 'Выберите кабинет, чтобы начать урок',
+  'lesson.remaining': 'Осталось {n} мин',
+  'lesson.overtime': 'Время вышло',
+  'lesson.startHint': 'После начала урока здесь появятся экраны учеников',
+  'grid.count': 'Компьютеров в уроке: {n}',
+  'cmd.messagePlaceholder': 'Напишите сообщение…',
+  'cmd.lockPlaceholder': 'Текст блокировки',
+  'remote.connectHint': 'Если экран не открылся, нажмите «Connect» внутри окна',
+  'power.subtitle': 'Выключение, перезагрузка, сон и включение компьютеров',
   'app.title': 'NetSchool',
   'nav.rooms': 'Кабинеты',
   'nav.power': 'Питание',
@@ -313,6 +337,18 @@ const ru: Strings = {
 };
 
 const en: Strings = {
+  'nav.manage': 'Manage',
+  'nav.account': 'Account',
+  'login.subtitle': 'Classroom computer control panel',
+  'rooms.subtitle': 'Pick a room to start a lesson',
+  'lesson.remaining': '{n} min left',
+  'lesson.overtime': 'Time is up',
+  'lesson.startHint': "Students' screens appear here once the lesson starts",
+  'grid.count': '{n} computers in the lesson',
+  'cmd.messagePlaceholder': 'Write a message…',
+  'cmd.lockPlaceholder': 'Lock message',
+  'remote.connectHint': 'If the screen does not open, press "Connect" inside the window',
+  'power.subtitle': 'Shut down, restart, sleep and wake computers',
   'app.title': 'NetSchool',
   'nav.rooms': 'Rooms',
   'nav.power': 'Power',

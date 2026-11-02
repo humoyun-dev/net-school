@@ -4,8 +4,14 @@ import { useApi } from '../api/api-context.tsx';
 import { RequireRole } from '../auth/require-role.tsx';
 import { isOrgAdmin, useMe } from '../auth/session.tsx';
 import { useT } from '../i18n/i18n.tsx';
+import { Toolbar } from '../layout/toolbar.tsx';
+import { Button } from '../ui/button.tsx';
+import { Input } from '../ui/input.tsx';
+import { ChoiceRow, Section } from '../ui/section.tsx';
+import { Segmented } from '../ui/segmented.tsx';
 import { ActionDetail } from './action-detail.tsx';
 import { ActionList } from './action-list.tsx';
+import { PowerColumns } from './power-columns.tsx';
 import { Schedules } from './schedules.tsx';
 import { ScopePicker } from './scope-picker.tsx';
 import { TypePicker } from './type-picker.tsx';
@@ -25,18 +31,20 @@ function PowerPanel() {
   const orgWide = isOrgAdmin(me);
   const [tab, setTab] = useState<'actions' | 'schedules'>('actions');
   return (
-    <section>
-      <h1>{t('power.title')}</h1>
-      <div role="tablist" className="tabs">
-        <button type="button" role="tab" aria-selected={tab === 'actions'} onClick={() => setTab('actions')}>
-          {t('power.tab.actions')}
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'schedules'} onClick={() => setTab('schedules')}>
-          {t('power.tab.schedules')}
-        </button>
-      </div>
+    <>
+      <Toolbar title={t('power.title')} subtitle={t('power.subtitle')}>
+        <Segmented
+          label={t('power.title')}
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'actions', label: t('power.tab.actions') },
+            { value: 'schedules', label: t('power.tab.schedules') },
+          ]}
+        />
+      </Toolbar>
       {tab === 'actions' ? <Actions orgWide={orgWide} /> : <Schedules orgWide={orgWide} />}
-    </section>
+    </>
   );
 }
 
@@ -67,42 +75,63 @@ function Actions(props: { orgWide: boolean }) {
   );
 
   return (
-    <div className="power-columns">
-      <form
-        className="card power-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (scope) void request.preview(type, scope);
-        }}
-      >
-        <h2>{t('power.tab.new')}</h2>
-        <TypePicker value={type} onChange={setType} />
-        <ScopePicker orgWide={props.orgWide} onChange={onScope} />
-        <fieldset>
-          <legend>{t('power.when')}</legend>
-          <label className="inline">
-            <input type="radio" name="when" checked={when === 'now'} onChange={() => setWhen('now')} />
-            {t('power.now')}
-          </label>
-          <label className="inline">
-            <input type="radio" name="when" checked={when === 'at'} onChange={() => setWhen('at')} />
-            {t('power.at')}
-          </label>
-          {when === 'at' && <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} required />}
-        </fieldset>
-        <button type="submit" disabled={!scope || (when === 'at' && !at)}>
-          {t('power.continue')}
-        </button>
-        {request.error && <p className="error">{request.error}</p>}
-      </form>
-      <div>
-        {opened ? (
-          <ActionDetail id={opened} onBack={() => setOpened(null)} />
-        ) : (
-          <ActionList key={refresh} onOpen={setOpened} />
-        )}
-      </div>
+    <PowerColumns
+      form={
+        <form
+          className="power-form flex flex-col gap-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (scope) void request.preview(type, scope);
+          }}
+        >
+          <h2 className="font-display text-[15px] font-semibold">{t('power.tab.new')}</h2>
+          <TypePicker value={type} onChange={setType} />
+          <ScopePicker orgWide={props.orgWide} onChange={onScope} />
+          <fieldset className="flex flex-col gap-3">
+            <legend className="sr-only">{t('power.when')}</legend>
+            <Section title={t('power.when')}>
+              <ChoiceRow
+                control={<input type="radio" name="when" checked={when === 'now'} onChange={() => setWhen('now')} />}
+              >
+                {t('power.now')}
+              </ChoiceRow>
+              <ChoiceRow
+                control={<input type="radio" name="when" checked={when === 'at'} onChange={() => setWhen('at')} />}
+                trailing={
+                  when === 'at' && (
+                    <Input
+                      type="datetime-local"
+                      className="w-auto"
+                      value={at}
+                      onChange={(e) => setAt(e.target.value)}
+                      required
+                    />
+                  )
+                }
+              >
+                {t('power.at')}
+              </ChoiceRow>
+            </Section>
+          </fieldset>
+          {request.error && (
+            <p className="text-[12px] text-destructive" role="alert">
+              {request.error}
+            </p>
+          )}
+          <div className="flex justify-end">
+            <Button type="submit" disabled={!scope || (when === 'at' && !at)}>
+              {t('power.continue')}
+            </Button>
+          </div>
+        </form>
+      }
+    >
+      {opened ? (
+        <ActionDetail id={opened} onBack={() => setOpened(null)} />
+      ) : (
+        <ActionList key={refresh} onOpen={setOpened} />
+      )}
       {request.dialog}
-    </div>
+    </PowerColumns>
   );
 }

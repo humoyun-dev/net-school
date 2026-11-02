@@ -1,425 +1,150 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * NetSchool — macOS uslubi.
+ * Oyna: yon panel (sidebar) + asboblar satri (toolbar) + kontent. Sinf sahifasi — "Mission Control":
+ * o'quvchilar ekranlari grafit sahnada. Qolgan hamma joy System Settings kabi sokin.
+ */
+
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
 :root {
-  --bg: #f5f6f8;
+  --window: #f5f5f7;
+  --sidebar: rgb(234 234 239 / 0.86);
   --card: #ffffff;
-  --text: #1c2330;
-  --muted: #5e6878;
-  --line: #d9dee6;
-  --accent: #1f5fbf;
-  --ok: #1d7a46;
-  --warn: #a35d00;
-  --bad: #b3261e;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  color: var(--text);
-  background: var(--bg);
-}
-* {
-  box-sizing: border-box;
-}
-body {
-  margin: 0;
-}
-button {
-  font: inherit;
-  padding: 0.45rem 0.9rem;
-  border-radius: 6px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-button.secondary {
-  background: #fff;
-  color: var(--accent);
-}
-button.danger {
-  background: var(--bad);
-  border-color: var(--bad);
-}
-button.link {
-  background: none;
-  border: none;
-  color: var(--accent);
-  padding: 0;
-}
-input,
-select,
-textarea {
-  font: inherit;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-label {
-  display: grid;
-  gap: 0.25rem;
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-.card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 1rem;
-}
-.auth {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-}
-.auth-form {
-  width: min(360px, 92vw);
-  display: grid;
-  gap: 0.9rem;
-}
-.error {
-  color: var(--bad);
-  margin: 0;
-}
-.notice {
-  color: var(--muted);
-  padding: 1rem;
-}
-.row {
-  display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.6rem 1.2rem;
-  background: var(--card);
-  border-bottom: 1px solid var(--line);
-}
-.topbar nav {
-  display: flex;
-  gap: 0.8rem;
-}
-.topbar nav a {
-  color: var(--muted);
-  text-decoration: none;
-}
-.topbar nav a.active {
-  color: var(--accent);
-  font-weight: 600;
-}
-.topbar .spacer {
-  flex: 1;
-}
-.topbar .locale {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.content {
-  padding: 1.2rem;
-}
-.room-head {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-.room-head h1 {
-  margin: 0;
-  font-size: 1.3rem;
-}
-.room-head .spacer {
-  flex: 1;
-}
-.start-lesson {
-  display: grid;
-  gap: 0.7rem;
-  max-width: 420px;
-}
-.command-bar {
-  display: grid;
-  gap: 0.7rem;
-  margin-bottom: 1rem;
-}
-.command-bar .row {
-  display: flex;
-  gap: 0.6rem;
-  align-items: end;
-  flex-wrap: wrap;
-}
-.command-bar .grow {
-  flex: 1;
-  min-width: 220px;
-}
-.command-bar .scope {
-  margin: 0;
-  display: flex;
-  gap: 0.8rem;
-  color: var(--muted);
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 0.8rem;
-}
-.tile {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.6rem;
-  display: grid;
-  gap: 0.4rem;
-}
-.tile header {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-.tile-help {
-  border-color: var(--warn);
-  box-shadow: 0 0 0 2px #f3d19c;
-}
-.tile-selected {
-  border-color: var(--accent);
-}
-.thumb {
-  aspect-ratio: 16 / 10;
-  background: #e9edf2;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-.thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-.badges {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-.badge {
-  font-size: 0.75rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 999px;
-  background: #eef1f5;
-  color: var(--muted);
-}
-.presence-online,
-.agent-online {
-  background: #e3f3ea;
-  color: var(--ok);
-}
-.presence-stale,
-.agent-offline {
-  background: #fbeee0;
-  color: var(--warn);
-}
-.help {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--warn);
-  font-weight: 600;
-}
-.result {
-  margin: 0;
-  font-size: 0.85rem;
-}
-.result-succeeded {
-  color: var(--ok);
-}
-.result-failed,
-.result-expired {
-  color: var(--bad);
-}
-.results {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 0.4rem;
-}
-.results .count {
-  margin-left: 0.6rem;
-  font-size: 0.85rem;
-}
-.room-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  list-style: none;
-  padding: 0;
-}
-.room-list li > a {
-  display: block;
-  padding: 0.5rem 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  text-decoration: none;
-  color: var(--accent);
-}
-.site {
-  margin-bottom: 1rem;
-}
-.tile-actions {
-  display: flex;
-  gap: 0.4rem;
-}
-.tile-actions button {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.85rem;
-}
-.remote-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 20, 30, 0.55);
-  display: grid;
-  place-items: center;
-  z-index: 10;
-}
-.remote-panel {
-  width: min(1280px, 96vw);
-  height: min(860px, 92vh);
-  background: var(--card);
-  border-radius: 10px;
-  display: grid;
-  grid-template-rows: auto 1fr;
-  overflow: hidden;
-}
-.remote-panel header {
-  display: flex;
-  gap: 0.8rem;
-  align-items: center;
-  padding: 0.5rem 0.8rem;
-  border-bottom: 1px solid var(--line);
-}
-.remote-panel .spacer {
-  flex: 1;
-}
-.remote-panel iframe {
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-.tabs {
-  display: flex;
-  gap: 0.4rem;
-  margin-bottom: 1rem;
-}
-.tabs [role="tab"] {
-  background: #fff;
-  color: var(--accent);
-}
-.tabs [role="tab"][aria-selected="true"] {
-  background: var(--accent);
-  color: #fff;
-}
-.power-columns {
-  display: grid;
-  grid-template-columns: minmax(300px, 420px) 1fr;
-  gap: 1rem;
-  align-items: start;
-}
-.power-form {
-  display: grid;
-  gap: 0.8rem;
-}
-fieldset {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  display: grid;
-  gap: 0.5rem;
-}
-label.inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--text);
-  margin-right: 0.8rem;
-}
-.choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem 0.8rem;
-  max-height: 220px;
-  overflow: auto;
-}
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 20, 30, 0.45);
-  display: grid;
-  place-items: center;
-  z-index: 20;
-}
-.modal {
-  width: min(440px, 94vw);
-  display: grid;
-  gap: 0.8rem;
-}
-.facts {
-  margin: 0;
-  padding-left: 1.1rem;
-  display: grid;
-  gap: 0.3rem;
-}
-.action-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.5rem;
-}
-.row-button {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.2rem 1rem;
-  text-align: left;
-  background: var(--card);
-  color: var(--text);
-  border-color: var(--line);
-}
-.schedule {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  align-items: center;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 0.5rem;
-}
-.muted {
-  color: var(--muted);
-}
-.summary .count {
-  margin-right: 0.8rem;
-}
-.targets {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.8rem;
-}
-.targets td {
-  padding: 0.35rem 0.4rem;
-  border-bottom: 1px solid var(--line);
-}
-.power-succeeded {
-  color: var(--ok);
-}
-.power-failed {
-  color: var(--bad);
-}
-.power-unknown {
-  color: var(--warn);
+  --foreground: #1d1d1f;
+  --muted-foreground: #6e6e73;
+  --separator: rgb(0 0 0 / 0.1);
+  --control: #ffffff;
+  --control-border: rgb(0 0 0 / 0.14);
+  --hover: rgb(0 0 0 / 0.05);
+  --primary: #007aff;
+  --primary-foreground: #ffffff;
+  --destructive: #ff3b30;
+  --success: #28a745;
+  --warning: #ff9500;
+  --selection: rgb(0 122 255 / 0.12);
+  /* Sinf sahnasi: tema'dan qat'i nazar grafit (ekranlar devori). */
+  --stage: #2b2c30;
+  --stage-raised: #3a3b40;
+  --stage-foreground: #f2f2f5;
+  --stage-muted: #a1a1a8;
+  --shadow-window: 0 0 0 0.5px rgb(0 0 0 / 0.12), 0 12px 40px rgb(0 0 0 / 0.18);
+  --shadow-control: 0 0.5px 1px rgb(0 0 0 / 0.12);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --window: #1e1e20;
+    --sidebar: rgb(42 42 46 / 0.86);
+    --card: #28282b;
+    --foreground: #f5f5f7;
+    --muted-foreground: #98989d;
+    --separator: rgb(255 255 255 / 0.1);
+    --control: rgb(255 255 255 / 0.08);
+    --control-border: rgb(255 255 255 / 0.12);
+    --hover: rgb(255 255 255 / 0.06);
+    --primary: #0a84ff;
+    --destructive: #ff453a;
+    --success: #30d158;
+    --warning: #ff9f0a;
+    --selection: rgb(10 132 255 / 0.22);
+    --stage: #18181b;
+    --stage-raised: #26262a;
+    --shadow-window: 0 0 0 0.5px rgb(255 255 255 / 0.1), 0 16px 48px rgb(0 0 0 / 0.55);
+    --shadow-control: 0 0.5px 1px rgb(0 0 0 / 0.4);
+  }
+}
+
+@theme inline {
+  --color-window: var(--window);
+  --color-sidebar: var(--sidebar);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-separator: var(--separator);
+  --color-control: var(--control);
+  --color-control-border: var(--control-border);
+  --color-hover: var(--hover);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-selection: var(--selection);
+  --color-stage: var(--stage);
+  --color-stage-raised: var(--stage-raised);
+  --color-stage-foreground: var(--stage-foreground);
+  --color-stage-muted: var(--stage-muted);
+  --shadow-window: var(--shadow-window);
+  --shadow-control: var(--shadow-control);
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  /* Ierarxiya bo'yicha radius: oyna 12, guruh 10, boshqaruv 6. */
+  --radius-window: 12px;
+  --radius-group: 10px;
+  --radius-control: 6px;
+}
+
+@layer base {
+  html {
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-window font-sans text-foreground;
+    margin: 0;
+    line-height: 1.4;
+    font-feature-settings: "tnum" 0;
+  }
+  :focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent);
+    outline-offset: 1px;
+    border-radius: 4px;
+  }
+  /* Native boshqaruvlar macOS ko'rinishida qoladi; faqat urg'u rangi tizim ko'kiga bog'lanadi. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--primary);
+    width: 14px;
+    height: 14px;
+    margin: 0;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 30%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      /* biome-ignore lint/complexity/noImportantStyles: reduced-motion hamma animatsiyani bosib o'tishi kerak */
+      animation-duration: 0.01ms !important;
+      /* biome-ignore lint/complexity/noImportantStyles: reduced-motion hamma animatsiyani bosib o'tishi kerak */
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* System Settings uslubidagi guruh: oq quti, ichida ajratgich chiziqli qatorlar. */
+  .group-box {
+    @apply rounded-[var(--radius-group)] bg-card;
+    box-shadow: 0 0 0 0.5px var(--separator);
+  }
+  .group-row {
+    @apply flex min-h-10 items-center gap-3 px-3.5 py-2;
+  }
+  .group-row + .group-row {
+    border-top: 0.5px solid var(--separator);
+  }
+  .field-label {
+    @apply text-[12px] font-medium text-muted-foreground;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
 }

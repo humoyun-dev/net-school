@@ -8,11 +8,15 @@ import {
   type ViewerState,
   workerRenewTimer,
 } from '@netschool/remote-viewer';
+import { Eye, LoaderCircle, MousePointer2, X as XIcon } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { useApi } from '../api/api-context.tsx';
 import { type Api, ApiFailure } from '../api/client.ts';
 import { useT } from '../i18n/i18n.tsx';
 import type { StringKey } from '../i18n/strings.ts';
+import { Badge } from '../ui/badge.tsx';
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog.tsx';
+import { TileActions, TileButton } from './device-tile.tsx';
 
 // apps/web Api → viewer paketi interfeysi; HTTP xatolari ViewerApiError bo'ladi.
 export function viewerApi(api: Api): ViewerApi {
@@ -82,34 +86,65 @@ export function RemotePanel(props: {
     };
   }, [api, makeTimer, props.lessonId, props.deviceId, props.mode]);
 
+  const title = t('remote.title', { name: props.label });
   return (
-    <div className="remote-backdrop" role="dialog" aria-label={t('remote.title', { name: props.label })}>
-      <section className="remote-panel">
-        <header>
-          <strong>{t('remote.title', { name: props.label })}</strong>
-          <span className="mode">{t(props.mode === 'control' ? 'remote.control' : 'remote.view')}</span>
-          <span className="spacer" />
-          <button type="button" className="secondary" onClick={props.onClose}>
-            {t('remote.close')}
-          </button>
+    <Dialog open onOpenChange={(open) => !open && props.onClose()}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="remote-panel flex h-[min(90vh,940px)] w-[min(96vw,1480px)] flex-col overflow-hidden p-0"
+        overlayClassName="bg-black/45 backdrop-blur-[2px]"
+      >
+        <header className="relative flex h-10 shrink-0 items-center gap-2 border-b-[0.5px] border-separator bg-window px-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label={t('remote.close')}
+              onClick={props.onClose}
+              className="group/close grid size-3 place-items-center rounded-full bg-[#ff5f57] ring-[0.5px] ring-black/15"
+            >
+              <XIcon className="size-2 text-black/60 opacity-0 group-hover/close:opacity-100" strokeWidth={3} />
+            </button>
+            <span aria-hidden className="size-3 rounded-full bg-black/10 dark:bg-white/15" />
+            <span aria-hidden className="size-3 rounded-full bg-black/10 dark:bg-white/15" />
+          </div>
+          <div className="pointer-events-none absolute inset-x-0 flex items-center justify-center gap-2">
+            <DialogTitle className="text-[13px]">{title}</DialogTitle>
+            <Badge tone={props.mode === 'control' ? 'warning' : 'info'} className="mode">
+              {props.mode === 'control' ? <MousePointer2 className="size-3" /> : <Eye className="size-3" />}
+              {t(props.mode === 'control' ? 'remote.control' : 'remote.view')}
+            </Badge>
+          </div>
+          {state.kind === 'open' && (
+            <span className="ml-auto hidden max-w-[40%] truncate text-[11px] text-muted-foreground lg:block">
+              {t('remote.connectHint')}
+            </span>
+          )}
         </header>
-        {state.kind === 'opening' && <p className="notice">{t('remote.opening')}</p>}
-        {state.kind === 'closed' && (
-          <p className="error" role="alert">
-            {t(`remote.closed.${state.reason}` as StringKey)}
-          </p>
-        )}
-        {state.kind === 'open' && (
-          <iframe
-            title={props.label}
-            src={state.url}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"
-            allow="clipboard-read; clipboard-write; fullscreen"
-            referrerPolicy="no-referrer"
-          />
-        )}
-      </section>
-    </div>
+        <div className="relative flex flex-1 bg-black">
+          {state.kind === 'opening' && (
+            <p className="m-auto flex items-center gap-2 text-[13px] text-white/70">
+              <LoaderCircle className="size-4 animate-spin" />
+              {t('remote.opening')}
+            </p>
+          )}
+          {state.kind === 'closed' && (
+            <p className="m-auto text-center text-[13px] text-white/85" role="alert">
+              {t(`remote.closed.${state.reason}` as StringKey)}
+            </p>
+          )}
+          {state.kind === 'open' && (
+            <iframe
+              title={props.label}
+              src={state.url}
+              className="size-full flex-1 border-0"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"
+              allow="clipboard-read; clipboard-write; fullscreen"
+              referrerPolicy="no-referrer"
+            />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -125,22 +160,18 @@ export function useRemoteViewer(timer?: () => RenewTimer): {
   const close = useCallback(() => setOpen(null), []);
   return {
     actions: (deviceId, lessonId, label) => (
-      <div className="tile-actions">
-        <button
-          type="button"
-          className="secondary"
+      <TileActions>
+        <TileButton
+          icon={<Eye />}
+          label={t('remote.view')}
           onClick={() => setOpen({ deviceId, lessonId, label, mode: 'view' })}
-        >
-          {t('remote.view')}
-        </button>
-        <button
-          type="button"
-          className="secondary"
+        />
+        <TileButton
+          icon={<MousePointer2 />}
+          label={t('remote.control')}
           onClick={() => setOpen({ deviceId, lessonId, label, mode: 'control' })}
-        >
-          {t('remote.control')}
-        </button>
-      </div>
+        />
+      </TileActions>
     ),
     panel: open ? <RemotePanel key={`${open.deviceId}-${open.mode}`} {...open} onClose={close} timer={timer} /> : null,
   };

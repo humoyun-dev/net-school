@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { useApi } from '../api/api-context.tsx';
 import { useT } from '../i18n/i18n.tsx';
+import { Field, Select } from '../ui/input.tsx';
+import { ChoiceRow, Section } from '../ui/section.tsx';
 
 const sitesSchema = z.object({ sites: z.array(siteSchema) });
 const roomsSchema = z.object({ rooms: z.array(roomSchema) });
@@ -63,28 +65,31 @@ export function ScopePicker(props: { orgWide: boolean; onChange: (scope: PowerSc
   const list = kind === 'sites' ? sites : items;
   const toggle = (id: string) => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
   return (
-    <fieldset className="scope-picker">
-      <legend>{t('power.scope')}</legend>
-      <div className="row">
+    <fieldset className="scope-picker flex flex-col gap-3">
+      <legend className="sr-only">{t('power.scope')}</legend>
+      <Section title={t('power.scope')}>
         {kinds.map((k) => (
-          <label key={k} className="inline">
-            <input
-              type="radio"
-              name="scope-kind"
-              checked={kind === k}
-              onChange={() => {
-                setKind(k);
-                setChosen([]);
-              }}
-            />
+          <ChoiceRow
+            key={k}
+            control={
+              <input
+                type="radio"
+                name="scope-kind"
+                checked={kind === k}
+                onChange={() => {
+                  setKind(k);
+                  setChosen([]);
+                }}
+              />
+            }
+          >
             {t(`power.scope.${k}`)}
-          </label>
+          </ChoiceRow>
         ))}
-      </div>
+      </Section>
       {(kind === 'rooms' || kind === 'devices') && (
-        <label>
-          {t('power.site')}
-          <select
+        <Field label={t('power.site')} className="px-3.5">
+          <Select
             value={site}
             onChange={(e) => {
               setSite(e.target.value);
@@ -96,16 +101,18 @@ export function ScopePicker(props: { orgWide: boolean; onChange: (scope: PowerSc
                 {s.name}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
       )}
-      {kind !== 'organization' && (
-        <div className="choices">
+      {kind !== 'organization' && list.length > 0 && (
+        <div className="choices group-box max-h-64 overflow-y-auto">
           {list.map((item) => (
-            <label key={item.id} className="inline">
-              <input type="checkbox" checked={chosen.includes(item.id)} onChange={() => toggle(item.id)} />
+            <ChoiceRow
+              key={item.id}
+              control={<input type="checkbox" checked={chosen.includes(item.id)} onChange={() => toggle(item.id)} />}
+            >
               {item.name}
-            </label>
+            </ChoiceRow>
           ))}
         </div>
       )}

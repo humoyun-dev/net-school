@@ -38,7 +38,8 @@ Tillar: uz, ru, en.
 
 ### Panel (`apps/web`)
 
-- **Stek:** React 19.3, react-router 8.5, Vite 8.3, aniq pin qilingan. UI kutubxonasi yo'q, oddiy CSS.
+- **Stek:** React 19.3, react-router 8.5, Vite 8.3, aniq pin qilingan. UI: Tailwind CSS 4 + shadcn/ui (Radix), lucide ikonkalari; macOS uslubi (yon panel, toolbar, System Settings guruhlari, sinf sahifasi — "Mission Control" ekranlar devori), yorug'/qorong'i rejim tizimdan.
+- **CSP va style nonce:** Radix Dialog scroll lock'i `<style>` tegi qo'shadi. Panel HTML'i har javobda yangi nonce bilan beriladi (`<meta name="csp-nonce">` va `style-src 'self' 'nonce-…'`); ilova uni `get-nonce` orqali Radix'ga beradi. `script-src` o'zgarmaydi, boshqa inline style yo'q.
 - **API klienti.**
   - So'rovlar `credentials: 'same-origin'` va JSON bilan.
   - Xato `ApiFailure` (`status`, `code`, `correlationId`) bo'ladi va foydalanuvchiga kod bo'yicha tarjima qilinadi.

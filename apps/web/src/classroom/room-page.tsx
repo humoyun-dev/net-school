@@ -1,10 +1,17 @@
 import { lessonSchema } from '@netschool/contracts';
+import { ChevronLeft, Clock, Monitor, Play } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { useApi } from '../api/api-context.tsx';
 import { useIntent } from '../api/intent.ts';
 import { useMe } from '../auth/session.tsx';
 import { useErrorText, useT } from '../i18n/i18n.tsx';
+import { Toolbar } from '../layout/toolbar.tsx';
+import { useRooms } from '../rooms/use-rooms.ts';
+import { Badge } from '../ui/badge.tsx';
+import { Button } from '../ui/button.tsx';
+import { cn } from '../ui/cn.ts';
+import { Field, Input } from '../ui/input.tsx';
 import { CommandBar } from './command-bar.tsx';
 import { CommandResults } from './command-results.tsx';
 import { DeviceTile } from './device-tile.tsx';
@@ -33,6 +40,7 @@ export function RoomPage(props: {
   const roomName = (useLocation().state as { name?: string } | null)?.name;
   const api = useApi();
   const me = useMe();
+  const rooms = useRooms();
   const t = useT();
   const errorText = useErrorText();
   const [state, update] = useLessonEvents(roomId);
@@ -98,96 +106,146 @@ export function RoomPage(props: {
 
   const shown = lesson ? devices.filter((d) => members.has(d.id)) : devices;
   const helpByDevice = new Map([...state.help.values()].map((h) => [h.deviceId, h]));
+  const name = roomName ?? rooms.data?.flatMap((s) => s.rooms).find((r) => r.id === roomId)?.name ?? t('room.title');
 
   return (
-    <section className="room">
-      <header className="room-head">
-        <Link to="/rooms">{t('room.back')}</Link>
-        <h1>{roomName ?? t('room.title')}</h1>
-        {lesson && <span className="lesson-title">{lesson.title}</span>}
-        <span className="spacer" />
+    <div className="room flex min-h-full flex-col">
+      <Toolbar
+        title={name}
+        subtitle={lesson ? <span className="lesson-title">{lesson.title}</span> : undefined}
+        leading={
+          <Button asChild variant="ghost" size="icon" aria-label={t('nav.rooms')}>
+            <Link to="/rooms">
+              <ChevronLeft />
+            </Link>
+          </Button>
+        }
+      >
+        {lesson && <Remaining endsAt={lesson.scheduledEndAt} />}
+        {lesson && (
+          <Badge className="tabular">
+            <Monitor className="size-3" />
+            {t('grid.count', { n: shown.length })}
+          </Badge>
+        )}
+        {lesson && canCommand && <CommandResults commands={[...state.commands.values()]} />}
         {lesson && canCommand && !confirmEnd && (
-          <button type="button" className="secondary" onClick={() => setConfirmEnd(true)}>
+          <Button variant="secondary" onClick={() => setConfirmEnd(true)}>
             {t('lesson.end')}
-          </button>
+          </Button>
         )}
         {lesson && confirmEnd && (
           <>
-            <button type="button" className="danger" disabled={end.pending} onClick={() => void end.run()}>
+            <Button variant="destructive" disabled={end.pending} onClick={() => void end.run()}>
               {t('lesson.endConfirm')}
-            </button>
-            <button type="button" className="secondary" onClick={() => setConfirmEnd(false)}>
+            </Button>
+            <Button variant="secondary" onClick={() => setConfirmEnd(false)}>
               {t('common.cancel')}
-            </button>
+            </Button>
           </>
         )}
-      </header>
+      </Toolbar>
 
-      {!lesson && (
-        <form
-          className="card start-lesson"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void start.run();
-          }}
+      <div className="flex flex-1 flex-col bg-stage px-5 pt-6 pb-4 text-stage-foreground">
+        {!lesson && (
+          <form
+            className="start-lesson mx-auto mb-8 w-full max-w-[440px] rounded-[var(--radius-window)] bg-card p-5 text-foreground shadow-window"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void start.run();
+            }}
+          >
+            <h2 className="font-display text-[15px] font-semibold">
+              {state.lesson?.status === 'ended' ? t('lesson.ended') : t('lesson.none')}
+            </h2>
+            <p className="mt-0.5 text-[12px] text-muted-foreground">{t('lesson.startHint')}</p>
+            <div className="mt-4 grid grid-cols-[1fr_120px] gap-3">
+              <Field label={t('lesson.titleLabel')}>
+                <Input value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />
+              </Field>
+              <Field label={t('lesson.duration')}>
+                <Input
+                  type="number"
+                  min={5}
+                  max={480}
+                  value={duration}
+                  className="tabular"
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                />
+              </Field>
+            </div>
+            {start.error ? (
+              <p className="mt-3 text-[12px] text-destructive" role="alert">
+                {errorText(start.error)}
+              </p>
+            ) : null}
+            <Button type="submit" size="lg" className="mt-4 w-full" disabled={start.pending}>
+              <Play />
+              {t('lesson.start')}
+            </Button>
+          </form>
+        )}
+
+        {lesson && !canCommand && (
+          <p className="mb-4 text-center text-[13px] text-stage-muted">{t('lesson.otherTeacher')}</p>
+        )}
+        {end.error ? (
+          <p className="mb-4 text-center text-[13px] text-destructive" role="alert">
+            {errorText(end.error)}
+          </p>
+        ) : null}
+        {lesson && shown.length === 0 && (
+          <p className="py-16 text-center text-[13px] text-stage-muted">{t('grid.empty')}</p>
+        )}
+
+        <div
+          className={cn(
+            'grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-x-5 gap-y-7',
+            !lesson && 'opacity-55',
+          )}
         >
-          <p>{state.lesson?.status === 'ended' ? t('lesson.ended') : t('lesson.none')}</p>
-          <label>
-            {t('lesson.titleLabel')}
-            <input value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <label>
-            {t('lesson.duration')}
-            <input
-              type="number"
-              min={5}
-              max={480}
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-            />
-          </label>
-          <button type="submit" disabled={start.pending}>
-            {t('lesson.start')}
-          </button>
-          {start.error ? (
-            <p className="error" role="alert">
-              {errorText(start.error)}
-            </p>
-          ) : null}
-        </form>
-      )}
+          {shown.map((d) => {
+            const result = latestResultFor(state, d.id);
+            return (
+              <DeviceTile
+                key={d.id}
+                device={d}
+                frameUrl={frames[d.id] ?? null}
+                help={lesson ? (helpByDevice.get(d.id) ?? null) : null}
+                result={result ? { type: result.type, status: result.status } : null}
+                selected={selected.includes(d.id)}
+                canCommand={canCommand}
+                onToggle={() => setSelected((s) => (s.includes(d.id) ? s.filter((x) => x !== d.id) : [...s, d.id]))}
+                onClearHelp={clearHelp}
+                actions={lesson && canCommand ? props.renderActions?.(d.id, lesson.id, d.hostname) : null}
+              />
+            );
+          })}
+        </div>
 
-      {lesson && !canCommand && <p className="notice">{t('lesson.otherTeacher')}</p>}
-      {lesson && canCommand && (
-        <CommandBar lessonId={lesson.id} selected={selected} onClearSelection={() => setSelected([])} />
-      )}
-      {end.error ? (
-        <p className="error" role="alert">
-          {errorText(end.error)}
-        </p>
-      ) : null}
-
-      {lesson && shown.length === 0 && <p className="notice">{t('grid.empty')}</p>}
-      <div className="grid">
-        {shown.map((d) => {
-          const result = latestResultFor(state, d.id);
-          return (
-            <DeviceTile
-              key={d.id}
-              device={d}
-              frameUrl={frames[d.id] ?? null}
-              help={lesson ? (helpByDevice.get(d.id) ?? null) : null}
-              result={result ? { type: result.type, status: result.status } : null}
-              selected={selected.includes(d.id)}
-              canCommand={canCommand}
-              onToggle={() => setSelected((s) => (s.includes(d.id) ? s.filter((x) => x !== d.id) : [...s, d.id]))}
-              onClearHelp={clearHelp}
-              actions={lesson && canCommand ? props.renderActions?.(d.id, lesson.id, d.hostname) : null}
-            />
-          );
-        })}
+        <div className="flex-1" />
+        {lesson && canCommand && (
+          <CommandBar lessonId={lesson.id} selected={selected} onClearSelection={() => setSelected([])} />
+        )}
       </div>
-      {lesson && <CommandResults commands={[...state.commands.values()]} />}
-    </section>
+    </div>
+  );
+}
+
+// Dars tugashiga qolgan vaqt (har 15 s yangilanadi).
+function Remaining(props: { endsAt: string | null }) {
+  const t = useT();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, []);
+  if (!props.endsAt) return null;
+  const minutes = Math.ceil((Date.parse(props.endsAt) - now) / 60_000);
+  return (
+    <Badge tone={minutes <= 5 ? 'warning' : 'info'} className="tabular">
+      <Clock className="size-3" />
+      {minutes > 0 ? t('lesson.remaining', { n: minutes }) : t('lesson.overtime')}
+    </Badge>
   );
 }

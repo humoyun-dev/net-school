@@ -30,7 +30,7 @@ async function signIn(username: string, next = '/') {
 
 async function openRoom() {
   await signIn('teacher1');
-  await page.getByRole('link', { name: '101' }).click();
+  await page.getByRole('main').getByRole('link', { name: '101' }).click();
 }
 
 async function waitUntil(check: () => Promise<boolean>, ms = 15_000) {

@@ -4,6 +4,8 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { useApi } from '../api/api-context.tsx';
 import { ApiFailure } from '../api/client.ts';
 import { useErrorText, useT } from '../i18n/i18n.tsx';
+import { Button } from '../ui/button.tsx';
+import { AuthField, AuthLayout, authInputClass } from './auth-layout.tsx';
 import { safeNext } from './safe-next.ts';
 
 export function LoginPage(props: { onSignedIn: () => void | Promise<void> }) {
@@ -33,32 +35,41 @@ export function LoginPage(props: { onSignedIn: () => void | Promise<void> }) {
   }
 
   return (
-    <main className="auth">
-      <form className="card auth-form" onSubmit={submit}>
-        <h1>{t('login.title')}</h1>
-        <label>
-          {t('login.username')}
-          <input autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-        </label>
-        <label>
-          {t('login.password')}
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </label>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={pending}>
-          {t('login.submit')}
-        </button>
-      </form>
-    </main>
+    <AuthLayout
+      title={t('login.title')}
+      onSubmit={submit}
+      footer={
+        <>
+          {error && (
+            <p className="text-center text-[12px] text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+          <Button type="submit" size="lg" disabled={pending} className="w-full">
+            {t('login.submit')}
+          </Button>
+        </>
+      }
+    >
+      <AuthField label={t('login.username')}>
+        <input
+          className={authInputClass}
+          autoComplete="username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          required
+        />
+      </AuthField>
+      <AuthField label={t('login.password')}>
+        <input
+          className={authInputClass}
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+      </AuthField>
+    </AuthLayout>
   );
 }
