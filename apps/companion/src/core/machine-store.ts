@@ -81,6 +81,14 @@ export function loadEnrollment(dir: string): Enrollment | null {
   };
 }
 
+// Katalogga yozish mumkinligini oldindan tekshiradi (admin huquqisiz `enroll` tokenni sarflamasin).
+export function ensureWritable(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  const probe = join(dir, `.probe-${process.pid}`);
+  writeFileSync(probe, '');
+  rmSync(probe, { force: true });
+}
+
 // device.json bor-yo'qligi (buzilgan bo'lsa ham): `enroll` mavjud enrollment'ni jimgina bosib ketmasligi uchun.
 export function enrollmentExists(dir: string): boolean {
   return existsSync(join(dir, CONFIG_FILE));

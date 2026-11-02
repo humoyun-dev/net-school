@@ -3,6 +3,7 @@ export type Locale = 'uz' | 'ru' | 'en';
 const uz = {
   statusTitle: 'NetSchool Companion',
   notEnrolled: "Kompyuter ro'yxatdan o'tmagan — IT xizmatiga murojaat qiling",
+  enrollmentBroken: "Companion sozlamalari buzilgan yoki o'qib bo'lmaydi — IT xizmatiga murojaat qiling",
   hubOnline: 'Ulangan',
   hubConnecting: 'Ulanmoqda…',
   hubOffline: "Hub bilan aloqa yo'q",
@@ -30,6 +31,7 @@ export type StringKey = keyof typeof uz;
 const ru: Record<StringKey, string> = {
   statusTitle: 'NetSchool Companion',
   notEnrolled: 'Компьютер не зарегистрирован — обратитесь в ИТ-службу',
+  enrollmentBroken: 'Настройки Companion повреждены или недоступны — обратитесь в ИТ-службу',
   hubOnline: 'Подключено',
   hubConnecting: 'Подключение…',
   hubOffline: 'Нет связи с хабом',
@@ -55,6 +57,7 @@ const ru: Record<StringKey, string> = {
 const en: Record<StringKey, string> = {
   statusTitle: 'NetSchool Companion',
   notEnrolled: 'This computer is not enrolled — contact IT support',
+  enrollmentBroken: 'Companion settings are damaged or unreadable — contact IT support',
   hubOnline: 'Connected',
   hubConnecting: 'Connecting…',
   hubOffline: 'No connection to the hub',

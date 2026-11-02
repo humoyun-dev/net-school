@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { heartbeatResponseSchema } from '@netschool/contracts';
@@ -96,10 +96,27 @@ describe('enroll', () => {
     await expect(enroll(input(token, dir, { ca: other.cert }))).rejects.toMatchObject({ kind: 'tls' });
     // Tizim root'lari: o'z-o'zidan imzolangan hub'ga ishonilmaydi.
     await expect(enroll(input(token, dir, { ca: null }))).rejects.toMatchObject({ kind: 'tls' });
-    expect(existsSync(dir)).toBe(false);
+    // Yozish huquqi oldindan tekshiriladi (katalog yaratiladi), lekin enrollment fayllari yo'q.
+    expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
     // Token sarflanmagan: to'g'ri CA bilan o'sha token ishlaydi.
     await enroll(input(token, tempDir()));
   });
+
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'an unwritable machine directory fails before the token is spent',
+    async () => {
+      const token = await newToken();
+      const parent = tempDir();
+      chmodSync(parent, 0o555); // admin huquqisiz ishga tushirilgan enroll
+      try {
+        await expect(enroll(input(token, join(parent, 'companion')))).rejects.toMatchObject({ code: 'EACCES' });
+      } finally {
+        chmodSync(parent, 0o755);
+      }
+      // Token sarflanmagan: huquq bilan qayta urinish o'tadi.
+      await enroll(input(token, tempDir()));
+    },
+  );
 
   test('refuses to overwrite an existing enrollment without force', async () => {
     const dir = tempDir();

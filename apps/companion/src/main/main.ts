@@ -19,6 +19,8 @@ import { Windows } from './windows.ts';
 
 // Asosiy jarayon CommonJS bundle sifatida yig'iladi (Playwright ESM entry'ni ulay olmaydi), shuning uchun __dirname.
 const here = __dirname;
+// esbuild `define` (scripts/build.mjs): faqat e2e test build'ida true.
+declare const __NETSCHOOL_TEST_BUILD__: boolean;
 
 async function main(): Promise<void> {
   // Bitta OS user ichida bitta nusxa; per-user holat katalogi testlar uchun almashtiriladi.
@@ -40,24 +42,38 @@ async function main(): Promise<void> {
   const windows = new Windows({
     preload: join(here, 'preload.cjs'),
     rendererDir: join(here, 'renderer'),
-    // Faqat test holat katalogi bilan birga: oddiy o'rnatishda overlay'ni yashirib bo'lmaydi.
-    hidden: process.env.NETSCHOOL_COMPANION_TEST_HIDDEN === '1' && Boolean(process.env.NETSCHOOL_COMPANION_STATE_DIR),
+    // Faqat e2e test build'ida (build vaqtidagi bayroq): oddiy build'da o'quvchi overlay'ni muhit orqali yashira olmaydi.
+    hidden: __NETSCHOOL_TEST_BUILD__
+      ? process.env.NETSCHOOL_COMPANION_TEST_HIDDEN === '1' && Boolean(process.env.NETSCHOOL_COMPANION_STATE_DIR)
+      : false,
   });
   // OS o'chirilishi yoki chiqish: oynalar yopilishiga ruxsat (aks holda ilova o'chirishni to'sib qo'yadi).
   app.on('before-quit', () => windows.allowClose());
   hardenSession(session.defaultSession);
 
   const trusted = (frameUrl: string | undefined) => isTrustedSender(frameUrl, windows.rendererDir);
-  ipcMain.handle('i18n:strings', (event) => (trusted(event.senderFrame?.url) ? text : null));
+  // Buzilgan enrollment (JSON, kalit mos emas, huquq) yoki ochilmaydigan kesh: ilova jimgina yo'qolmaydi, sababni ko'rsatadi.
+  let enrollment: ReturnType<typeof loadEnrollment> = null;
+  let cache: StateCache | null = null;
+  let broken = false;
+  try {
+    enrollment = loadEnrollment(machineDir(process.platform, process.env));
+    if (enrollment) cache = StateCache.open(join(app.getPath('userData'), 'state.sqlite'));
+  } catch (err) {
+    broken = true;
+    enrollment = null;
+    console.error('companion cannot start:', err);
+  }
+  const pageText = broken ? { ...text, notEnrolled: text.enrollmentBroken } : text;
+  ipcMain.handle('i18n:strings', (event) => (trusted(event.senderFrame?.url) ? pageText : null));
   ipcMain.on('message:dismiss', (event, id: unknown) => {
     const parsed = dismissArgSchema.safeParse(id);
     if (trusted(event.senderFrame?.url) && parsed.success) windows.dismissMessage(parsed.data);
   });
 
-  const enrollment = loadEnrollment(machineDir(process.platform, process.env));
   const tray = createTray(text, () => windows.showStatus());
 
-  if (!enrollment) {
+  if (!enrollment || !cache) {
     // Ro'yxatdan o'tmagan kompyuter: agent ishga tushmaydi, holat oynasi sababni ko'rsatadi.
     ipcMain.handle('help:raise', () => Promise.reject(new Error('not enrolled')));
     ipcMain.handle('help:withdraw', () => Promise.reject(new Error('not enrolled')));
@@ -65,7 +81,6 @@ async function main(): Promise<void> {
   } else {
     const signer = new RequestSigner(enrollment.identity);
     const hub = new HubClient({ origin: enrollment.config.hubOrigin, ca: enrollment.ca, signer });
-    const cache = StateCache.open(join(app.getPath('userData'), 'state.sqlite'));
     const overlay = new OverlayController(systemClock, cache, () => {});
     const commands = new CommandProcessor({ hub, cache, overlay, ui: { showMessage: (t) => windows.showMessage(t) } });
     const thumbnails = new ThumbnailUploader({ hub, signer, source: new ElectronFrameSource() });

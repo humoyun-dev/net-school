@@ -102,6 +102,7 @@ export class CompanionAgent {
     this.#loops = [this.#heartbeatLoop(), this.#pollLoop(), this.#capabilityLoop(), this.#overlayLoop()];
   }
 
+  // Hamma hub so'rovlari (heartbeat, capability, long-poll, receipt) bekor qilinadi: chiqish/o'chirish kutib qolmaydi.
   async stop(): Promise<void> {
     this.#running = false;
     this.#abort.abort();
@@ -127,7 +128,9 @@ export class CompanionAgent {
     let backoff = this.#opts.backoffMinMs;
     while (this.#running) {
       try {
-        const hb = await this.#deps.hub.json('POST', '/api/v1/device/heartbeat', {}, heartbeatResponseSchema);
+        const hb = await this.#deps.hub.json('POST', '/api/v1/device/heartbeat', {}, heartbeatResponseSchema, {
+          signal: this.#abort.signal,
+        });
         this.#unauthorized = 0;
         backoff = this.#opts.backoffMinMs;
         // Overlay hub javobi bilan bir vaqtda yangilanadi: 'online' paytida eskirgan lock ko'rinmaydi.
@@ -184,7 +187,7 @@ export class CompanionAgent {
         });
         backoff = this.#opts.backoffMinMs;
         if (res.commands.length > 0) {
-          await this.#deps.commands.handleBatch(res.commands);
+          await this.#deps.commands.handleBatch(res.commands, this.#abort.signal);
           this.#emit();
         }
       } catch {
@@ -204,7 +207,7 @@ export class CompanionAgent {
         this.#thumbnailCapability = thumbnailCapability(report);
         const key = JSON.stringify(report);
         if (key !== this.#sentReport) {
-          await this.#deps.hub.json('PUT', '/api/v1/device/capabilities', report, null);
+          await this.#deps.hub.json('PUT', '/api/v1/device/capabilities', report, null, { signal: this.#abort.signal });
           this.#sentReport = key;
         }
         backoff = this.#opts.backoffMinMs;

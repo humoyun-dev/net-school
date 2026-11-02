@@ -264,6 +264,15 @@ describe('hub client against the real hub', () => {
     expect(res).toEqual({ heartbeatIntervalSeconds: 10, lesson: null });
   });
 
+  test('a device clock running ahead is corrected from the hub Date header', async () => {
+    const identity = await freshIdentity();
+    const signer = new RequestSigner(identity, () => Date.now() + 120_000);
+    const client = track(new HubClient({ origin: app.origin, ca: app.ca, signer }));
+    expect((await client.json('POST', '/api/v1/device/heartbeat', {}, heartbeatResponseSchema)).lesson).toBeNull();
+    // Keyingi so'rovlar ham birinchi urinishda o'tadi.
+    await client.json('POST', '/api/v1/device/heartbeat', {}, heartbeatResponseSchema);
+  });
+
   test('a skewed device clock is corrected from the hub Date header', async () => {
     // Qurilma soati 2 daqiqa orqada: hub ±30 s dan tashqari imzoni rad etadi.
     const identity = await freshIdentity();
