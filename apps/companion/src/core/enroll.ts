@@ -3,7 +3,7 @@ import { claimResponseSchema } from '@netschool/contracts';
 import { capabilityReport, type PlatformFacts } from './capabilities.ts';
 import { HubClient } from './hub-client.ts';
 import { claimProof, generateDeviceKey } from './identity.ts';
-import { type DeviceConfig, enrollmentExists, saveEnrollment } from './machine-store.ts';
+import { type DeviceConfig, enrollmentExists, ensureWritable, saveEnrollment } from './machine-store.ts';
 
 export class EnrollError extends Error {
   readonly code: 'already_enrolled';
@@ -37,6 +37,8 @@ export async function enroll(input: EnrollInput): Promise<DeviceConfig> {
   if (!input.force && enrollmentExists(input.dir)) {
     throw new EnrollError('already_enrolled', 'this computer is already enrolled; use --force to enroll it again');
   }
+  // Hub'ga murojaatdan oldin: yozib bo'lmasa token sarflanmaydi va hub'da yetim qurilma qolmaydi.
+  ensureWritable(input.dir);
   const key = generateDeviceKey();
   const proof = claimProof(createPrivateKey(key.privateKeyPem), input.token, key.publicKey);
   const hub = new HubClient({ origin: input.hubOrigin, ca: input.ca, signer: null });

@@ -419,6 +419,35 @@ describe('companion agent', () => {
     }
   });
 
+  test('stop does not wait for hub requests that never answer', async () => {
+    const cert = await makeCert('localhost');
+    const { createServer } = await import('node:https');
+    const silent = createServer({ key: cert.key, cert: cert.cert }, () => {}); // so'rovga javob bermaydi
+    await new Promise<void>((r) => silent.listen(0, 'localhost', r));
+    const port = (silent.address() as { port: number }).port;
+    try {
+      const { identity } = await (async () => {
+        const key = generateDeviceKey();
+        return {
+          identity: {
+            deviceId: '7d1f2a40-3c55-4b8e-9a61-0f2e8c4d5b6a',
+            publicKey: key.publicKey,
+            privateKey: createPrivateKey(key.privateKeyPem),
+          },
+        };
+      })();
+      const run = makeAgent(`https://localhost:${port}`, cert.cert, identity);
+      await run.agent.start();
+      await new Promise((r) => setTimeout(r, 300)); // heartbeat va capability so'rovlari osilib turibdi
+      const started = Date.now();
+      await run.agent.stop();
+      expect(Date.now() - started).toBeLessThan(1_500);
+    } finally {
+      silent.closeAllConnections();
+      await new Promise((r) => silent.close(r));
+    }
+  });
+
   test('stop ends every loop', async () => {
     const w = await world();
     try {

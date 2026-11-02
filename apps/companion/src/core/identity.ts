@@ -62,8 +62,13 @@ export class RequestSigner {
 
   // Hub vaqtiga moslash: farq 5 s dan oshsa offset shunga o'rnatiladi, aks holda nolga qaytadi
   // (qurilma soati to'g'rilangan bo'lsa eski offset qolib ketmasin).
+  // Offset o'zgarsa `#last` ham tuzatilgan soatga tortiladi: oldinda ketgan soat bilan yozilgan kelajakdagi timestamp'larni
+  // hub qabul qilmagan (±30 s oynadan tashqarida), aks holda keyingi imzolar ham o'sha kelajakdan davom etib rad etilardi.
   syncClock(hubTimeMs: number): void {
     const skew = hubTimeMs - this.#now();
-    this.#offsetMs = Math.abs(skew) > CLOCK_SKEW_TOLERANCE_MS ? skew : 0;
+    const offset = Math.abs(skew) > CLOCK_SKEW_TOLERANCE_MS ? skew : 0;
+    if (offset === this.#offsetMs) return;
+    this.#offsetMs = offset;
+    this.#last = Math.min(this.#last, Math.round(this.#now() + offset) - 1);
   }
 }

@@ -56,6 +56,12 @@ export async function createWorld(): Promise<World> {
 }
 
 export function launch(world: World): Promise<ElectronApplication> {
+  // Himoya: oddiy build oynalarni ekranda ko'rsatadi va ishchi ekranni qoplaydi — e2e faqat test build bilan.
+  if (!readFileSync(MAIN, 'utf8').includes('NETSCHOOL_COMPANION_TEST_HIDDEN')) {
+    throw new Error(
+      'dist is not an e2e test build; run `pnpm test:e2e:companion` (it builds with NETSCHOOL_COMPANION_TEST_BUILD=1)',
+    );
+  }
   return _electron.launch({
     executablePath: electronPath,
     args: [MAIN],

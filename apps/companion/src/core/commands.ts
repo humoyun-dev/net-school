@@ -54,7 +54,7 @@ export class CommandProcessor {
   }
 
   // `sequence` bo'yicha o'sish tartibida (son sifatida: '9' < '10'). Tarmoq xatosi qolganlarini to'xtatadi — ular qayta yetkaziladi.
-  async handleBatch(batch: readonly unknown[]): Promise<void> {
+  async handleBatch(batch: readonly unknown[], signal?: AbortSignal): Promise<void> {
     const commands = batch.flatMap((raw) => {
       const parsed = commandSchema.safeParse(raw);
       return parsed.success ? [parsed.data] : [];
@@ -63,20 +63,23 @@ export class CommandProcessor {
       const diff = BigInt(a.sequence) - BigInt(b.sequence);
       return diff < 0n ? -1 : diff > 0n ? 1 : 0;
     });
-    for (const command of commands) await this.#handle(command);
+    for (const command of commands) {
+      if (signal?.aborted) return;
+      await this.#handle(command, signal);
+    }
   }
 
-  async #handle(command: Command): Promise<void> {
+  async #handle(command: Command, signal?: AbortSignal): Promise<void> {
     const stored = this.#cache.outcomeOf(command.commandId);
     if (stored) {
-      await this.#send(command.commandId, receiptOf(stored));
+      await this.#send(command.commandId, receiptOf(stored), signal);
       return;
     }
     // Ack avval: hub qabul qilmasa (masalan bekor qilingan) buyruq bajarilmaydi.
-    if ((await this.#send(command.commandId, { status: 'acknowledged' })) === 'refused') return;
+    if ((await this.#send(command.commandId, { status: 'acknowledged' }, signal)) === 'refused') return;
     const outcome = this.#execute(command);
     this.#cache.recordOutcome(command.commandId, outcome, this.#now());
-    await this.#send(command.commandId, receiptOf(outcome));
+    await this.#send(command.commandId, receiptOf(outcome), signal);
   }
 
   #execute(command: Command): CommandOutcome {
@@ -119,14 +122,14 @@ export class CommandProcessor {
 
   // 4xx — hub shu receipt'ni qabul qilmaydi (terminal/bekor qilingan): qayta urinilmaydi. Tarmoq/5xx — qisqa qayta urinish,
   // ack yetmasa xato ko'tariladi va buyruq qayta yetkaziladi.
-  async #send(commandId: string, receipt: Receipt): Promise<'ok' | 'refused'> {
+  async #send(commandId: string, receipt: Receipt, signal?: AbortSignal): Promise<'ok' | 'refused'> {
     for (let attempt = 1; ; attempt++) {
       try {
-        await this.#hub.json('POST', `/api/v1/device/commands/${commandId}/receipt`, receipt, null);
+        await this.#hub.json('POST', `/api/v1/device/commands/${commandId}/receipt`, receipt, null, { signal });
         return 'ok';
       } catch (err) {
         if (err instanceof HubError && err.kind === 'http' && err.status !== null && err.status < 500) return 'refused';
-        if (attempt >= RECEIPT_ATTEMPTS) throw err;
+        if (attempt >= RECEIPT_ATTEMPTS || signal?.aborted) throw err;
         await sleep(this.#retryDelayMs * 2 ** (attempt - 1));
       }
     }

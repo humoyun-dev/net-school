@@ -97,6 +97,11 @@ export async function runEnrollCli(argv: string[], env: NodeJS.ProcessEnv, io: I
       } else io.err(`cannot reach the hub (${err.kind})`);
       return 3;
     }
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EACCES' || code === 'EPERM') {
+      io.err('cannot write the machine directory; run enroll as an administrator');
+      return 2;
+    }
     if (err instanceof Error && /bare https origin/.test(err.message)) {
       io.err('the hub address must be a bare https origin, e.g. https://hub.school.lan');
       return 2;

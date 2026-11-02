@@ -77,7 +77,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y xvfb
       - run: pnpm install --frozen-lockfile
       - run: node apps/companion/node_modules/electron/install.js
-      - run: pnpm --filter @netschool/companion build
+      # test:e2e:companion o'zi test build yig'adi (oynalar yashirin rejimda).
       - run: xvfb-run -a pnpm test:e2e:companion
 
   compose-smoke:

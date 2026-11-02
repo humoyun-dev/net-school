@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ElectronApplication } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { issueCommand } from '../../api/test/support/lesson.ts';
@@ -161,5 +164,21 @@ describe('companion in real Electron', () => {
     await eventually(async () => (await overlay.textContent('#root'))?.includes('Qayta ishga tushirish'));
     const status = await windowOf(electron, 'status.html');
     await eventually(async () => (await status.textContent('#root'))?.includes(T.hubOffline));
+  });
+});
+
+describe('a broken enrollment', () => {
+  test('a corrupt enrollment shows the reason instead of vanishing', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ns-e2e-broken-'));
+    const machineDir = join(root, 'machine');
+    mkdirSync(machineDir);
+    writeFileSync(join(machineDir, 'device.json'), '{ not json');
+    const app = await launch({ machineDir, stateDir: join(root, 'state') } as World);
+    try {
+      const status = await windowOf(app, 'status.html');
+      await eventually(async () => (await status.textContent('#root'))?.includes(T.enrollmentBroken));
+    } finally {
+      await app.close();
+    }
   });
 });

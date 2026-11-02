@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dist = join(root, 'dist');
+const dist = process.env.NETSCHOOL_COMPANION_OUT || join(root, 'dist');
+// Faqat e2e build: oynalarni ekranda ko'rsatmaydigan sinov rejimi. Oddiy build'da bu kod butunlay olib tashlanadi.
+const testBuild = process.env.NETSCHOOL_COMPANION_TEST_BUILD === '1';
 const tsconfig = join(root, 'tsconfig.json');
 const common = { bundle: true, sourcemap: true, tsconfig, logLevel: 'warning' };
 const external = ['electron', 'bufferutil', 'utf-8-validate'];
@@ -35,6 +37,9 @@ await build({
   target: 'node24',
   format: 'cjs',
   external,
+  define: { __NETSCHOOL_TEST_BUILD__: String(testBuild) },
+  // Konstant shartlar yig'iladi: `false ? … : …` dagi sinov kodi bundle'ga kirmaydi.
+  minifySyntax: true,
 });
 
 // Preload sandbox'da ishlaydi: CommonJS, faqat `electron`ni require qiladi.
@@ -49,7 +54,7 @@ await build({
   external,
 });
 
-// Renderer sahifalari: brauzer konteksti, har biri alohida IIFE (CSP: script-src 'self').
+// Renderer sahifalari: brauzer konteksti, har biri alohida ES modul (CSP: script-src 'self').
 const rendererSrc = join(root, 'src/renderer');
 const rendererOut = join(dist, 'renderer');
 const pages = readdirSync(rendererSrc)

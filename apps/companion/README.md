@@ -22,7 +22,7 @@ NETSCHOOL_ENROLL_TOKEN=nse_... node apps/companion/dist/enroll.mjs \
 
 `--ca` hub sertifikatining CA'si (o'z-o'zidan imzolangan yoki maktab CA'si). Berilmasa tizim root'lariga ishoniladi. Token buyruq tarixida qolmasligi uchun `--token` o'rniga `NETSCHOOL_ENROLL_TOKEN` tavsiya etiladi. Qayta ro'yxatdan o'tkazish — `--force`.
 
-Chiqish kodlari: `0` muvaffaqiyat, `2` noto'g'ri argument, `3` hub'ga ulanib bo'lmadi yoki sertifikat ishonchsiz, `4` hub rad etdi (token ishlatilgan/noto'g'ri) yoki kompyuter allaqachon ro'yxatdan o'tgan.
+Chiqish kodlari: `0` muvaffaqiyat, `2` noto'g'ri argument yoki mashina katalogiga yozish huquqi yo'q (admin sifatida ishga tushiring), `3` hub'ga ulanib bo'lmadi yoki sertifikat ishonchsiz, `4` hub rad etdi (token ishlatilgan/noto'g'ri) yoki kompyuter allaqachon ro'yxatdan o'tgan.
 
 ## Kataloglar
 
@@ -31,16 +31,16 @@ Chiqish kodlari: `0` muvaffaqiyat, `2` noto'g'ri argument, `3` hub'ga ulanib bo'
 | Mashina (kalit, `device.json`, `hub-ca.pem`) | Windows `%ProgramData%\NetSchool\companion`, macOS `/Library/Application Support/NetSchool/companion`, Linux `/var/lib/netschool/companion` |
 | Foydalanuvchi holati (`state.sqlite`) | Electron `userData` |
 
-Muhit o'zgaruvchilari (dev/sinov): `NETSCHOOL_COMPANION_DIR` (mashina katalogi), `NETSCHOOL_COMPANION_STATE_DIR` (holat), `NETSCHOOL_COMPANION_LOCALE` (`uz`/`ru`/`en`), `NETSCHOOL_COMPANION_SHOW_STATUS=1` (holat oynasini ochiq boshlash), `NETSCHOOL_COMPANION_TEST_HIDDEN=1` (faqat `STATE_DIR` bilan: oynalar ekranda ko'rsatilmaydi).
+Muhit o'zgaruvchilari (dev/sinov): `NETSCHOOL_COMPANION_DIR` (mashina katalogi), `NETSCHOOL_COMPANION_STATE_DIR` (holat), `NETSCHOOL_COMPANION_LOCALE` (`uz`/`ru`/`en`), `NETSCHOOL_COMPANION_SHOW_STATUS=1` (holat oynasini ochiq boshlash).
 
 ## Sinovlar
 
 ```bash
 pnpm test                                   # unit + real hub'ga qarshi integratsiya (Electron'siz)
-pnpm --filter @netschool/companion build && pnpm test:e2e:companion   # haqiqiy Electron, oynalar yashirin
+pnpm test:e2e:companion   # test build yig'adi va haqiqiy Electron'ni oynalar yashirin holda ishga tushiradi
 ```
 
-E2e oynalarni ekranda ko'rsatmaydi va ishchi ekranni qoplamaydi. CI'da `companion-e2e` ishi xvfb ostida, Chromium sandbox yoqilgan holda ishlaydi.
+E2e oynalarni ekranda ko'rsatmaydi va ishchi ekranni qoplamaydi. Yashirin rejim faqat test build'ida bor (`NETSCHOOL_COMPANION_TEST_BUILD=1`); oddiy build'da bu kod yo'q, shuning uchun o'quvchi uni yoqa olmaydi. Test build'ni o'quvchi kompyuteriga o'rnatmang. CI'da `companion-e2e` ishi xvfb ostida, Chromium sandbox yoqilgan holda ishlaydi.
 
 ## Muammolarni aniqlash
 
