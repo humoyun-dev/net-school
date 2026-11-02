@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -142,8 +143,10 @@ describe('startup ordering', () => {
 
 describe('meshcentral config rendering', () => {
   test('postgres settings use the meshcentral user and keep the hardened template', () => {
+    // Sinov qiymati ishga tushishda yaratiladi: repoda parolga o'xshash literal qolmaydi.
+    const dbPassword = randomBytes(12).toString('hex');
     const config = renderConfig(template, {
-      dbPassword: 's3cret',
+      dbPassword,
       certName: 'hub.school.lan',
       trustedProxy: '172.31.250.10',
     });
@@ -151,7 +154,7 @@ describe('meshcentral config rendering', () => {
       host: 'postgres',
       port: 5432,
       user: 'meshcentral',
-      password: 's3cret',
+      password: dbPassword,
       database: 'meshcentral',
       // Database init skriptda yaratiladi; aks holda MeshCentral `postgres` DB'ga ulanmoqchi bo'ladi (db.js:961).
       createdatabase: false,
