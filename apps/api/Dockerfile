@@ -8,7 +8,8 @@ FROM base AS deps
 RUN pnpm install --frozen-lockfile --prod --filter @netschool/api...
 
 FROM base AS build
-RUN pnpm install --frozen-lockfile --filter @netschool/api... && pnpm --filter @netschool/api build
+RUN pnpm install --frozen-lockfile --filter @netschool/api... --filter @netschool/web... \
+  && pnpm --filter @netschool/api build && pnpm --filter @netschool/web build
 
 FROM node:24-bookworm-slim
 ENV NODE_ENV=production
@@ -18,6 +19,9 @@ COPY --from=deps /src/apps/api/node_modules /app/apps/api/node_modules
 COPY --from=build /src/apps/api/package.json ./package.json
 COPY --from=build /src/apps/api/dist ./dist
 COPY --from=build /src/apps/api/drizzle ./drizzle
+# Panel (apps/web) shu API orqali beriladi (ADR 0011).
+COPY --from=build /src/apps/web/dist /app/web
+ENV WEB_DIST_DIR=/app/web
 USER node
 EXPOSE 8443
 CMD ["node", "dist/main.mjs"]

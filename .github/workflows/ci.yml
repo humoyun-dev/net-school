@@ -143,6 +143,10 @@ jobs:
           cat health.json || true
           grep -q '"db":"ok"' health.json && grep -q '"mesh":"ok"' health.json \
             || { docker compose ps; docker compose logs api api-migrate meshcentral | tail -100; exit 1; }
+      - name: API serves the web panel
+        run: |
+          curl --fail --silent --cacert secrets/api_tls_cert https://localhost/ > index.html
+          grep -q '<div id="root"' index.html || { head -c 300 index.html; exit 1; }
       - name: Remote session gateway answers over TLS on 8444
         run: |
           code=$(curl --silent --output /dev/null --write-out '%{http_code}' --cacert secrets/api_tls_cert https://localhost:8444/)
