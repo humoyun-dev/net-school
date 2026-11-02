@@ -183,9 +183,14 @@ describe('MeshControlClient', () => {
     expect(c.connected).toBe(false);
     await c.connect();
     expect(c.connected).toBe(true);
+    // Qayta ulanish serverinfo'siz osilib turadi: uzilgan holat qisqa oynada emas, barqaror kuzatiladi.
+    server.silent = true;
     server.dropAll();
-    await until(() => !c.connected);
-    await until(() => c.connected);
+    await until(() => !c.connected && server.connectionCount === 2);
+    expect(c.connected).toBe(false);
+    server.silent = false;
+    server.dropAll();
+    await until(() => c.connected, 10_000);
     await c.close();
     expect(c.connected).toBe(false);
   });
