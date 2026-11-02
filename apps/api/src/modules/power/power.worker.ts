@@ -21,6 +21,7 @@ import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort } from '..
 import { MESH_LINK, type MeshLink } from '../health/health.controller.ts';
 import { WORKERS_ENABLED } from '../workers/outbox.worker.ts';
 import { PowerService } from './power.service.ts';
+import { PowerSchedulesService } from './power-schedules.service.ts';
 
 const INTERVAL_MS = 1_000;
 const SEND_CONCURRENCY = 16;
@@ -52,6 +53,7 @@ export class PowerWorker implements OnApplicationBootstrap, OnModuleDestroy {
     @Inject(DEVICE_MANAGEMENT) private readonly factory: DeviceManagementFactory | null,
     @Inject(AuditWriter) private readonly audit: AuditWriter,
     @Inject(PowerService) private readonly power: PowerService,
+    @Inject(PowerSchedulesService) private readonly schedules: PowerSchedulesService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -76,6 +78,7 @@ export class PowerWorker implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   async tick(now: number): Promise<void> {
+    await this.schedules.runDue(now);
     await this.#startDue(now);
     await this.#dispatch(now);
     await this.#reconcile(now);
