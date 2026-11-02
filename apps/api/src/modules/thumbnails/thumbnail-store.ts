@@ -16,6 +16,7 @@ interface Frame {
 @Injectable()
 export class ThumbnailStore implements OnModuleInit, OnModuleDestroy {
   readonly #frames = new Map<string, Frame>();
+  readonly #listeners = new Set<(deviceId: string, lessonId: string) => void>();
   #timer: NodeJS.Timeout | undefined;
 
   constructor(@Inject(CLOCK) private readonly now: Clock) {}
@@ -37,7 +38,14 @@ export class ThumbnailStore implements OnModuleInit, OnModuleDestroy {
     const prev = this.#frames.get(deviceId);
     if (prev && prev.lessonId === lessonId && at - prev.at < THUMBNAIL_SERVER_MIN_INTERVAL_MS) return 'too_fast';
     this.#frames.set(deviceId, { lessonId, jpeg, seq: (prev?.seq ?? 0) + 1, at });
+    for (const listener of this.#listeners) listener(deviceId, lessonId);
     return 'stored';
+  }
+
+  // Yangi saqlangan kadr haqida xabar (o'qituvchi oqimi); kadrning o'zi latest() orqali olinadi.
+  onFrame(listener: (deviceId: string, lessonId: string) => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
   }
 
   // TTL tashqarisidagi yoki boshqa dars uchun olingan kadr berilmaydi.

@@ -1,12 +1,12 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
-import { HttpAdapterHost } from '@nestjs/core';
 import { THUMBNAIL_MAX_BYTES } from '@netschool/domain';
 import { and, eq, isNull } from 'drizzle-orm';
 import { type RawData, type WebSocket, WebSocketServer } from 'ws';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { ApiError } from '../../common/errors.ts';
+import { refuse, UpgradeRouter } from '../../common/upgrade-router.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { lessonDevices, lessons } from '../../db/schema.ts';
 import { DeviceVerifier } from '../devices/device-verifier.ts';
@@ -26,23 +26,17 @@ interface Connection {
   queue: Promise<void>;
 }
 
-// Upgrade'ga berilgan soketga HTTP server taymerlari endi tegmaydi: yarim ochiq mijoz uni abadiy ushlab turmasin.
-function refuse(socket: Duplex, status: number, text: string): void {
-  socket.once('finish', socket.destroy);
-  socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
-}
-
 // Qurilmadan JPEG miniaturalar: imzolangan WS upgrade, API jarayonida (§11). Kadr faqat ThumbnailStore'ga tushadi.
 @Injectable()
 export class ThumbnailIngest implements OnApplicationBootstrap, OnModuleDestroy {
   readonly #log = new Logger('ThumbnailIngest');
   readonly #wss = new WebSocketServer({ noServer: true, maxPayload: THUMBNAIL_MAX_BYTES });
   readonly #connections = new Map<string, Connection>();
-  #server: ReturnType<HttpAdapterHost['httpAdapter']['getHttpServer']> | undefined;
+  #unroute: (() => void) | undefined;
   #pingTimer: NodeJS.Timeout | undefined;
 
   constructor(
-    @Inject(HttpAdapterHost) private readonly adapterHost: HttpAdapterHost,
+    @Inject(UpgradeRouter) private readonly router: UpgradeRouter,
     @Inject(DeviceVerifier) private readonly verifier: DeviceVerifier,
     @Inject(ThumbnailStore) private readonly store: ThumbnailStore,
     @Inject(DB) private readonly db: Db,
@@ -50,14 +44,13 @@ export class ThumbnailIngest implements OnApplicationBootstrap, OnModuleDestroy 
   ) {}
 
   onApplicationBootstrap(): void {
-    this.#server = this.adapterHost.httpAdapter.getHttpServer();
-    this.#server.on('upgrade', this.#onUpgrade);
+    this.#unroute = this.router.route(/^\/api\/v1\/device\/thumbnails$/, this.#onUpgrade);
     this.#pingTimer = setInterval(() => this.#ping(), PING_INTERVAL_MS);
     this.#pingTimer.unref();
   }
 
   async onModuleDestroy(): Promise<void> {
-    this.#server?.off('upgrade', this.#onUpgrade);
+    this.#unroute?.();
     clearInterval(this.#pingTimer);
     for (const conn of this.#connections.values()) conn.ws.terminate();
     this.#connections.clear();
@@ -65,7 +58,6 @@ export class ThumbnailIngest implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   readonly #onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    socket.on('error', () => {}); // upgrade kutilayotganda uzilgan soket jarayonni yiqitmasin
     void this.#upgrade(req, socket, head).catch((err: unknown) => {
       this.#log.error(`thumbnail upgrade failed: ${err instanceof Error ? err.message : 'unknown'}`);
       if (!socket.destroyed) refuse(socket, 500, 'Internal Server Error');
@@ -74,7 +66,7 @@ export class ThumbnailIngest implements OnApplicationBootstrap, OnModuleDestroy 
 
   async #upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const url = req.url ?? '';
-    if (req.method !== 'GET' || new URL(url, 'https://localhost').pathname !== THUMBNAIL_PATH) {
+    if (req.method !== 'GET') {
       refuse(socket, 400, 'Bad Request');
       return;
     }

@@ -7,6 +7,7 @@ import { correlationMiddleware } from './common/correlation.ts';
 import { ErrorFilter } from './common/error-filter.ts';
 import { Idempotency } from './common/idempotency.ts';
 import { OriginGuard } from './common/origin-guard.ts';
+import { UpgradeRouter } from './common/upgrade-router.ts';
 import { API_CONFIG, type ApiConfig } from './config/config.ts';
 import { DB, type Db } from './db/client.ts';
 import { AuditModule } from './modules/audit/audit.module.ts';
@@ -58,6 +59,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       Idempotency,
       // Imzo qoidasi guard va WS upgrade uchun umumiy; har modulga alohida berilmaydi.
       DeviceVerifier,
+      UpgradeRouter,
       { provide: WORKERS_ENABLED, useValue: opts.workers ?? false },
     ],
     exports: [
@@ -69,6 +71,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       MESH_LINK,
       Idempotency,
       DeviceVerifier,
+      UpgradeRouter,
       WORKERS_ENABLED,
     ],
   })
