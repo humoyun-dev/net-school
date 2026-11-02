@@ -3,6 +3,7 @@ import { z } from 'zod';
 const timestamp = z.iso.datetime({ offset: true });
 
 export const powerActionTypeSchema = z.enum(['shutdown', 'reboot', 'sleep', 'wake']);
+export type PowerActionType = z.infer<typeof powerActionTypeSchema>;
 export const powerTargetStatusSchema = z.enum(['pending', 'sent', 'succeeded', 'failed', 'unknown', 'cancelled']);
 export const powerFailureReasonSchema = z.enum([
   'unbound',

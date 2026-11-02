@@ -8,6 +8,7 @@ import { SessionProvider, useSession } from './auth/session.tsx';
 import { ClassroomRoute } from './classroom/classroom-route.tsx';
 import { LocaleProvider, useT } from './i18n/i18n.tsx';
 import { Shell } from './layout/shell.tsx';
+import { PowerPage } from './power/power-page.tsx';
 import { RoomsPage } from './rooms/rooms-page.tsx';
 
 // Kirmagan foydalanuvchi login'ga, qaytish manzili bilan.
@@ -37,6 +38,7 @@ function Pages() {
                 { index: true, element: <Navigate to="/rooms" replace /> },
                 { path: '/rooms', element: <RoomsPage /> },
                 { path: '/rooms/:roomId', element: <ClassroomRoute /> },
+                { path: '/power', element: <PowerPage /> },
                 { path: '*', element: <Navigate to="/rooms" replace /> },
               ],
             },
