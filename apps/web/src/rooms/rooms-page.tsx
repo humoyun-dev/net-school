@@ -1,69 +1,49 @@
-import { roomSchema, siteSchema } from '@netschool/contracts';
-import { useEffect, useState } from 'react';
+import { ChevronRight, DoorOpen } from 'lucide-react';
 import { Link } from 'react-router';
-import { z } from 'zod';
-import { useApi } from '../api/api-context.tsx';
-import { hasRole, useMe } from '../auth/session.tsx';
 import { useErrorText, useT } from '../i18n/i18n.tsx';
+import { Notice, Toolbar } from '../layout/toolbar.tsx';
+import { useRooms } from './use-rooms.ts';
 
-const sitesSchema = z.object({ sites: z.array(siteSchema) });
-const roomsSchema = z.object({ rooms: z.array(roomSchema) });
-
-interface SiteRooms {
-  site: z.infer<typeof siteSchema>;
-  rooms: z.infer<typeof roomSchema>[];
-}
-
-// O'qituvchi — o'ziga biriktirilgan xonalar; admin/IT — o'z site'larining hamma xonalari.
+// Xonalar: bino bo'yicha guruhlangan ro'yxat (System Settings uslubi).
 export function RoomsPage() {
-  const api = useApi();
-  const me = useMe();
   const t = useT();
   const errorText = useErrorText();
-  const [data, setData] = useState<SiteRooms[] | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  useEffect(() => {
-    const abort = new AbortController();
-    (async () => {
-      try {
-        const { sites } = await api.get('/api/v1/sites', sitesSchema, abort.signal);
-        const staff = hasRole(me, ['school_admin', 'it_support']);
-        const out: SiteRooms[] = [];
-        for (const site of sites) {
-          const { rooms } = await api.get(`/api/v1/sites/${site.id}/rooms`, roomsSchema, abort.signal).catch(() => ({
-            rooms: [],
-          }));
-          const mine = staff ? rooms : rooms.filter((r) => me.roomIds.includes(r.id));
-          if (mine.length > 0) out.push({ site, rooms: mine });
-        }
-        setData(out);
-      } catch (err) {
-        if (!abort.signal.aborted) setError(err);
-      }
-    })();
-    return () => abort.abort();
-  }, [api, me]);
-
-  if (error) return <p className="error">{errorText(error)}</p>;
-  if (!data) return <p className="notice">{t('common.loading')}</p>;
-  if (data.length === 0) return <p className="notice">{t('rooms.empty')}</p>;
+  const { data, error } = useRooms();
   return (
-    <section>
-      <h1>{t('rooms.title')}</h1>
-      {data.map(({ site, rooms }) => (
-        <div key={site.id} className="card site">
-          <h2>{site.name}</h2>
-          <ul className="room-list">
-            {rooms.map((r) => (
-              <li key={r.id}>
-                <Link to={`/rooms/${r.id}`} state={{ name: r.name }}>
-                  {r.name}
-                </Link>
-              </li>
-            ))}
-          </ul>
+    <>
+      <Toolbar title={t('rooms.title')} subtitle={t('rooms.subtitle')} />
+      {error ? (
+        <Notice tone="error">{errorText(error)}</Notice>
+      ) : !data ? (
+        <Notice>{t('common.loading')}</Notice>
+      ) : data.length === 0 ? (
+        <Notice>{t('rooms.empty')}</Notice>
+      ) : (
+        <div className="mx-auto flex max-w-[720px] flex-col gap-6 px-5 py-6">
+          {data.map(({ site, rooms }) => (
+            <section key={site.id}>
+              <h2 className="mb-1.5 px-3.5 text-[12px] font-semibold text-muted-foreground">{site.name}</h2>
+              <ul className="group-box overflow-hidden">
+                {rooms.map((r) => (
+                  <li key={r.id} className="group-row p-0">
+                    <Link
+                      to={`/rooms/${r.id}`}
+                      state={{ name: r.name }}
+                      className="flex min-h-11 flex-1 items-center gap-3 px-3.5 hover:bg-hover"
+                    >
+                      <span className="grid size-7 place-items-center rounded-[7px] bg-primary/12 text-primary">
+                        <DoorOpen className="size-4" />
+                      </span>
+                      <span className="flex-1 text-[13px] font-medium">{r.name}</span>
+                      <ChevronRight aria-hidden className="size-4 text-muted-foreground/70" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
         </div>
-      ))}
-    </section>
+      )}
+    </>
   );
 }

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -10,7 +11,7 @@ const key = process.env.NETSCHOOL_DEV_TLS_KEY;
 const ca = process.env.NETSCHOOL_DEV_API_CA;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   build: { outDir: 'dist', assetsDir: 'assets', sourcemap: false },
   server: {
     https: cert && key ? { cert: readFileSync(cert), key: readFileSync(key) } : undefined,

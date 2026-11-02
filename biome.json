@@ -29,6 +29,21 @@
     }
   },
   "linter": {
-    "enabled": true
+    "enabled": true,
+    "rules": {
+      "a11y": {
+        "noLabelWithoutControl": {
+          "level": "error",
+          "options": {
+            "inputComponents": ["Input", "Select"]
+          }
+        }
+      }
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
   }
 }
