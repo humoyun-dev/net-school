@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { helpRequestSchema } from './help-requests.ts';
 import { lessonSchema } from './lessons.ts';
 import { remoteSessionSchema } from './remote-sessions.ts';
 
@@ -93,6 +94,8 @@ export const eventSchema = z.object({
     'command.target_updated',
     'remote_session.opened',
     'remote_session.closed',
+    'help_request.raised',
+    'help_request.cleared',
   ]),
   at: timestamp,
   lessonId: z.uuid().nullable(),
@@ -108,6 +111,7 @@ export const eventsResponseSchema = z.object({
       lesson: lessonSchema.nullable(),
       commands: z.array(commandSchema),
       remoteSessions: z.array(remoteSessionSchema),
+      helpRequests: z.array(helpRequestSchema), // darsning ochiq so'rovlari
     })
     .optional(),
   events: z.array(eventSchema),

@@ -57,6 +57,8 @@ const ownSite: [Action, Target, Who[]][] = [
   ['lesson.end', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
   ['command.issue', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
   ['command.issue', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
+  ['help.clear', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
+  ['help.clear', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
   ['remote.view', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
   ['remote.view', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
   ['remote.control', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
@@ -139,6 +141,29 @@ describe('authorize', () => {
     // Egasi bo'lsa ham boshqa xonada emas; ownerUserId berilmasa — rad.
     expect(authorize(actors.teacher, 'command.issue', { ...own, roomId: 'room-other' }).allowed).toBe(false);
     expect(authorize(actors.teacher, 'lesson.end', site(SITE, { roomId: 'room-assigned' })).allowed).toBe(false);
+  });
+
+  test('help.clear follows command.issue', () => {
+    const own = site(SITE, { roomId: 'room-assigned', ownerUserId: 'u' });
+    const variants: Target[] = [
+      own,
+      { ...own, ownerUserId: 'someone-else' },
+      { ...own, roomId: 'room-other' },
+      site(SITE, { roomId: 'room-assigned' }),
+      site(OTHER_SITE, { roomId: 'room-assigned', ownerUserId: 'u' }),
+    ];
+    for (const who of Object.keys(actors) as Who[]) {
+      for (const target of variants) {
+        expect(authorize(actors[who], 'help.clear', target).allowed, `${who} ${JSON.stringify(target)}`).toBe(
+          authorize(actors[who], 'command.issue', target).allowed,
+        );
+      }
+    }
+    expect(authorize(actors.teacher, 'help.clear', own).allowed).toBe(true);
+    expect(authorize(actors.teacher, 'help.clear', { ...own, ownerUserId: 'someone-else' }).allowed).toBe(false);
+    expect(authorize(actors.siteAdmin, 'help.clear', own).allowed).toBe(true);
+    expect(authorize(actors.itSupport, 'help.clear', own).allowed).toBe(false);
+    expect(authorize(actors.student, 'help.clear', own).allowed).toBe(false);
   });
 
   test('it_support reads lessons but cannot command', () => {

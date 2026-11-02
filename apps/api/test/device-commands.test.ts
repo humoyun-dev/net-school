@@ -151,6 +151,8 @@ describe('device command channel', () => {
           // Qurilma monoton taymer bilan hisoblaydi: OS soati noto'g'ri bo'lsa ham lease uzaymaydi (spec §10).
           leaseSeconds: 120,
         },
+        thumbnails: { intervalMs: 1000, maxWidth: 480 },
+        helpRequest: null,
       },
     });
   });

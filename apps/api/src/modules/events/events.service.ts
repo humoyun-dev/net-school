@@ -88,7 +88,12 @@ export class EventsService {
       .from(lessons)
       .where(and(eq(lessons.roomId, roomId), eq(lessons.status, 'active')));
     if (!lesson)
-      return { cursor, resync: true, snapshot: { lesson: null, commands: [], remoteSessions: [] }, events: [] };
+      return {
+        cursor,
+        resync: true,
+        snapshot: { lesson: null, commands: [], remoteSessions: [], helpRequests: [] },
+        events: [],
+      };
     const recent = await this.db
       .select({ id: commands.id })
       .from(commands)
@@ -104,6 +109,7 @@ export class EventsService {
         lesson: await this.lessons.view(this.db, lesson),
         commands: views,
         remoteSessions: await this.remoteSessions.openOfLesson(this.db, lesson.id),
+        helpRequests: [], // Task 2 to'ldiradi
       },
       events: [],
     };

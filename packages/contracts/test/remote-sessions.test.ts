@@ -72,7 +72,7 @@ describe('remote session contracts', () => {
     const response = {
       cursor: '5',
       resync: true,
-      snapshot: { lesson: null, commands: [], remoteSessions: [session] },
+      snapshot: { lesson: null, commands: [], remoteSessions: [session], helpRequests: [] },
       events: [
         { seq: '4', type: 'remote_session.opened', at, lessonId: id(2), data: {} },
         { seq: '5', type: 'remote_session.closed', at, lessonId: id(2), data: { reason: 'teacher' } },

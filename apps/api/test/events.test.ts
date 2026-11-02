@@ -177,7 +177,7 @@ describe('events', () => {
     // Dars tugagach faol dars yo'q: snapshot'da sessiya ham yo'q.
     expect((await endLesson(app, teacher, lesson.id)).status).toBe(200);
     const after = await poll(`roomId=${roomId}`);
-    expect(after.json.snapshot).toEqual({ lesson: null, commands: [], remoteSessions: [] });
+    expect(after.json.snapshot).toEqual({ lesson: null, commands: [], remoteSessions: [], helpRequests: [] });
   });
 
   test('remote session open and close appear in the room stream', async () => {

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { CapabilityReport } from '@netschool/contracts';
-import { HEARTBEAT_INTERVAL_MS } from '@netschool/domain';
+import { HEARTBEAT_INTERVAL_MS, THUMBNAIL_INTERVAL_MS, THUMBNAIL_MAX_WIDTH } from '@netschool/domain';
 import { and, eq, isNull } from 'drizzle-orm';
 import { canonical } from '../../common/canonical-json.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
@@ -57,6 +57,8 @@ export class PresenceService {
               // Qurilma lease'ni monoton taymer bilan hisoblaydi; absolyut vaqt faqat ma'lumot uchun (spec §10).
               leaseSeconds: OVERLAY_LEASE_MS / 1000,
             },
+            thumbnails: { intervalMs: THUMBNAIL_INTERVAL_MS, maxWidth: THUMBNAIL_MAX_WIDTH },
+            helpRequest: null, // Task 2 to'ldiradi
           }
         : null,
     };

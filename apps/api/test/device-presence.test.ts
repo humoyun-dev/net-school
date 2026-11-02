@@ -3,11 +3,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { auditEvents, deviceCapabilities, devices } from '../src/db/schema.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { type DeviceKey, deviceRequest, makeDeviceKey, seedDevice } from './support/device.ts';
-import { seedOrg } from './support/seed.ts';
+import { endLesson, startLesson } from './support/lesson.ts';
+import { loginAs } from './support/login.ts';
+import { seedOrg, seedRoom, seedUser } from './support/seed.ts';
 
 let now = 1_800_000_000_000;
 let app: TestApp;
 let orgId: string;
+let siteId: string;
 let key: DeviceKey;
 let deviceId: string;
 
@@ -27,7 +30,6 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await app.db.reset();
-  let siteId: string;
   ({ orgId, siteId } = await seedOrg(app.db.db));
   key = makeDeviceKey();
   deviceId = await seedDevice(app.db.db, orgId, siteId, key.publicKey);
@@ -50,6 +52,28 @@ describe('device presence', () => {
     const [row] = await app.db.db.select().from(devices).where(eq(devices.id, deviceId));
     expect(row?.lastHeartbeatAt?.getTime()).toBe(now);
     expect((await send('POST', '/api/v1/device/heartbeat', { extra: 1 })).status).toBe(400);
+  });
+
+  test('heartbeat tells a lesson device to send thumbnails', async () => {
+    const roomId = await seedRoom(app.db.db, orgId, siteId, '101');
+    await seedUser(app.db.db, orgId, 'teacher1', [{ role: 'teacher', siteId }], { roomIds: [roomId] });
+    const teacher = await loginAs(app, 'teacher1');
+    const k = makeDeviceKey();
+    const id = await seedDevice(app.db.db, orgId, siteId, k.publicKey, { roomId });
+    const beat = () => {
+      now += 1;
+      return deviceRequest(app, k, id, 'POST', '/api/v1/device/heartbeat', {}, now);
+    };
+    expect((await beat()).json.lesson).toBeNull();
+    const lessonId = (await startLesson(app, teacher, roomId)).json.id;
+    const res = await beat();
+    expect(res.json.lesson).toMatchObject({
+      id: lessonId,
+      thumbnails: { intervalMs: 1000, maxWidth: 480 },
+      helpRequest: null,
+    });
+    await endLesson(app, teacher, lessonId);
+    expect((await beat()).json).toEqual({ heartbeatIntervalSeconds: 10, lesson: null });
   });
 
   test('capability change is stored and audited once', async () => {
