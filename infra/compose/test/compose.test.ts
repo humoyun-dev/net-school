@@ -251,10 +251,12 @@ describe('meshcentral config rendering', () => {
   test('the poc overlay publishes only the agent port of meshcentral', () => {
     const poc = parse(readFileSync(join(here, '..', 'compose.poc.yaml'), 'utf8'));
     const mc = poc.services.meshcentral as Service;
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: compose interpolatsiya sintaksisi
     expect(mc.ports).toEqual(['${MESH_AGENT_BIND:-0.0.0.0}:${MESH_AGENT_PORT:-4433}:4433']);
     expect(JSON.stringify(mc.ports)).not.toContain('4430');
     expect(mc.environment).toMatchObject({
       MESHCENTRAL_AGENT_PORT: '4433',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: compose interpolatsiya sintaksisi
       MESHCENTRAL_AGENT_ALIAS_PORT: '${MESH_AGENT_PORT:-4433}',
     });
     expect(mc.environment?.MESHCENTRAL_AGENT_ALIAS_DNS).toMatch(/^\$\{MESH_AGENT_HOST:\?/);
