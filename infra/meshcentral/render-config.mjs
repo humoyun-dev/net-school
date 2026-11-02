@@ -5,9 +5,16 @@ import { isIP } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export function renderConfig(template, { dbPassword, certName, trustedProxy }) {
+// Agent .msh'idagi server manzili: LAN nomi yoki IP (port/yo'l/foydalanuvchisiz). Agent serverni sertifikat hash'i
+// (ServerID) bo'yicha taniydi, shuning uchun bu nom API'ning `meshcentral` hostname tekshiruviga ta'sir qilmaydi.
+const ALIAS = /^[A-Za-z0-9.-]{1,253}$/;
+
+export function renderConfig(template, { dbPassword, certName, trustedProxy, agent }) {
   // Faqat IP literal: DNS nomini MeshCentral bir marta ishga tushishda aniqlaydi va api hali yo'q bo'lsa ishonch yo'qoladi.
   if (isIP(trustedProxy ?? '') === 0) throw new Error('MESHCENTRAL_TRUSTED_PROXY must be an IP address');
+  if (agent && !ALIAS.test(agent.aliasDns ?? '')) {
+    throw new Error('MESHCENTRAL_AGENT_ALIAS_DNS must be a host name or IP without port, path or user');
+  }
   const config = structuredClone(template);
   config.settings = {
     ...config.settings,
@@ -31,6 +38,8 @@ export function renderConfig(template, { dbPassword, certName, trustedProxy }) {
       database: 'meshcentral',
       createdatabase: false,
     },
+    // PoC/pilot: agentlar faqat alohida agent portiga ulanadi (admin UI 4430 ichkarida qoladi).
+    ...(agent ? { agentPort: agent.port, agentAliasDNS: agent.aliasDns, agentAliasPort: agent.aliasPort } : {}),
   };
   return config;
 }
@@ -44,6 +53,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     dbPassword,
     certName: process.env.MESHCENTRAL_CERT_NAME ?? 'meshcentral',
     trustedProxy: process.env.MESHCENTRAL_TRUSTED_PROXY,
+    agent: process.env.MESHCENTRAL_AGENT_ALIAS_DNS
+      ? {
+          port: Number(process.env.MESHCENTRAL_AGENT_PORT ?? 4433),
+          aliasDns: process.env.MESHCENTRAL_AGENT_ALIAS_DNS,
+          aliasPort: Number(process.env.MESHCENTRAL_AGENT_ALIAS_PORT ?? process.env.MESHCENTRAL_AGENT_PORT ?? 4433),
+        }
+      : undefined,
   });
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify(config, null, 2), { mode: 0o600 });

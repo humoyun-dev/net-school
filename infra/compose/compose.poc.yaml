@@ -1,0 +1,12 @@
+# P0c / pilot: LAN'dagi test kompyuterlarining MeshAgent'i hub'ga ulanishi uchun.
+#   docker compose -f compose.yaml -f compose.poc.yaml up -d
+# Faqat agent porti ochiladi; MeshCentral admin UI (4430) ichki tarmoqda qoladi.
+services:
+  meshcentral:
+    environment:
+      MESHCENTRAL_AGENT_PORT: "4433"
+      # Agent .msh faylidagi server manzili: test kompyuterlari shu nom/IP orqali hub'ga yetadi.
+      MESHCENTRAL_AGENT_ALIAS_DNS: ${MESH_AGENT_HOST:?MESH_AGENT_HOST is required, e.g. the hub's LAN name or IP}
+      MESHCENTRAL_AGENT_ALIAS_PORT: ${MESH_AGENT_PORT:-4433}
+    ports:
+      - ${MESH_AGENT_BIND:-0.0.0.0}:${MESH_AGENT_PORT:-4433}:4433

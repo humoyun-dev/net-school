@@ -2,7 +2,7 @@
 
 Servislar: `postgres` (NetSchool va MeshCentral uchun **alohida** database va user), `meshcentral` (pin qilingan submodule'dan build), `api-migrate` (bir martalik migratsiya), `api` (NetSchool API, HTTPS).
 
-Tashqariga faqat `api` chiqadi: `443 → 8443` (API) va `8444 → 8444` (remote session gateway, ADR 0003). MeshCentral web/admin paneli va PostgreSQL hech qanday port publish qilmaydi (spec §13). MeshCentral agent porti P0c natijasiga ko'ra qo'shiladi — hozircha publish qilinmagan.
+Tashqariga faqat `api` chiqadi: `443 → 8443` (API) va `8444 → 8444` (remote session gateway, ADR 0003). MeshCentral web/admin paneli va PostgreSQL hech qanday port publish qilmaydi (spec §13). MeshCentral agent porti faqat PoC/pilot overlay'ida ochiladi (quyida).
 
 ## API ↔ MeshCentral
 
@@ -42,6 +42,22 @@ docker compose run --rm api-migrate node dist/cli.mjs bootstrap --org "Maktab" -
 ```
 
 Parolni tiklash (oflayn): `docker compose run --rm api-migrate node dist/cli.mjs reset-password <username>`.
+
+## PoC / pilot: test kompyuterlari (agent porti)
+
+LAN'dagi kompyuterlarning MeshAgent'i hub'ga ulanishi uchun:
+
+```bash
+# .env: PUBLIC_ORIGIN=https://<hub-nomi>, GATEWAY_PUBLIC_ORIGIN=https://<hub-nomi>:8444,
+#       MESH_AGENT_HOST=<hub-nomi yoki qat'iy LAN IP>
+pnpm meshcentral:agents                       # pin qilingan agentlar (image'ga kiradi)
+docker compose -f compose.yaml -f compose.poc.yaml up -d --build
+```
+
+- MeshCentral `agentPort` 4433'da faqat agent ulanishlarini qabul qiladi. Admin UI (4430) ochilmaydi.
+- `MESH_AGENT_HOST` agent `.msh` fayliga yoziladi (`agentAliasDNS`). DHCP'da o'zgaradigan IP ishlatmang.
+- Sertifikat nomi `meshcentral` bo'lib qoladi: agent serverni sertifikat hash'i bo'yicha taniydi.
+- Faqat shu Mac'dan sinash uchun `MESH_AGENT_BIND=127.0.0.1`.
 
 ## Cheklovlar
 
