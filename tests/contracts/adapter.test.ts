@@ -125,6 +125,26 @@ describe('MeshCentral adapter against pinned upstream', () => {
     expect(result).toEqual({ status: 'node_not_found' });
   });
 
+  test('requestPowerAction accepts shutdown for a listed device', async () => {
+    const upstream = await deviceNamed('pc-01');
+    const result = await new MeshCentralDeviceManagement(admin, site).requestPowerAction({
+      siteId: 'site-a',
+      upstream,
+      type: 'shutdown',
+    });
+    expect(result).toEqual({ accepted: true });
+  });
+
+  test('waking a local device without network information is wake_unsupported', async () => {
+    const upstream = await deviceNamed('pc-02');
+    const result = await new MeshCentralDeviceManagement(admin, site).requestPowerAction({
+      siteId: 'site-a',
+      upstream,
+      type: 'wake',
+    });
+    expect(result).toEqual({ accepted: false, reason: 'wake_unsupported' });
+  });
+
   test('emits device.added when a device is added', async () => {
     const events: DeviceEvent[] = [];
     const off = new MeshCentralDeviceManagement(admin, site).subscribeDeviceEvents((e) => events.push(e));
