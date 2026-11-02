@@ -11,6 +11,7 @@ import { API_CONFIG, type ApiConfig } from './config/config.ts';
 import { DB, type Db } from './db/client.ts';
 import { AuditModule } from './modules/audit/audit.module.ts';
 import { CommandsModule } from './modules/commands/commands.module.ts';
+import { DeviceVerifier } from './modules/devices/device-verifier.ts';
 import { DevicesModule } from './modules/devices/devices.module.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory } from './modules/devices/mesh.ts';
 import { EventsModule } from './modules/events/events.module.ts';
@@ -22,6 +23,7 @@ import { LessonsModule } from './modules/lessons/lessons.module.ts';
 import { OrganizationModule } from './modules/organization/organization.module.ts';
 import { REMOTE_UPSTREAM, type RemoteUpstream } from './modules/remote-sessions/remote-gateway.ts';
 import { RemoteSessionsModule } from './modules/remote-sessions/remote-sessions.module.ts';
+import { ThumbnailsModule } from './modules/thumbnails/thumbnails.module.ts';
 import { WORKERS_ENABLED } from './modules/workers/outbox.worker.ts';
 import { WorkersModule } from './modules/workers/workers.module.ts';
 
@@ -52,9 +54,21 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       { provide: REMOTE_UPSTREAM, useValue: opts.remote ?? null },
       { provide: MESH_LINK, useValue: opts.mesh ?? null },
       Idempotency,
+      // Imzo qoidasi guard va WS upgrade uchun umumiy; har modulga alohida berilmaydi.
+      DeviceVerifier,
       { provide: WORKERS_ENABLED, useValue: opts.workers ?? false },
     ],
-    exports: [API_CONFIG, DB, CLOCK, DEVICE_MANAGEMENT, REMOTE_UPSTREAM, MESH_LINK, Idempotency, WORKERS_ENABLED],
+    exports: [
+      API_CONFIG,
+      DB,
+      CLOCK,
+      DEVICE_MANAGEMENT,
+      REMOTE_UPSTREAM,
+      MESH_LINK,
+      Idempotency,
+      DeviceVerifier,
+      WORKERS_ENABLED,
+    ],
   })
   class CoreModule {}
 
@@ -69,6 +83,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       LessonsModule,
       CommandsModule,
       HelpRequestsModule,
+      ThumbnailsModule,
       RemoteSessionsModule,
       WorkersModule,
       EventsApiModule,
