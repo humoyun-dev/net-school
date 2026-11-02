@@ -26,7 +26,9 @@ interface Connection {
   queue: Promise<void>;
 }
 
+// Upgrade'ga berilgan soketga HTTP server taymerlari endi tegmaydi: yarim ochiq mijoz uni abadiy ushlab turmasin.
 function refuse(socket: Duplex, status: number, text: string): void {
+  socket.once('finish', socket.destroy);
   socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 }
 

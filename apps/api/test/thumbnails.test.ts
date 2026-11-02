@@ -1,3 +1,6 @@
+import type { Server } from 'node:net';
+import { type ConnectionOptions, connect } from 'node:tls';
+import { HttpAdapterHost } from '@nestjs/core';
 import { count, eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { WebSocket } from 'ws';
@@ -153,6 +156,35 @@ describe('thumbnail ingest', () => {
     expect(await attempt(signedHeaders(device, '/api/v1/device/other'), '/api/v1/device/other')).toEqual({
       status: 400,
     });
+  });
+
+  test.each([
+    ['unsigned', PATH, 401],
+    ['another path', '/api/v1/device/other', 400],
+  ])('a refused %s upgrade does not keep the socket open', async (_name, path, status) => {
+    const server: Server = app.get<HttpAdapterHost>(HttpAdapterHost).httpAdapter.getHttpServer();
+    const openConnections = () => new Promise<number>((resolve) => server.getConnections((_e, n) => resolve(n)));
+    // allowHalfOpen: mijoz o'z tomonini yopmaydi; server o'zi soketni tugatishi shart.
+    const client = connect({
+      host: '127.0.0.1',
+      port: Number(new URL(app.origin).port),
+      servername: 'localhost',
+      ca: app.ca,
+      allowHalfOpen: true, // @types/node bu tls opsiyasini bilmaydi, lekin runtime qo'llaydi
+    } as ConnectionOptions);
+    sockets.push({ terminate: () => client.destroy() } as unknown as WebSocket);
+    await new Promise<void>((resolve) => client.once('secureConnect', () => resolve()));
+    const connected = await openConnections();
+    let head = '';
+    client.on('data', (chunk) => {
+      head += chunk.toString('latin1');
+    });
+    client.write(
+      `GET ${path} HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`,
+    );
+    await until(() => head.startsWith(`HTTP/1.1 ${status} `), 'refusal response');
+    for (let i = 0; i < 100 && (await openConnections()) >= connected; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(await openConnections()).toBeLessThan(connected);
   });
 
   test('a device outside an active lesson cannot open the stream', async () => {
