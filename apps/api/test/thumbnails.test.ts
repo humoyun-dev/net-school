@@ -8,7 +8,7 @@ import { auditEvents, devices, events, outbox } from '../src/db/schema.ts';
 import { ThumbnailStore } from '../src/modules/thumbnails/thumbnail-store.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { type DeviceKey, makeDeviceKey, seedDevice, signingInput } from './support/device.ts';
-import { startLesson } from './support/lesson.ts';
+import { endLesson, startLesson } from './support/lesson.ts';
 import { loginAs } from './support/login.ts';
 import { seedOrg, seedRoom, seedUser } from './support/seed.ts';
 
@@ -23,24 +23,40 @@ let roomId: string;
 let otherRoomId: string;
 let lessonId: string;
 let admin: string;
+let teacher: string;
+let sessions = new Map<string, string>();
 let device: { id: string; key: DeviceKey };
 const sockets: WebSocket[] = [];
+
+// Kirish IP bo'yicha cheklanadi (30/daqiqa): har test yangi oynada boshlanadi va foydalanuvchini bir marta kiritadi.
+async function loginOnce(username: string): Promise<string> {
+  const known = sessions.get(username);
+  if (known) return known;
+  const cookie = await loginAs(app, username);
+  sessions.set(username, cookie);
+  return cookie;
+}
 
 beforeAll(async () => {
   app = await startTestApp({ now: () => now });
   store = app.get(ThumbnailStore);
 });
 beforeEach(async () => {
+  now += 60_000;
   await app.db.reset();
   ({ orgId, siteId } = await seedOrg(app.db.db));
   roomId = await seedRoom(app.db.db, orgId, siteId, '101');
   otherRoomId = await seedRoom(app.db.db, orgId, siteId, '102');
   await seedUser(app.db.db, orgId, 'teacher1', [{ role: 'teacher', siteId }], { roomIds: [roomId] });
   await seedUser(app.db.db, orgId, 'admin1', [{ role: 'school_admin', siteId }]);
-  admin = await loginAs(app, 'admin1');
+  await seedUser(app.db.db, orgId, 'teacher2', [{ role: 'teacher', siteId }], { roomIds: [otherRoomId] });
+  await seedUser(app.db.db, orgId, 'it1', [{ role: 'it_support', siteId }]);
+  sessions = new Map();
+  admin = await loginOnce('admin1');
+  teacher = await loginOnce('teacher1');
   const key = makeDeviceKey();
   device = { id: await seedDevice(app.db.db, orgId, siteId, key.publicKey, { roomId }), key };
-  lessonId = (await startLesson(app, await loginAs(app, 'teacher1'), roomId)).json.id;
+  lessonId = (await startLesson(app, teacher, roomId)).json.id;
 });
 afterEach(() => {
   for (const ws of sockets.splice(0)) ws.terminate();
@@ -281,5 +297,121 @@ describe('thumbnail ingest', () => {
     }
     await until(() => store.latest(device.id, lessonId)?.seq === 3, 'three frames');
     expect(await tally()).toEqual(before);
+  });
+});
+
+const thumbnailPath = (lesson: string, deviceId: string) => `/api/v1/lessons/${lesson}/devices/${deviceId}/thumbnail`;
+const read = (cookie: string, lesson = lessonId, deviceId = device.id) =>
+  app.request('GET', thumbnailPath(lesson, deviceId), { cookie });
+const deniedAudits = () => app.db.db.select().from(auditEvents).where(eq(auditEvents.result, 'denied'));
+
+describe('thumbnail read', () => {
+  test('the lesson owner reads the latest frame', async () => {
+    const ws = await open();
+    await send(ws, jpeg(1));
+    await until(() => store.latest(device.id, lessonId)?.seq === 1, 'first frame');
+    now += 400;
+    const last = jpeg(2, 40);
+    await send(ws, last);
+    await until(() => store.latest(device.id, lessonId)?.seq === 2, 'second frame');
+
+    const auditsBefore = (await app.db.db.select({ n: count() }).from(auditEvents))[0]?.n;
+    for (const cookie of [teacher, admin]) {
+      const res = await read(cookie);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('image/jpeg');
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(res.headers.get('x-ns-frame-seq')).toBe('2');
+      expect(res.headers.get('x-ns-frame-at')).toBe(new Date(now).toISOString());
+      expect(res.headers.get('x-correlation-id')).toBeTruthy();
+      expect(res.bytes.equals(last)).toBe(true);
+    }
+    // Muvaffaqiyatli o'qish audit qilinmaydi.
+    expect((await app.db.db.select({ n: count() }).from(auditEvents))[0]?.n).toBe(auditsBefore);
+  });
+
+  test('a lesson device without a frame has no thumbnail', async () => {
+    const res = await read(teacher);
+    expect(res.status).toBe(404);
+    expect(res.json.error.code).toBe('not_found');
+  });
+
+  test('a frame from a previous lesson is never served in the next one', async () => {
+    const ws = await open();
+    await send(ws, jpeg(1));
+    await until(() => store.latest(device.id, lessonId) !== null, 'frame in the first lesson');
+    expect((await read(teacher)).status).toBe(200);
+
+    expect((await endLesson(app, teacher, lessonId)).status).toBe(200);
+    const next = (await startLesson(app, teacher, roomId)).json.id;
+    expect(next).not.toBe(lessonId);
+    const res = await read(teacher, next);
+    expect(res.status).toBe(404);
+    expect(res.json.error.code).toBe('not_found');
+  });
+
+  test('frames older than ten seconds are not served', async () => {
+    const ws = await open();
+    await send(ws, jpeg(1));
+    await until(() => store.latest(device.id, lessonId) !== null, 'frame');
+    now += 10_000;
+    expect((await read(teacher)).status).toBe(200);
+    now += 1;
+    const res = await read(teacher);
+    expect(res.status).toBe(404);
+    expect(res.json.error.code).toBe('not_found');
+  });
+
+  test('another teacher or it_support cannot read thumbnails', async () => {
+    const ws = await open();
+    await send(ws, jpeg(1));
+    await until(() => store.latest(device.id, lessonId) !== null, 'frame');
+    for (const cookie of [await loginOnce('teacher2'), await loginOnce('it1')]) {
+      const res = await read(cookie);
+      expect(res.status).toBe(403);
+      expect(res.json.error.code).toBe('scope_denied');
+      expect(res.bytes.includes(jpeg(1).subarray(0, 3))).toBe(false);
+    }
+    const audits = await deniedAudits();
+    expect(audits).toHaveLength(2);
+    expect(audits.every((e) => e.action === 'remote.view' && e.targetType === 'lesson')).toBe(true);
+  });
+
+  test('unknown or malformed ids are denied like a foreign lesson', async () => {
+    const unknown = '00000000-0000-4000-8000-000000000000';
+    for (const [lesson, deviceId] of [
+      [unknown, device.id],
+      ['not-a-uuid', device.id],
+      [lessonId, unknown],
+      [lessonId, 'not-a-uuid'],
+    ] as const) {
+      const res = await read(teacher, lesson, deviceId);
+      expect(res.status).toBe(403);
+      expect(res.json.error.code).toBe('scope_denied');
+    }
+    expect(await deniedAudits()).toHaveLength(4);
+  });
+
+  test('a device that is not in the lesson has no thumbnail', async () => {
+    const key = makeDeviceKey();
+    const idle = { id: await seedDevice(app.db.db, orgId, siteId, key.publicKey, { roomId: otherRoomId }), key };
+    const res = await read(teacher, lessonId, idle.id);
+    expect(res.status).toBe(403);
+    expect(res.json.error.code).toBe('scope_denied');
+    const audits = await deniedAudits();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ action: 'remote.view', targetType: 'device', targetId: idle.id });
+  });
+
+  test('a device that left the lesson no longer has a thumbnail', async () => {
+    const ws = await open();
+    await send(ws, jpeg(1));
+    await until(() => store.latest(device.id, lessonId) !== null, 'frame');
+    const moved = await app.request('PUT', `/api/v1/devices/${device.id}/room`, {
+      body: { roomId: otherRoomId },
+      cookie: admin,
+    });
+    expect(moved.status).toBe(200);
+    expect((await read(teacher)).status).toBe(403);
   });
 });

@@ -13,6 +13,8 @@ export interface TestResponse {
   headers: Headers;
   // biome-ignore lint/suspicious/noExplicitAny: test javoblarini erkin o'qish uchun
   json: any;
+  // Xom javob tanasi (ikkilik javoblar, masalan JPEG, uchun).
+  bytes: Buffer;
 }
 
 export interface TestApp {
@@ -106,7 +108,8 @@ export async function startTestApp(
             const chunks: Buffer[] = [];
             res.on('data', (c: Buffer) => chunks.push(c));
             res.on('end', () => {
-              const text = Buffer.concat(chunks).toString('utf8');
+              const bytes = Buffer.concat(chunks);
+              const text = bytes.toString('utf8');
               const h = new Headers();
               for (const [k, v] of Object.entries(res.headers)) {
                 if (Array.isArray(v)) for (const item of v) h.append(k, item);
@@ -118,7 +121,7 @@ export async function startTestApp(
               } catch {
                 json = undefined;
               }
-              resolve({ status: res.statusCode ?? 0, headers: h, json });
+              resolve({ status: res.statusCode ?? 0, headers: h, json, bytes });
             });
           },
         );
