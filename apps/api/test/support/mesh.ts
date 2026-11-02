@@ -11,6 +11,8 @@ export interface FakeNode {
 export class FakeMesh {
   readonly nodes = new Map<string, FakeNode>();
   failing = false;
+  // Berilsa listDevices javobidan oldin bajariladi (agent holatini o'qish paytidagi poyga testlari uchun).
+  beforeList: (() => Promise<void>) | null = null;
   // Berilsa reconcileEnrollment shu va'da bajarilguncha kutadi (poyga testlari uchun).
   #held: { reached: () => void; gate: Promise<void> } | null = null;
 
@@ -31,6 +33,7 @@ export class FakeMesh {
 
   #port(scopes: ReadonlyMap<string, SiteScope>): DeviceManagementPort {
     const list = async (siteId: string): Promise<DeviceSnapshot[]> => {
+      await this.beforeList?.();
       if (this.failing) throw new Error('upstream down');
       const scope = scopes.get(siteId);
       if (!scope) throw new Error(`no scope for ${siteId}`);

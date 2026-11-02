@@ -50,6 +50,7 @@ beforeEach(async () => {
   now = start;
   mesh.nodes.clear();
   mesh.failing = false;
+  mesh.beforeList = null;
   remote.reset();
   await app.db.reset();
   ({ orgId, siteId } = await seedOrg(app.db.db));
@@ -305,6 +306,23 @@ describe('opening remote sessions', () => {
     const next = await open(admin, lesson.id, { deviceId: d, mode: 'control' });
     expect(next.status).toBe(201);
     expect(next.json.lease).not.toBeNull();
+  });
+
+  // Bog'lanish tranzaksiyadan oldin o'qiladi; agent holati so'ralayotganda unbind commit bo'lsa sessiya ochilmasligi kerak.
+  test('unbinding during the agent check does not open a session on the unbound node', async () => {
+    const d = await device();
+    const lesson = await lessonIn();
+    mesh.beforeList = async () => {
+      mesh.beforeList = null;
+      const unbind = await app.request('DELETE', `/api/v1/devices/${d}/mesh-binding`, { cookie: admin });
+      expect(unbind.status).toBe(204);
+    };
+    const res = await open(teacher, lesson.id, { deviceId: d, mode: 'control' });
+    expect(res.status).toBe(409);
+    expect(res.json.error.code).toBe('capability_unavailable');
+    expect(await app.db.db.select().from(remoteSessions)).toHaveLength(0);
+    expect(await app.db.db.select().from(controlLeases)).toHaveLength(0);
+    expect(remote.opened).toHaveLength(0);
   });
 
   test('lesson ending during open revokes the fresh principal', async () => {

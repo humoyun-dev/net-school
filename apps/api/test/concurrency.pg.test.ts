@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { commandTargets, controlLeases, events, lessons, outbox, remoteSessions, sites } from '../src/db/schema.ts';
 import { EventLog } from '../src/modules/events/event-log.ts';
@@ -186,5 +186,50 @@ describe.skipIf(!realPg)('concurrency on real PostgreSQL', () => {
     expect(await app.db.db.select().from(remoteSessions)).toEqual([expect.objectContaining({ id: winner.id })]);
     expect(await app.db.db.select().from(controlLeases)).toEqual([expect.objectContaining({ sessionId: winner.id })]);
     expect(remote.opened.map((o) => o.sessionId)).toEqual([winner.id]);
+  });
+
+  // Ochish bog'lanishni tranzaksiyadan oldin o'qiydi; parallel unbind qaysi tartibda commit bo'lmasin, bog'lanmagan
+  // node'da yopilmagan sessiya qolmasligi kerak (yo ochish 409, yo unbind sessiyani device_left bilan yopadi).
+  test('an unbind racing an open never leaves a live session on the unbound node', async () => {
+    const adminId = await seedUser(app.db.db, orgId, 'admin1', [{ role: 'school_admin', siteId }]);
+    const admin = await loginAs(app, 'admin1');
+    const lesson = (await startLesson(app, teacher, roomId)).json;
+    mesh.beforeList = async () => {
+      await sleep(Math.random() * 5);
+    };
+    try {
+      for (let round = 0; round < 10; round++) {
+        if (round > 0) {
+          await seedBinding(app.db.db, {
+            orgId,
+            siteId,
+            deviceId: device.id,
+            meshDomainId: 'dom-a',
+            meshNodeId: 'node-1',
+            boundBy: adminId,
+          });
+        }
+        const [opened, unbound] = await Promise.all([
+          app.request('POST', `/api/v1/lessons/${lesson.id}/remote-sessions`, {
+            body: { deviceId: device.id, mode: 'view' },
+            cookie: teacher,
+            headers: idem(),
+          }),
+          sleep(Math.random() * 5).then(() =>
+            app.request('DELETE', `/api/v1/devices/${device.id}/mesh-binding`, { cookie: admin }),
+          ),
+        ]);
+        expect(unbound.status).toBe(204);
+        expect([201, 409]).toContain(opened.status);
+        if (opened.status === 409) expect(opened.json.error.code).toBe('capability_unavailable');
+        const live = await app.db.db
+          .select()
+          .from(remoteSessions)
+          .where(and(eq(remoteSessions.deviceId, device.id), ne(remoteSessions.status, 'closed')));
+        expect(live).toEqual([]);
+      }
+    } finally {
+      mesh.beforeList = null;
+    }
   });
 });
