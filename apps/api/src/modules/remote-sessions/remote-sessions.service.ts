@@ -157,6 +157,11 @@ export class RemoteSessionsService {
       if (!(await this.#isMember(tx, lesson.id, input.deviceId, true))) {
         throw new ApiError('conflict', 'Device has left the lesson');
       }
+      // Bog'lanish tranzaksiyadan oldin o'qilgan: commit'gacha qulflab qayta tekshiriladi. Oraliqda unbind bo'lsa
+      // sessiya bog'lanmagan node'da ochilmaydi; keyin kelgan unbind esa shu sessiyani ko'rib yopadi.
+      if (!(await this.#stillBound(tx, input.deviceId, device))) {
+        throw new ApiError('capability_unavailable', 'Device is not bound to MeshCentral');
+      }
       const at = new Date(this.now());
       const [session] = await tx
         .insert(remoteSessions)
@@ -334,6 +339,22 @@ export class RemoteSessionsService {
         ),
       );
     const rows = lock ? await query.for('share', { of: lessonDevices }) : await query;
+    return rows.length > 0;
+  }
+
+  async #stillBound(tx: Db, deviceId: string, ref: UpstreamDeviceRef): Promise<boolean> {
+    const rows = await tx
+      .select({ deviceId: meshBindings.deviceId })
+      .from(meshBindings)
+      .where(
+        and(
+          eq(meshBindings.deviceId, deviceId),
+          eq(meshBindings.meshInstanceId, ref.meshInstanceId),
+          eq(meshBindings.meshDomainId, ref.meshDomainId),
+          eq(meshBindings.meshNodeId, ref.meshNodeId),
+        ),
+      )
+      .for('share');
     return rows.length > 0;
   }
 
