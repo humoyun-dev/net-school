@@ -168,15 +168,16 @@ describe('thumbnail ingest', () => {
     expect(await attempt(signedHeaders(device))).toEqual({ status: 401 });
   });
 
-  test('an upgrade to another path is refused with 400', async () => {
+  // Umumiy upgrade router: noma'lum WS yo'li 404 (avval har yo'l 400 bilan yopilardi — ADR 0009 keyingi ishlar).
+  test('an upgrade to another path is refused with 404', async () => {
     expect(await attempt(signedHeaders(device, '/api/v1/device/other'), '/api/v1/device/other')).toEqual({
-      status: 400,
+      status: 404,
     });
   });
 
   test.each([
     ['unsigned', PATH, 401],
-    ['another path', '/api/v1/device/other', 400],
+    ['another path', '/api/v1/device/other', 404],
   ])('a refused %s upgrade does not keep the socket open', async (_name, path, status) => {
     const server: Server = app.get<HttpAdapterHost>(HttpAdapterHost).httpAdapter.getHttpServer();
     const openConnections = () => new Promise<number>((resolve) => server.getConnections((_e, n) => resolve(n)));

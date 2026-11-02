@@ -5,3 +5,7 @@ export const THUMBNAIL_SERVER_MIN_INTERVAL_MS = 400; // Hub bundan tez kelgan ka
 export const THUMBNAIL_MAX_WIDTH = 480;
 export const THUMBNAIL_MAX_BYTES = 262_144;
 export const THUMBNAIL_TTL_MS = 10_000; // Hub har qurilmaning oxirgi kadrini shuncha saqlaydi
+
+// O'qituvchi oqimi (P1f): sekin klientda bufer shundan oshsa kadr tashlanadi; sessiya va dars shu oraliqda qayta tekshiriladi.
+export const THUMBNAIL_STREAM_MAX_BUFFER = 1_048_576;
+export const THUMBNAIL_STREAM_RECHECK_MS = 30_000;
