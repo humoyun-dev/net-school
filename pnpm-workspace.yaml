@@ -4,3 +4,4 @@ packages:
   - "tests/*"
 allowBuilds:
   esbuild: true
+  electron: true
