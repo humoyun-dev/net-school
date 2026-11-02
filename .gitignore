@@ -18,3 +18,6 @@ dist/
 infra/compose/secrets/
 infra/compose/.env
 !.env.example
+
+# MeshAgent binary'lari (pnpm meshcentral:agents) — repoga kirmaydi
+infra/meshcentral/agent-cache/

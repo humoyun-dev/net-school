@@ -4,6 +4,35 @@
   "packageVersion": "1.3.1",
   "node": ">=20.0.0",
   "imageDigest": null,
-  "agentManifest": null,
+  "agentManifest": {
+    "source": "infra/meshcentral/upstream/agents/agent-defaults.json (pinned GitHub releases, sha384)",
+    "fetch": "pnpm meshcentral:agents",
+    "releases": [
+      {
+        "repository": "Ylianst/MeshAgent",
+        "tag": "legacy-1.2.6",
+        "files": 30
+      },
+      {
+        "repository": "Ylianst/MeshCentralAndroidAgent",
+        "tag": "legacy-1.2.6",
+        "files": 1
+      }
+    ],
+    "windows": [
+      {
+        "id": 4,
+        "name": "MeshService64.exe",
+        "sha384": "319d3ad514173be85838bf7ba5995e11671d8f8e6df8e51b74c8304c3caf70e754e69db74b1baec1a6430ece213ab293",
+        "bytes": 3444736
+      },
+      {
+        "id": 43,
+        "name": "MeshServiceARM64.exe",
+        "sha384": "08a3372068b5f636c89b909d0dac1d4fafac7ff8bbe55a78b27593dae1606ceef69bfa5078ece112915272b96f8c46bb",
+        "bytes": 3637760
+      }
+    ]
+  },
   "note": "Pilotdan keyin sinovdan o'tgan release/commit, image digest va agent manifest shu yerga yoziladi."
 }
