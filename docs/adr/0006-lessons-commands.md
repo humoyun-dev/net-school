@@ -28,7 +28,7 @@ Teacher xonada dars ochib-yopadi, darsdagi qurilmalarga typed buyruq yuboradi va
 - Control lease va `409 control_busy`, remote session'ni darsga ulash — P1d'da bajarildi ([ADR 0008](0008-remote-sessions.md)).
 - Power/reboot buyruqlari (MeshCentral orqali) va `unknown` natija — keyingi bosqich.
 - Help request, chat, guruhlar, dars davomida qurilma qo'shish/olib tashlash.
-- Companion klienti (overlay'ni ko'rsatish, lease'ni hisoblash) — P1e; teacher paneli — P1f.
+- Companion klienti (overlay'ni ko'rsatish, lease'ni hisoblash) — P1e'da bajarildi ([ADR 0009](0009-companion.md)); teacher paneli — P1f.
 
 ## Ma'lum cheklovlar
 
