@@ -1,21 +1,57 @@
-// Companion'ni yig'adi. Hamma narsa (zod, workspace paketlari) bitta faylga kiradi, shuning uchun `enroll`
-// maktab kompyuterida node_modules'siz ishlaydi; faqat Electron tashqarida qoladi.
+// Companion'ni yig'adi. Hamma narsa (zod, ws, workspace paketlari) fayllarga kiradi, shuning uchun `enroll` va ilova
+// node_modules'siz ishlaydi; faqat Electron va ws'ning ixtiyoriy native qo'shimchalari tashqarida qoladi.
+import { cpSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const dist = join(root, 'dist');
+const tsconfig = join(root, 'tsconfig.json');
+const common = { bundle: true, sourcemap: true, tsconfig, logLevel: 'warning' };
+const external = ['electron', 'bufferutil', 'utf-8-validate'];
 
+// CLI va asosiy jarayon: Node 24 (Electron 45 ichidagi Node ham 24), ESM.
 await build({
-  entryPoints: { enroll: join(root, 'src/cli/enroll.ts') },
-  outdir: join(root, 'dist'),
+  ...common,
+  entryPoints: { enroll: join(root, 'src/cli/enroll.ts'), main: join(root, 'src/main/main.ts') },
+  outdir: dist,
   outExtension: { '.js': '.mjs' },
-  bundle: true,
   platform: 'node',
   target: 'node24',
   format: 'esm',
-  sourcemap: true,
-  tsconfig: join(root, 'tsconfig.json'),
-  external: ['electron'],
-  logLevel: 'warning',
+  external,
+  // Bundle ichidagi CJS paketlar (ws) uchun `require`.
+  banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
 });
+
+// Preload sandbox'da ishlaydi: CommonJS, faqat `electron`ni require qiladi.
+await build({
+  ...common,
+  entryPoints: { preload: join(root, 'src/preload/preload.ts') },
+  outdir: dist,
+  outExtension: { '.js': '.cjs' },
+  platform: 'node',
+  target: 'node24',
+  format: 'cjs',
+  external,
+});
+
+// Renderer sahifalari: brauzer konteksti, har biri alohida IIFE (CSP: script-src 'self').
+const rendererSrc = join(root, 'src/renderer');
+const rendererOut = join(dist, 'renderer');
+const pages = readdirSync(rendererSrc)
+  .filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts'))
+  .map((f) => f.replace(/\.ts$/, ''));
+await build({
+  ...common,
+  entryPoints: Object.fromEntries(pages.map((p) => [p, join(rendererSrc, `${p}.ts`)])),
+  outdir: rendererOut,
+  platform: 'browser',
+  target: 'chrome140',
+  format: 'esm',
+});
+mkdirSync(rendererOut, { recursive: true });
+for (const f of readdirSync(rendererSrc)) {
+  if (f.endsWith('.html') || f.endsWith('.css')) cpSync(join(rendererSrc, f), join(rendererOut, f));
+}

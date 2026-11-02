@@ -3,9 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "dist/main.mjs",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "enroll": "node dist/enroll.mjs"
+    "enroll": "node dist/enroll.mjs",
+    "start": "electron ."
   },
   "dependencies": {
     "@netschool/contracts": "workspace:*",

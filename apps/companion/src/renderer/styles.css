@@ -1,0 +1,103 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #14181f;
+  color: #e8edf5;
+}
+main {
+  padding: 20px;
+}
+h1 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+p {
+  margin: 6px 0;
+  line-height: 1.4;
+}
+.muted {
+  color: #9aa7b8;
+  font-size: 13px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #6b7787;
+  flex: none;
+}
+.dot.online {
+  background: #3fb950;
+}
+.dot.offline,
+.dot.connecting {
+  background: #d29922;
+}
+.dot.tls_error,
+.dot.rejected {
+  background: #f85149;
+}
+button {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #3a4658;
+  background: #1f2735;
+  color: inherit;
+  cursor: pointer;
+}
+button:hover {
+  background: #283246;
+}
+button.primary {
+  background: #2f6feb;
+  border-color: #2f6feb;
+}
+.hidden {
+  display: none;
+}
+body.overlay {
+  background: #0b0e13;
+  cursor: default;
+  user-select: none;
+}
+body.overlay main {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+}
+body.overlay h1 {
+  font-size: 34px;
+  max-width: 900px;
+}
+body.overlay .teacher {
+  font-size: 24px;
+  max-width: 800px;
+  color: #cfd8e6;
+}
+body.message main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+body.message .text {
+  font-size: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
