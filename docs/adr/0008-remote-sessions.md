@@ -50,6 +50,12 @@ Teacher o'z darsidagi qurilmaga `view` yoki `control` remote desktop sessiyasini
 - Outbox batch'i 100 qatorgacha: hammasi 10 s osilsa (~70 s > 30 s lease) oxirgi qatorlar qayta claim qilinadi va `attempts` oshadi. Crash sababli to'xtagan (10-claim lease'i o'tgan) qator log qilinmaydi — DB'da `attempts = 10` bilan qoladi.
 - Contract testlar MeshCentral'ning birinchi login'idagi startup poygasiga sezgir (ADR 0003): reconciliation retry testi byudjeti vaqtga bog'liq, CI'da flake xavfi bor.
 - CI `compose-smoke` (healthz `mesh: "ok"`) push'dan keyin tasdiqlanadi; lokal tekshirilgan.
+- `apps/api/test/remote-gateway.test.ts` (`issued ticket redeems once to the viewer entry`) to'liq suite yukida (PGlite) 5 s limitga yetishi mumkin: ilova (RSA kalit yaratish, migratsiyalar) test ichida ishga tushadi; alohida ishga tushirilganda o'tadi. Tuzatilmagan.
+
+## Merge'dan oldingi tuzatishlar (2026-11-02)
+
+- **Unbind va ochish poygasi.** Ochish `mesh_bindings`ni tranzaksiyadan oldin o'qiydi (agent holati tranzaksiyadan tashqarida so'raladi); oraliqda unbind commit bo'lsa sessiya bog'lanmagan node'da ochilardi. Endi tranzaksiya ichida o'sha bog'lanish `FOR SHARE` bilan qayta tekshiriladi (yuqoridagi "Ochish darvozasi tartibi"). Testlar: `unbinding during the agent check does not open a session on the unbound node` (PGlite) va `an unbind racing an open never leaves a live session on the unbound node` (real PostgreSQL; tuzatishsiz `active` sessiya qolishi tasdiqlangan).
+- **GitGuardian `Generic Password`.** PR #7'da `infra/compose/test/compose.test.ts`dagi sinov fixture'i (`'s3cret'`, `19d5a81a fix(infra): trust the gateway by a fixed api address`) topildi — haqiqiy sir emas. Fixture endi har ishga tushishda tasodifiy yaratiladi (`98a0ae86`). Eski commit tarixda qoladi (tarix qayta yozilmadi), shuning uchun GitGuardian incident'i (39197763) dashboard'da egasi tomonidan false positive deb belgilanadi.
 
 ## Dalillar
 
