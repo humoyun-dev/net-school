@@ -10,7 +10,7 @@ let bare: TestApp;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'web-dist-'));
-  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>NetSchool</title>');
+  writeFileSync(join(dir, 'index.html'), '<!doctype html><head><title>NetSchool</title></head>');
   mkdirSync(join(dir, 'assets'));
   writeFileSync(join(dir, 'assets', 'app-abc123.js'), 'console.log(1)');
   writeFileSync(join(tmpdir(), 'outside-secret.txt'), 'secret');
@@ -23,6 +23,8 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+const cspWithStyle = (style: string) =>
+  `default-src 'self'; script-src 'self'; style-src ${style}; img-src 'self' blob: data:; connect-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'`;
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'";
 
@@ -34,10 +36,21 @@ describe('static web panel', () => {
       expect(res.headers.get('content-type')).toMatch(/text\/html/);
       expect(res.bytes.toString()).toContain('<title>NetSchool</title>');
       expect(res.headers.get('cache-control')).toBe('no-store');
-      expect(res.headers.get('content-security-policy')).toBe(CSP);
+      // Radix (react-remove-scroll) o'z <style> tegini shu nonce bilan qo'shadi; boshqa inline style yo'q.
+      const nonce = /<meta name="csp-nonce" content="([A-Za-z0-9+/=]{24})">/.exec(res.bytes.toString())?.[1];
+      expect(nonce, path).toBeDefined();
+      expect(res.headers.get('content-security-policy')).toBe(cspWithStyle(`'self' 'nonce-${nonce}'`));
       expect(res.headers.get('x-content-type-options')).toBe('nosniff');
       expect(res.headers.get('referrer-policy')).toBe('no-referrer');
     }
+  });
+
+  test('every page response carries a fresh style nonce', async () => {
+    const nonceOf = async () => (await app.request('GET', '/')).bytes.toString().match(/content="([^"]+)"/)?.[1];
+    const a = await nonceOf();
+    const b = await nonceOf();
+    expect(a).toBeDefined();
+    expect(a).not.toBe(b);
   });
 
   test('serves hashed assets as immutable', async () => {

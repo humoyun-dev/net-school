@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -6,11 +7,11 @@ import express, { type NextFunction, type Request, type Response } from 'express
 // API'ga tegishli yo'llar: SPA ularni hech qachon yutmaydi (JSON 404 qoladi).
 const API_PREFIX = /^\/api(\/|$)/;
 
-export function webCsp(gatewayOrigin: string | null): string {
+export function webCsp(gatewayOrigin: string | null, styleNonce?: string): string {
   return [
     "default-src 'self'",
     "script-src 'self'",
-    "style-src 'self'",
+    styleNonce ? `style-src 'self' 'nonce-${styleNonce}'` : "style-src 'self'",
     "img-src 'self' blob: data:",
     // 'self' same-origin wss:// ni ham qamraydi (miniatura oqimi).
     "connect-src 'self'",
@@ -26,10 +27,10 @@ export function webCsp(gatewayOrigin: string | null): string {
 // PUBLIC_ORIGIN'ga aynan teng, CORS yo'q. Faqat GET/HEAD; fayl topilmasa index.html (client-side routing).
 export function mountStaticWeb(app: NestExpressApplication, opts: { dir: string; gatewayOrigin: string | null }): void {
   const root = resolve(opts.dir);
-  const index = readFileSync(join(root, 'index.html'));
+  const index = readFileSync(join(root, 'index.html'), 'utf8');
   const csp = webCsp(opts.gatewayOrigin);
-  const security = (res: Response) => {
-    res.setHeader('content-security-policy', csp);
+  const security = (res: Response, policy = csp) => {
+    res.setHeader('content-security-policy', policy);
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'no-referrer');
   };
@@ -59,8 +60,10 @@ export function mountStaticWeb(app: NestExpressApplication, opts: { dir: string;
       });
     }
     // Boshqa har yo'l — SPA. Fayl tizimiga murojaat yo'q, shuning uchun traversal mumkin emas.
-    security(res);
+    // Har javobga yangi nonce: UI kutubxonasi (Radix scroll lock) qo'shadigan <style> faqat shu nonce bilan o'tadi.
+    const nonce = randomBytes(16).toString('base64');
+    security(res, webCsp(opts.gatewayOrigin, nonce));
     res.setHeader('cache-control', 'no-store');
-    res.type('html').send(index);
+    res.type('html').send(index.replace('<head>', `<head><meta name="csp-nonce" content="${nonce}">`));
   });
 }
