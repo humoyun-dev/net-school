@@ -14,11 +14,16 @@ export function CommandBar(props: { lessonId: string; selected: string[]; onClea
   const targets = props.selected.length > 0 ? { targetDeviceIds: props.selected } : {};
   const issue = (body: IssueCommandRequest) => (key: string) =>
     api.send('POST', `/api/v1/lessons/${props.lessonId}/commands`, body, commandSchema, { idempotencyKey: key });
-  const message = useIntent(issue({ type: 'message.show', payload: { text: text.trim() }, ...targets }));
-  const lock = useIntent(
-    issue({ type: 'overlay.lock', payload: lockText.trim() ? { message: lockText.trim() } : {}, ...targets }),
-  );
-  const unlock = useIntent(issue({ type: 'overlay.unlock', payload: {}, ...targets }));
+  const messageBody: IssueCommandRequest = { type: 'message.show', payload: { text: text.trim() }, ...targets };
+  const lockBody: IssueCommandRequest = {
+    type: 'overlay.lock',
+    payload: lockText.trim() ? { message: lockText.trim() } : {},
+    ...targets,
+  };
+  const unlockBody: IssueCommandRequest = { type: 'overlay.unlock', payload: {}, ...targets };
+  const message = useIntent(issue(messageBody));
+  const lock = useIntent(issue(lockBody));
+  const unlock = useIntent(issue(unlockBody));
   const error = message.error ?? lock.error ?? unlock.error;
   return (
     <section className="card command-bar">
@@ -39,7 +44,7 @@ export function CommandBar(props: { lessonId: string; selected: string[]; onClea
           type="button"
           disabled={!text.trim() || message.pending}
           onClick={async () => {
-            if (await message.run()) setText('');
+            if (await message.run(JSON.stringify(messageBody))) setText('');
           }}
         >
           {t('cmd.send')}
@@ -50,10 +55,20 @@ export function CommandBar(props: { lessonId: string; selected: string[]; onClea
           {t('cmd.lockMessage')}
           <input value={lockText} maxLength={200} onChange={(e) => setLockText(e.target.value)} />
         </label>
-        <button type="button" className="danger" disabled={lock.pending} onClick={() => void lock.run()}>
+        <button
+          type="button"
+          className="danger"
+          disabled={lock.pending}
+          onClick={() => void lock.run(JSON.stringify(lockBody))}
+        >
           {t('cmd.lock')}
         </button>
-        <button type="button" className="secondary" disabled={unlock.pending} onClick={() => void unlock.run()}>
+        <button
+          type="button"
+          className="secondary"
+          disabled={unlock.pending}
+          onClick={() => void unlock.run(JSON.stringify(unlockBody))}
+        >
           {t('cmd.unlock')}
         </button>
       </div>

@@ -3,7 +3,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { useApi } from '../api/api-context.tsx';
 import { useIntent } from '../api/intent.ts';
-import { hasRole, useMe } from '../auth/session.tsx';
+import { useMe } from '../auth/session.tsx';
 import { useErrorText, useT } from '../i18n/i18n.tsx';
 import { CommandBar } from './command-bar.tsx';
 import { CommandResults } from './command-results.tsx';
@@ -46,7 +46,11 @@ export function RoomPage(props: {
   const members = useMemo(() => new Set(lesson?.deviceIds ?? []), [lesson?.deviceIds]);
   const membersRef = useRef(members);
   membersRef.current = members;
-  const canCommand = !!lesson && (lesson.teacherUserId === me.user.id || hasRole(me, ['school_admin']));
+  // Server qoidasi bilan bir xil: dars egasi yoki shu site'ning (yoki butun tashkilotning) school_admin'i.
+  const canCommand =
+    !!lesson &&
+    (lesson.teacherUserId === me.user.id ||
+      me.assignments.some((a) => a.role === 'school_admin' && (a.siteId === null || a.siteId === lesson.siteId)));
   const createFeed = props.createFeed ?? defaultFeed;
 
   const lessonId = lesson?.id ?? null;

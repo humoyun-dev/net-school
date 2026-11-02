@@ -83,6 +83,21 @@ Tillar: uz, ru, en.
 - **Bir vaqtda bitta viewer:** bir brauzerda faqat bitta viewer paneli ochiladi (gateway cookie'si bitta, ADR 0003 `superseded`).
 - **Miniatura e2e** kadrni `ThumbnailStore`ga to'g'ridan-to'g'ri qo'yadi. Qurilma ingest WS'i API testlarida va Companion e2e'da qamralgan.
 
+- **Yakuniy review'dan keyingi tuzatishlar:**
+  - Viewer ochilayotganda yopilsa sessiya darhol o'chiriladi va yangilanmaydi. Controller avlod hisoblagichiga ega, har mount o'z controller'iga ega.
+  - `/password`da noto'g'ri joriy parol sahifada xato ko'rsatadi, loginga otmaydi (`noAuthRedirect`).
+  - Miniatura oqimi 5 marta ketma-ket bir marta ham ochilmasa to'xtaydi, audit to'lmaydi.
+  - Buyruq tugmalari faqat dars egasiga yoki shu site'ning admin'iga ko'rinadi.
+  - So'rov tanasi o'zgarsa `Idempotency-Key` yangilanadi.
+- **Qoldirilgan mayda ishlar:**
+  - oqim recheck'i `mustChangePassword`ni tekshirmaydi va recheck'lar ustma-ust tushishi mumkin;
+  - quvvat yuborishda preview qiymatlari o'rniga forma holati ishlatiladi (server son tekshiruvi ushlaydi);
+  - ko'p upstream CSP header'i bitta siyosatga birlashtiriladi;
+  - `ActionDetail` 403/404 da va kelajakdagi `scheduled` amalda har 2 s so'raydi;
+  - static xato callback'ida `headersSent` tekshiruvi yo'q, noma'lum yo'llar (`/favicon.ico`) `index.html` oladi;
+  - sanalar panel tilida emas, brauzer tilida formatlanadi;
+  - feed testida `4410` tekshirilmaydi.
+
 ## Dalillar
 
 - **Server:**

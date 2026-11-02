@@ -22,7 +22,7 @@ export interface Api {
     path: string,
     body: unknown,
     schema: ZodType<T> | null,
-    opts?: { idempotencyKey?: string; signal?: AbortSignal; keepalive?: boolean },
+    opts?: { idempotencyKey?: string; signal?: AbortSignal; keepalive?: boolean; noAuthRedirect?: boolean },
   ): Promise<T>;
 }
 
@@ -33,7 +33,7 @@ export function createApi(fetchImpl: typeof fetch, onUnauthenticated: () => void
     path: string,
     body: unknown,
     schema: ZodType<T> | null,
-    opts: { idempotencyKey?: string; signal?: AbortSignal; keepalive?: boolean } = {},
+    opts: { idempotencyKey?: string; signal?: AbortSignal; keepalive?: boolean; noAuthRedirect?: boolean } = {},
   ): Promise<T> {
     const headers = new Headers({ accept: 'application/json' });
     if (body !== undefined) headers.set('content-type', 'application/json');
@@ -58,7 +58,8 @@ export function createApi(fetchImpl: typeof fetch, onUnauthenticated: () => void
       } catch {
         // JSON bo'lmagan xato (proksi, 502) — kod internal qoladi.
       }
-      if (res.status === 401) onUnauthenticated();
+      // noAuthRedirect: 401 sahifaning o'z xatosi (masalan noto'g'ri joriy parol), sessiya tugagani emas.
+      if (res.status === 401 && !opts.noAuthRedirect) onUnauthenticated();
       if (code === 'password_change_required') onPasswordChange();
       throw new ApiFailure(res.status, code, message, correlationId);
     }

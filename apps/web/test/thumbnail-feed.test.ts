@@ -92,4 +92,28 @@ describe('thumbnail feed', () => {
     expect(FakeSocket.last).toBe(first);
     feed.close();
   });
+  test('a stream refused before it ever opens stops after a few attempts', async () => {
+    const urls = fakeUrl();
+    const events: string[] = [];
+    let created = 0;
+    class Counting extends FakeSocket {
+      constructor(url: string) {
+        super(url);
+        created += 1;
+        // Upgrade rad etildi: brauzer faqat 1006 ko'radi, onopen chaqirilmaydi.
+        setTimeout(() => this.onclose?.({ code: 1006 }), 0);
+      }
+    }
+    const feed = new ThumbnailFeed('wss://hub/x', () => {}, {
+      WebSocket: Counting as unknown as typeof WebSocket,
+      URL: urls,
+      accept: () => true,
+      onEnded: () => events.push('gave-up'),
+      retryMs: 1,
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(created).toBe(5);
+    expect(events).toEqual(['gave-up']);
+    feed.close();
+  });
 });

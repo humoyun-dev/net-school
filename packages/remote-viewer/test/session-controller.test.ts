@@ -186,4 +186,28 @@ describe('remote session controller', () => {
     expect(timer.running).toBe(false);
     expect(states.at(-1)).toEqual({ kind: 'closed', reason: 'closed' });
   });
+  test('closing while the session is still opening deletes it and never starts renewal', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { api, calls } = fakeApi({
+      openSession: async (lessonId, deviceId, mode) => {
+        await gate;
+        calls.push(`open ${lessonId} ${deviceId} ${mode}`);
+        return session({ mode });
+      },
+    });
+    const timer = fakeTimer();
+    const c = new RemoteSessionController({ api, timer, idempotencyKey: () => 'key-12345678' });
+    const states = track(c);
+    const opening = c.open(id(2), id(3), 'control');
+    await c.close();
+    release();
+    await opening;
+    expect(timer.running).toBe(false);
+    expect(calls).toContain(`close ${id(1)}`);
+    expect(calls.some((x) => x.startsWith('ticket'))).toBe(false);
+    expect(states.at(-1)).toEqual({ kind: 'closed', reason: 'closed' });
+  });
 });

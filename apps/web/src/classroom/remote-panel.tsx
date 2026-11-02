@@ -8,7 +8,7 @@ import {
   type ViewerState,
   workerRenewTimer,
 } from '@netschool/remote-viewer';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { useApi } from '../api/api-context.tsx';
 import { type Api, ApiFailure } from '../api/client.ts';
 import { useT } from '../i18n/i18n.tsx';
@@ -62,16 +62,14 @@ export function RemotePanel(props: {
   const api = useApi();
   const t = useT();
   const [state, setState] = useState<ViewerState>({ kind: 'opening' });
-  const controller = useMemo(
-    () =>
-      new RemoteSessionController({
-        api: viewerApi(api),
-        timer: (props.timer ?? defaultTimer)(),
-        idempotencyKey: () => crypto.randomUUID(),
-      }),
-    [api, props.timer],
-  );
+  const makeTimer = props.timer ?? defaultTimer;
+  // Har mount o'z controller'i (StrictMode'da ikki marta mount bo'lsa ham birinchisi to'liq yopiladi).
   useEffect(() => {
+    const controller = new RemoteSessionController({
+      api: viewerApi(api),
+      timer: makeTimer(),
+      idempotencyKey: () => crypto.randomUUID(),
+    });
     const off = controller.subscribe(setState);
     void controller.open(props.lessonId, props.deviceId, props.mode);
     // Sahifadan chiqilganda ham sessiya yopiladi (keepalive DELETE).
@@ -82,7 +80,7 @@ export function RemotePanel(props: {
       removeEventListener('pagehide', onHide);
       void controller.close();
     };
-  }, [controller, props.lessonId, props.deviceId, props.mode]);
+  }, [api, makeTimer, props.lessonId, props.deviceId, props.mode]);
 
   return (
     <div className="remote-backdrop" role="dialog" aria-label={t('remote.title', { name: props.label })}>

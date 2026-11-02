@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useApi } from '../api/api-context.tsx';
+import { ApiFailure } from '../api/client.ts';
 import { useErrorText, useT } from '../i18n/i18n.tsx';
 
 export function PasswordPage(props: { onChanged: () => void | Promise<void> }) {
@@ -19,11 +20,11 @@ export function PasswordPage(props: { onChanged: () => void | Promise<void> }) {
       return;
     }
     try {
-      await api.send('POST', '/api/v1/auth/password', { currentPassword, newPassword }, null);
+      await api.send('POST', '/api/v1/auth/password', { currentPassword, newPassword }, null, { noAuthRedirect: true });
       await props.onChanged();
       navigate('/', { replace: true });
     } catch (err) {
-      setError(errorText(err));
+      setError(err instanceof ApiFailure && err.status === 401 ? t('password.wrongCurrent') : errorText(err));
     }
   }
 
