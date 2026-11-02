@@ -75,6 +75,18 @@ describe('device identity', () => {
     expect(stamps).toEqual([1_000, 1_001, 1_002]);
   });
 
+  test('syncClock adopts the hub time only when the skew exceeds five seconds', () => {
+    const signer = new RequestSigner(identity(), () => 1_000_000);
+    signer.syncClock(1_000_000 + 120_000);
+    expect(signer.sign('GET', '/x', Buffer.alloc(0))['x-ns-timestamp']).toBe('1120000');
+    // Soat to'g'rilangach (farq ≤ 5 s) eski offset qolmaydi.
+    signer.syncClock(1_000_000 + 4_000);
+    expect(signer.sign('GET', '/x', Buffer.alloc(0))['x-ns-timestamp']).toBe('1120001');
+    const fresh = new RequestSigner(identity(), () => 1_000_000);
+    fresh.syncClock(1_000_000 - 60_000);
+    expect(fresh.sign('GET', '/x', Buffer.alloc(0))['x-ns-timestamp']).toBe('940000');
+  });
+
   test('clock offset shifts signed timestamps', () => {
     let now = 5_000;
     const signer = new RequestSigner(identity(), () => now);
