@@ -1,17 +1,29 @@
+import { createServer, type Server } from 'node:https';
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { type GatewayStack, startGatewayStack } from './harness/gateway.ts';
-import { type MeshCentralInstance, startMeshCentral } from './harness/meshcentral.ts';
+import { freePort, type MeshCentralInstance, startMeshCentral } from './harness/meshcentral.ts';
 
 let mc: MeshCentralInstance;
 let stack: GatewayStack;
 let browser: Browser | undefined;
 let context: BrowserContext | undefined;
 let page: Page | undefined;
+let panel: Server | undefined;
+let panelOrigin: string;
 
 beforeAll(async () => {
   mc = await startMeshCentral();
-  stack = await startGatewayStack(mc);
+  // O'qituvchi paneli o'rnida: boshqa portdagi (same-site) sahifa viewer'ni iframe'da ochadi.
+  const panelPort = await freePort();
+  panelOrigin = `https://localhost:${panelPort}`;
+  stack = await startGatewayStack(mc, { frameAncestor: panelOrigin });
+  panel = createServer({ key: stack.tls.key, cert: stack.tls.cert }, (req, res) => {
+    const src = new URL(req.url ?? '/', panelOrigin).searchParams.get('src') ?? '';
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<!doctype html><iframe id="viewer" width="1024" height="768" src="${src.replace(/"/g, '&quot;')}"></iframe>`);
+  });
+  await new Promise<void>((resolve) => panel?.listen(panelPort, '127.0.0.1', resolve));
   // TLS tekshiruvi yoqiq: faqat gateway sinov sertifikati SPKI pin orqali ishoniladi.
   browser = await chromium.launch({ args: [`--ignore-certificate-errors-spki-list=${stack.spki}`] });
   context = await browser.newContext();
@@ -22,6 +34,7 @@ afterAll(async () => {
   await context?.close().catch(() => {});
   await browser?.close().catch(() => {});
   await stack?.broker.close('s-browser').catch(() => {});
+  await new Promise<void>((resolve) => (panel ? panel.close(() => resolve()) : resolve()));
   await stack?.stop();
   await mc?.stop();
 });
@@ -42,7 +55,8 @@ describe('upstream viewer in a real browser', () => {
     expect(entryUrl.searchParams.get('viewmode')).toBe('11');
     expect(entry?.request().redirectedFrom()?.url()).toContain('/rs/redeem');
     expect(entry?.status()).toBe(200);
-    expect(entry?.headers()['x-frame-options']?.toLowerCase()).toBe('sameorigin');
+    expect(entry?.headers()['x-frame-options']).toBeUndefined();
+    expect(entry?.headers()['content-security-policy']).toContain(`frame-ancestors ${panelOrigin}`);
 
     try {
       await expect.poll(() => tab.getByText('pc-01').count(), { timeout: 30_000 }).toBeGreaterThan(0);
@@ -61,5 +75,22 @@ describe('upstream viewer in a real browser', () => {
     ]);
     expect(handles).toHaveLength(2);
     for (const handle of handles) expect(handle.startsWith('nsh_')).toBe(true);
+  });
+  test('the viewer loads inside an iframe on the panel origin', async () => {
+    const jar = context;
+    if (!jar) throw new Error('browser not started');
+    const tab = await jar.newPage();
+    try {
+      await stack.broker.close('s-browser').catch(() => {});
+      const device = await stack.device('pc-02');
+      const { ticket } = await stack.broker.open({ sessionId: 's-frame', actorId: 'u-1', device, mode: 'view' });
+      const src = `${stack.gatewayOrigin}/rs/redeem?ticket=${encodeURIComponent(ticket)}`;
+      await tab.goto(`${panelOrigin}/?src=${encodeURIComponent(src)}`);
+      const frame = tab.frameLocator('#viewer');
+      await expect.poll(() => frame.getByText('pc-02').count(), { timeout: 30_000 }).toBeGreaterThan(0);
+    } finally {
+      await tab.close();
+      await stack.broker.close('s-frame').catch(() => {});
+    }
   });
 });
