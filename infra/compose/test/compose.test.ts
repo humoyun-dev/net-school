@@ -199,9 +199,14 @@ describe('meshcentral config rendering', () => {
       files: r.files.length,
     }));
     expect(lock.agentManifest.releases).toEqual(pinned);
-    const all = defaults.releases.flatMap((r: { files: { filename: string; sha384: string; size: number }[] }) => r.files);
+    const all = defaults.releases.flatMap(
+      (r: { files: { filename: string; sha384: string; size: number }[] }) => r.files,
+    );
     for (const f of lock.agentManifest.windows) {
-      expect(all.find((x: { filename: string }) => x.filename === f.name)).toMatchObject({ sha384: f.sha384, size: f.bytes });
+      expect(all.find((x: { filename: string }) => x.filename === f.name)).toMatchObject({
+        sha384: f.sha384,
+        size: f.bytes,
+      });
     }
     expect(lock.agentManifest.windows.map((f: { id: number }) => f.id)).toEqual([4, 43]);
   });
