@@ -10,6 +10,21 @@ node apps/companion/node_modules/electron/install.js   # Electron binary (bir ma
 pnpm --filter @netschool/companion build               # dist/main.cjs, preload.cjs, renderer/, enroll.mjs
 ```
 
+## Windows uchun portable paket (P0c, installer'siz)
+
+```bash
+pnpm --filter @netschool/companion pack:win --arch x64     # yoki arm64 (Apple Silicon'dagi Windows VM)
+# → apps/companion/out/netschool-companion-win32-<arch>.zip
+```
+
+Zip tarkibi:
+- Electron 45.2.1 (`@electron/get`, SHASUMS bilan tekshiriladi);
+- `NetSchool Companion.exe`;
+- oddiy (test emas) build `resources/app/` ichida;
+- `enroll.cmd` (Electron'ni Node sifatida ishlatadi) va `start.cmd`.
+
+Test build'ni paketlash rad etiladi.
+
 ## Ro'yxatdan o'tkazish (IT admin, har kompyuterda bir marta)
 
 1. Hub'da enrollment token yarating (`POST /api/v1/enrollments`, site admin yoki IT).
