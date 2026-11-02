@@ -64,6 +64,13 @@
       "when": 1793360649886,
       "tag": "0008_remote_sessions_superseded",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793597898298,
+      "tag": "0009_help_requests",
+      "breakpoints": true
     }
   ]
 }

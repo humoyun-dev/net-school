@@ -11,6 +11,7 @@ import { DB, type Db } from '../../db/client.ts';
 import { commands, commandTargets, devices, lessonDevices, lessons, rooms } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import { EventLog, Outbox } from '../events/event-log.ts';
+import { HelpRequestsService } from '../help-requests/help-requests.service.ts';
 import { closeRemoteSessions } from '../remote-sessions/closing.ts';
 
 export type LessonRow = typeof lessons.$inferSelect;
@@ -29,6 +30,7 @@ export class LessonsService {
     @Inject(Idempotency) private readonly idempotency: Idempotency,
     @Inject(EventLog) private readonly events: EventLog,
     @Inject(Outbox) private readonly outbox: Outbox,
+    @Inject(HelpRequestsService) private readonly help: HelpRequestsService,
   ) {}
 
   async start(ctx: RequestContext, roomId: string, input: StartLessonRequest, key: string) {
@@ -151,7 +153,7 @@ export class LessonsService {
     return result;
   }
 
-  // Bitta tranzaksiyada: dars yopiladi, qurilmalar bo'shaydi, ochiq buyruq target'lari va masofaviy sessiyalar yopiladi.
+  // Bitta tranzaksiyada: dars yopiladi, qurilmalar bo'shaydi, ochiq buyruq target'lari, yordam so'rovlari va masofaviy sessiyalar yopiladi.
   // Chaqiruvchi commit'dan keyin Outbox.kick() qiladi (remote.revoke).
   async endLesson(tx: Db, lessonId: string, reason: EndReason, endedBy: string | null, correlationId: string) {
     const at = new Date(this.now());
@@ -173,7 +175,8 @@ export class LessonsService {
       .where(and(inArray(commandTargets.commandId, lessonCommands), inArray(commandTargets.status, OPEN_STATUSES)))
       .returning({ commandId: commandTargets.commandId });
     const deviceIds = released.map((r) => r.deviceId).sort();
-    // Xona voqeasidan oldin: sessiya qatorlari xona lock'idan oldin olinadi (closing.ts dagi lock tartibi).
+    // Xona voqeasidan oldin: sessiya va yordam qatorlari xona lock'idan oldin olinadi (closing.ts dagi lock tartibi).
+    await this.help.clearOpen(tx, { lessonId: lesson.id }, 'lesson_ended', endedBy);
     await closeRemoteSessions(tx, { lessonId: lesson.id }, 'lesson_ended', at, endedBy, correlationId, {
       events: this.events,
       outbox: this.outbox,

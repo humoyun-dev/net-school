@@ -7,6 +7,7 @@ import type { RequestContext } from '../../common/request-context.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { commands, events, lessons, rooms } from '../../db/schema.ts';
 import { CommandsService } from '../commands/commands.service.ts';
+import { HelpRequestsService } from '../help-requests/help-requests.service.ts';
 import { LessonsService } from '../lessons/lessons.service.ts';
 import { RemoteSessionsService } from '../remote-sessions/remote-sessions.service.ts';
 import { type Notifier, ROOM_NOTIFIER } from './notifier.ts';
@@ -25,6 +26,7 @@ export class EventsService {
     @Inject(LessonsService) private readonly lessons: LessonsService,
     @Inject(CommandsService) private readonly commands: CommandsService,
     @Inject(RemoteSessionsService) private readonly remoteSessions: RemoteSessionsService,
+    @Inject(HelpRequestsService) private readonly help: HelpRequestsService,
     @Inject(ROOM_NOTIFIER) private readonly notifier: Notifier,
   ) {}
 
@@ -109,7 +111,7 @@ export class EventsService {
         lesson: await this.lessons.view(this.db, lesson),
         commands: views,
         remoteSessions: await this.remoteSessions.openOfLesson(this.db, lesson.id),
-        helpRequests: [], // Task 2 to'ldiradi
+        helpRequests: await this.help.openOfLesson(this.db, lesson.id),
       },
       events: [],
     };

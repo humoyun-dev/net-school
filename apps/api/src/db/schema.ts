@@ -567,6 +567,47 @@ export const remoteSessions = pgTable(
   ],
 );
 
+// Yordam so'rovi (qo'l ko'tarish): matnsiz. Bir (dars, qurilma) uchun eng ko'pi bitta ochiq so'rov;
+// yopilishda sabab yoziladi (teacher, device, lesson_ended, device_left).
+export const helpRequests = pgTable(
+  'help_requests',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id').notNull(),
+    roomId: uuid('room_id').notNull(),
+    lessonId: uuid('lesson_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    raisedAt: timestamp('raised_at', { withTimezone: true }).notNull(),
+    clearedAt: timestamp('cleared_at', { withTimezone: true }),
+    clearReason: text('clear_reason'),
+    // Foydalanuvchi (teacher/admin yoki dars tugatgan); qurilma o'zi yopsa va maintenance'da null.
+    clearedBy: uuid('cleared_by'),
+  },
+  (t) => [
+    foreignKey({
+      name: 'help_requests_lesson_fk',
+      columns: [t.siteId, t.lessonId],
+      foreignColumns: [lessons.siteId, lessons.id],
+    }),
+    foreignKey({
+      name: 'help_requests_room_fk',
+      columns: [t.siteId, t.roomId],
+      foreignColumns: [rooms.siteId, rooms.id],
+    }),
+    foreignKey({
+      name: 'help_requests_device_fk',
+      columns: [t.siteId, t.deviceId],
+      foreignColumns: [devices.siteId, devices.id],
+    }),
+    check('help_requests_clear_reason', sql`${t.clearReason} in ('teacher', 'device', 'lesson_ended', 'device_left')`),
+    check('help_requests_cleared_consistent', sql`(${t.clearedAt} is null) = (${t.clearReason} is null)`),
+    uniqueIndex('help_requests_open_device').on(t.lessonId, t.deviceId).where(sql`${t.clearedAt} is null`),
+    // Qurilma chiqishi/withdraw ochiq so'rovni qurilma bo'yicha topadi.
+    index('help_requests_open_by_device').on(t.deviceId).where(sql`${t.clearedAt} is null`),
+  ],
+);
+
 // Bitta qurilmada bitta boshqaruv lease'i (primary key); fencing eski egasini rad etish uchun.
 export const controlLeases = pgTable(
   'control_leases',

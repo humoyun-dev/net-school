@@ -7,6 +7,7 @@ import { CLOCK, type Clock } from '../../common/clock.ts';
 import { DB, type Db } from '../../db/client.ts';
 import { deviceCapabilities, devices, lessonDevices, lessons } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
+import { HelpRequestsService } from '../help-requests/help-requests.service.ts';
 import type { AuthenticatedDevice } from './device-auth.guard.ts';
 
 // O'zgargan capability kalitlari va yuqori darajadagi maydonlar (os, desktopSession, …).
@@ -29,6 +30,7 @@ export class PresenceService {
     @Inject(DB) private readonly db: Db,
     @Inject(CLOCK) private readonly now: Clock,
     @Inject(AuditWriter) private readonly audit: AuditWriter,
+    @Inject(HelpRequestsService) private readonly help: HelpRequestsService,
   ) {}
 
   // Javob qurilmaning faol darsini va overlay lease'ini beradi: lease yangilanmasa overlay o'zi tushadi (spec §10).
@@ -58,7 +60,7 @@ export class PresenceService {
               leaseSeconds: OVERLAY_LEASE_MS / 1000,
             },
             thumbnails: { intervalMs: THUMBNAIL_INTERVAL_MS, maxWidth: THUMBNAIL_MAX_WIDTH },
-            helpRequest: null, // Task 2 to'ldiradi
+            helpRequest: await this.help.openOfDevice(this.db, joined.lessonId, device.id),
           }
         : null,
     };

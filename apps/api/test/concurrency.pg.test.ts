@@ -1,12 +1,21 @@
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import { commandTargets, controlLeases, events, lessons, outbox, remoteSessions, sites } from '../src/db/schema.ts';
+import {
+  commandTargets,
+  controlLeases,
+  events,
+  helpRequests,
+  lessons,
+  outbox,
+  remoteSessions,
+  sites,
+} from '../src/db/schema.ts';
 import { EventLog } from '../src/modules/events/event-log.ts';
 import { OutboxWorker } from '../src/modules/workers/outbox.worker.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { setCapabilities, setHeartbeat } from './support/caps.ts';
 import { type DeviceKey, deviceRequest, makeDeviceKey, seedDevice } from './support/device.ts';
-import { idem, issueCommand, startLesson } from './support/lesson.ts';
+import { endLesson, idem, issueCommand, startLesson } from './support/lesson.ts';
 import { loginAs } from './support/login.ts';
 import { FakeMesh } from './support/mesh.ts';
 import { FakeRemote, seedBinding } from './support/remote.ts';
@@ -167,6 +176,30 @@ describe.skipIf(!realPg)('concurrency on real PostgreSQL', () => {
     const [after] = await app.db.db.select().from(outbox).where(eq(outbox.id, row.id));
     expect(after).toMatchObject({ attempts: 1, lastError: null });
     expect(after?.processedAt?.getTime()).toBe(now);
+  });
+
+  // raise (dars + a'zolik FOR SHARE, keyin xona lock'i) va endLesson (dars UPDATE, keyin clearOpen, keyin xona lock'i)
+  // parallel: deadlock yo'q, oxirida ochiq so'rov qolmaydi; raise yo 200 (keyin yopilgan), yo 409.
+  test('raising help while the lesson ends leaves no open request', async () => {
+    for (let i = 0; i < 20; i += 1) {
+      const lesson = (await startLesson(app, teacher, roomId)).json;
+      now += 1;
+      const at = now;
+      // Ikki tomondan tasodifiy kechikish: raise ham oldin, ham keyin keladi.
+      const raising = sleep(Math.random() * 8).then(() =>
+        deviceRequest(app, device.key, device.id, 'POST', '/api/v1/device/help-request', {}, at),
+      );
+      const ending = sleep(Math.random() * 8).then(() => endLesson(app, teacher, lesson.id));
+      const [raised, ended] = await Promise.all([raising, ending]);
+      expect(ended.status).toBe(200);
+      expect([200, 409]).toContain(raised.status);
+      const open = await app.db.db.select().from(helpRequests).where(isNull(helpRequests.clearedAt));
+      expect(open).toEqual([]);
+      if (raised.status === 200) {
+        const [row] = await app.db.db.select().from(helpRequests).where(eq(helpRequests.id, raised.json.id));
+        expect(row).toMatchObject({ lessonId: lesson.id, clearReason: 'lesson_ended' });
+      }
+    }
   });
 
   test('control lease is exclusive under concurrency', async () => {

@@ -8,6 +8,7 @@ import {
   controlLeases,
   devices,
   enrollments,
+  helpRequests,
   lessonDevices,
   lessons,
   meshBindings,
@@ -575,6 +576,61 @@ describe('lesson invariants', () => {
       .returning();
     if (!stranger) throw new Error('user');
     await rejects(session(s, l, near, { actorUserId: stranger.id }));
+  });
+
+  const help = (s: S, l: { id: string }, d: { id: string }, extra: Partial<typeof helpRequests.$inferInsert> = {}) =>
+    t.db
+      .insert(helpRequests)
+      .values({
+        organizationId: s.orgId,
+        siteId: s.siteId,
+        roomId: s.roomId,
+        lessonId: l.id,
+        deviceId: d.id,
+        raisedAt: new Date(),
+        ...extra,
+      })
+      .returning()
+      .then(([row]) => {
+        if (!row) throw new Error('help');
+        return row;
+      });
+
+  test('one open help request per device in a lesson', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    const open = await help(s, l, d);
+    await rejects(help(s, l, d));
+    // Boshqa qurilma yoki boshqa dars alohida.
+    await expect(help(s, l, await device(s))).resolves.toBeDefined();
+    const l2 = await lesson(s, s.room2Id);
+    await expect(help(s, l2, d)).resolves.toBeDefined();
+    // Yopilgan so'rovlar cheklanmaydi; yopilgach yangi ochiq so'rov mumkin.
+    await t.db
+      .update(helpRequests)
+      .set({ clearedAt: new Date(), clearReason: 'teacher' })
+      .where(sql`${helpRequests.id} = ${open.id}`);
+    await expect(help(s, l, d)).resolves.toBeDefined();
+    await expect(help(s, l, d, { clearedAt: new Date(), clearReason: 'device' })).resolves.toBeDefined();
+    // Qurilma dars site'ida bo'lishi shart.
+    const far = await device(s, s.site2Id);
+    await rejects(help(s, l, far));
+  });
+
+  test('help request clear reason and timestamp go together', async () => {
+    const s = await setup();
+    const l = await lesson(s);
+    const d = await device(s);
+    await rejects(help(s, l, d, { clearedAt: new Date() }));
+    await rejects(help(s, l, d, { clearReason: 'teacher' }));
+    await rejects(help(s, l, d, { clearedAt: new Date(), clearReason: 'because' }));
+    for (const reason of ['teacher', 'device', 'lesson_ended', 'device_left']) {
+      await expect(help(s, l, d, { clearedAt: new Date(), clearReason: reason })).resolves.toBeDefined();
+    }
+    const open = await help(s, l, d);
+    await rejects(t.db.update(helpRequests).set({ clearedAt: new Date() }).where(sql`${helpRequests.id} = ${open.id}`));
+    await rejects(t.db.update(helpRequests).set({ clearReason: 'device' }).where(sql`${helpRequests.id} = ${open.id}`));
   });
 
   test('fencing values increase', async () => {
