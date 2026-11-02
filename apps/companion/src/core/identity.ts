@@ -7,6 +7,9 @@ export interface DeviceIdentity {
   privateKey: KeyObject;
 }
 
+// Hub javobidagi `Date` (soniya aniqligida) bilan qurilma soati shundan ko'p farq qilsa, imzo soati tuzatiladi.
+export const CLOCK_SKEW_TOLERANCE_MS = 5_000;
+
 export type SignedHeaders = Record<'x-ns-device-id' | 'x-ns-timestamp' | 'x-ns-signature', string>;
 
 export function generateDeviceKey(): { publicKey: string; privateKeyPem: string } {
@@ -55,5 +58,12 @@ export class RequestSigner {
 
   setClockOffset(ms: number): void {
     this.#offsetMs = ms;
+  }
+
+  // Hub vaqtiga moslash: farq 5 s dan oshsa offset shunga o'rnatiladi, aks holda nolga qaytadi
+  // (qurilma soati to'g'rilangan bo'lsa eski offset qolib ketmasin).
+  syncClock(hubTimeMs: number): void {
+    const skew = hubTimeMs - this.#now();
+    this.#offsetMs = Math.abs(skew) > CLOCK_SKEW_TOLERANCE_MS ? skew : 0;
   }
 }

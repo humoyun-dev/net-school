@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "enroll": "node dist/enroll.mjs"
+  },
   "dependencies": {
     "@netschool/contracts": "workspace:*",
     "@netschool/domain": "workspace:*",
@@ -10,6 +14,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@netschool/test-support": "workspace:*",
     "electron": "45.2.1",
     "esbuild": "^0.28.2"
   }

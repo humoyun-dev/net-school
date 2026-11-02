@@ -1,5 +1,5 @@
 import { createPrivateKey, createPublicKey } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, win32 } from 'node:path';
 import { z } from 'zod';
 import type { DeviceIdentity } from './identity.ts';
@@ -79,6 +79,11 @@ export function loadEnrollment(dir: string): Enrollment | null {
     identity: { deviceId: config.deviceId, publicKey: config.publicKey, privateKey },
     ca: readOptional(join(dir, CA_FILE)),
   };
+}
+
+// device.json bor-yo'qligi (buzilgan bo'lsa ham): `enroll` mavjud enrollment'ni jimgina bosib ketmasligi uchun.
+export function enrollmentExists(dir: string): boolean {
+  return existsSync(join(dir, CONFIG_FILE));
 }
 
 function writeAtomic(file: string, data: string): void {
