@@ -9,19 +9,34 @@ Natijalar `docs/poc/results/` ga yoziladi:
 ## 1. Hub (Mac)
 
 1. **LAN manzili.** Mac'ning LAN manzilini aniqlang: `ipconfig getifaddr en0` yoki routerda qat'iy IP yoki DNS nomi. Quyida `HUB` deb yozilgan.
-2. **TLS sertifikati.**
-   - `HUB` nomi uchun sertifikat va uning CA'si kerak. SAN'da `HUB` bo'lsin: nom bo'lsa `DNS:HUB`, IP bo'lsa `IP:HUB`. Test uchun o'z-o'zidan imzolangan sertifikat ham bo'ladi; uning o'zi CA bo'ladi.
-   - Sertifikat `infra/compose/secrets/api_tls_cert`ga, kalit `infra/compose/secrets/api_tls_key`ga yoziladi.
-   - Boshqa sirlar `infra/compose/README.md`dagidek.
-3. **`infra/compose/.env`:**
+2. **Zaxira.** Mavjud lokal sozlamani saqlab qo'ying, 9-bo'limda qaytarasiz:
+   ```bash
+   cp infra/compose/.env infra/compose/.env.bak
+   cp infra/compose/secrets/api_tls_cert infra/compose/secrets/api_tls_cert.bak
+   cp infra/compose/secrets/api_tls_key infra/compose/secrets/api_tls_key.bak
+   ```
+3. **TLS sertifikati.**
+   - `HUB` nomi uchun sertifikat va uning CA'si kerak. SAN'da `HUB` bo'lsin: nom bo'lsa `DNS:HUB`, IP bo'lsa `IP:HUB`.
+   - Test uchun o'z-o'zidan imzolangan sertifikat ham bo'ladi; uning o'zi CA bo'ladi. `localhost` ham qo'shiladi, shunda Mac'dagi lokal ish buzilmaydi. IP uchun:
+     ```bash
+     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 30 \
+       -keyout infra/compose/secrets/api_tls_key -out infra/compose/secrets/api_tls_cert \
+       -subj "/CN=HUB" -addext "subjectAltName=IP:HUB,DNS:localhost,IP:127.0.0.1"
+     chmod 644 infra/compose/secrets/api_tls_*
+     ```
+   - Boshqa sirlar `infra/compose/README.md`dagidek. Ular allaqachon bo'lsa, qayta yaratilmaydi.
+4. **`infra/compose/.env`:**
    ```
    PUBLIC_ORIGIN=https://HUB
    GATEWAY_PUBLIC_ORIGIN=https://HUB:8444
    MESH_AGENT_HOST=HUB
    # Har `docker compose` buyrug'i overlay bilan: oddiy `up` agent portini va nuqtali nomni yo'qotmasin.
    COMPOSE_FILE=compose.yaml:compose.poc.yaml
+   # Alohida loyiha: mavjud `netschool_*` volume'lariga tegilmaydi.
+   COMPOSE_PROJECT_NAME=netschool-poc
    ```
-4. **Agentlar va stack.** Compose buyruqlari subshell ichida, repo ildizida qolasiz:
+   Agar Mac'da `netschool` stack'i ishlab turgan bo'lsa, avval uni to'xtating: portlar bir xil.
+5. **Agentlar va stack.** Compose buyruqlari subshell ichida, repo ildizida qolasiz:
    ```bash
    pnpm meshcentral:agents
    (cd infra/compose && docker compose up -d --build)
@@ -29,8 +44,8 @@ Natijalar `docs/poc/results/` ga yoziladi:
    (cd infra/compose && docker compose logs meshcentral | grep -E "agent-only|AMT")
    ```
    Logda `agent-only server running on port 4433` bo'lishi va AMT haqida xato bo'lmasligi kerak. Shu qatorni qo'lda tekshiruv yozuviga ham ko'chiring.
-5. **Admin paroli.** Brauzerda `https://HUB` ni oching, `admin` bilan kiring va parolni almashtiring. Yangi parolni `NETSCHOOL_PASSWORD` sifatida ishlatasiz.
-6. **Skriptlar uchun muhit** (zsh va bash'da bir xil ishlaydi):
+6. **Admin paroli.** `bootstrap` bir martalik parol chiqaradi. Brauzerda `https://HUB` ni oching, `admin` va shu parol bilan kiring va parolni almashtiring. Yangi parolni `NETSCHOOL_PASSWORD` sifatida ishlatasiz.
+7. **Skriptlar uchun muhit** (zsh va bash'da bir xil ishlaydi):
    ```bash
    export NETSCHOOL_HUB_ORIGIN=https://HUB
    export NETSCHOOL_HUB_CA=$PWD/infra/compose/secrets/api_tls_cert
@@ -97,7 +112,7 @@ Panelga `https://HUB` orqali kiring. Dars `verify` ochgan holda qoladi. Har band
 5. **Yordam.** O'quvchi tray yoki holat oynasidan "Yordam" bossa, plitkada ✋ belgisi chiqadi; o'qituvchi uni yopa oladi.
 6. **Miniatura.** Plitkadagi rasm Windows ekrani bilan ~1–2 s ichida mos keladi.
 7. **Ko'rish.** Panelda Windows ekrani ko'rinadi, lekin klaviatura va sichqoncha **ishlamaydi**.
-8. **Boshqarish.** Sichqoncha va klaviatura ishlaydi. Shu vaqtda ikkinchi o'qituvchi (yoki ikkinchi brauzer) boshqarishni so'rasa, "boshqa foydalanuvchi boshqaryapti" chiqadi.
+8. **Boshqarish.** Sichqoncha va klaviatura ishlaydi. Shu vaqtda ikkinchi o'qituvchi (yoki ikkinchi brauzer) boshqarishni so'rasa, "boshqa foydalanuvchi boshqaryapti" chiqadi. Ikkinchi o'qituvchini Mac'da yarating: `node scripts/poc/hubctl.mjs teacher create teacher2 --room Lab-1 --password '<kamida 12 belgi>'`.
 9. **Revoke.** Panel yopilsa yoki dars tugatilsa, viewer ≤10 s ichida uziladi.
 10. **UAC.** Windows'da UAC so'rovi (secure desktop) ochilsa, control vaqtida nima ko'rinishini yozing. Kutilgan cheklov: secure desktop ko'rinmasligi mumkin.
 11. **Ko'p monitor** (bo'lsa). Ko'rish, boshqarish va overlay barcha monitorlarda ishlaydi.
@@ -138,4 +153,10 @@ Windows versiyasi: …  ·  VM/fizik: …  ·  Monitorlar: …
 
 1. Darsni tugating (panelda "Darsni tugatish"). Shundan keyin ochiq remote sessiya qolmasligi kerak: `verify` sessiyalarni o'zi yopadi, dars tugashi qolganlarini yopadi (ADR 0008).
 2. Windows'da MeshAgent'ni o'chiring: `meshagent-<arch>.exe` → **Uninstall**. `C:\NetSchool` va `%ProgramData%\NetSchool` ni ham o'chiring.
-3. Mac'da `(cd infra/compose && docker compose down)`. Ma'lumotni ham o'chirish uchun `-v` qo'shing.
+3. Mac'da PoC stack'ini ma'lumoti bilan o'chiring va zaxirani qaytaring:
+   ```bash
+   (cd infra/compose && docker compose down -v)   # faqat netschool-poc volume'lari
+   mv infra/compose/.env.bak infra/compose/.env
+   mv infra/compose/secrets/api_tls_cert.bak infra/compose/secrets/api_tls_cert
+   mv infra/compose/secrets/api_tls_key.bak infra/compose/secrets/api_tls_key
+   ```
