@@ -27,6 +27,7 @@ import { RemoteSessionsModule } from './modules/remote-sessions/remote-sessions.
 import { ThumbnailsModule } from './modules/thumbnails/thumbnails.module.ts';
 import { WORKERS_ENABLED } from './modules/workers/outbox.worker.ts';
 import { WorkersModule } from './modules/workers/workers.module.ts';
+import { mountStaticWeb } from './web/static-web.ts';
 
 export interface CreateAppOptions {
   db: Db;
@@ -107,5 +108,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
   app.disable('x-powered-by');
   app.use(correlationMiddleware);
   app.useBodyParser('json', { limit: '64kb' });
+  if (config.webDistDir)
+    mountStaticWeb(app, { dir: config.webDistDir, gatewayOrigin: config.gateway?.publicOrigin ?? null });
   return app;
 }

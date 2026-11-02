@@ -112,6 +112,7 @@ describe('loadConfig', () => {
       mesh: null,
       meshInstanceId: 'local',
       gateway: null,
+      webDistDir: null,
     });
   });
 

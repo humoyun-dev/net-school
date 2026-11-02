@@ -56,6 +56,10 @@ export async function startTestApp(
     mesh?: MeshLink | null;
     // Fon workerlari (haqiqiy taymer bilan); berilmasa o'chiq — testlar tick'ni qo'lda chaqiradi.
     workers?: boolean;
+    // Panel fayllari katalogi (WEB_DIST_DIR); berilmasa SPA berilmaydi.
+    webDistDir?: string;
+    // Gateway public origin'i (CSP frame-src); remote berilmasa ham config'ga yoziladi.
+    gatewayOrigin?: string;
   } = {},
 ): Promise<TestApp> {
   const db = opts.db ?? (await createTestDb());
@@ -75,7 +79,12 @@ export async function startTestApp(
         ? { url: 'wss://127.0.0.1:9/control.ashx', username: 'unused', password: 'unused', ca: cert.cert }
         : null,
       meshInstanceId: 'local',
-      gateway: remote ? { port: 0, publicOrigin: 'https://localhost:8444' } : null,
+      gateway: remote
+        ? { port: 0, publicOrigin: opts.gatewayOrigin ?? 'https://localhost:8444' }
+        : opts.gatewayOrigin
+          ? { port: 0, publicOrigin: opts.gatewayOrigin }
+          : null,
+      webDistDir: opts.webDistDir ?? null,
     },
     {
       db: db.db,
