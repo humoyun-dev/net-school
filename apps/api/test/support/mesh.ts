@@ -65,6 +65,7 @@ export class FakeMesh {
         return snapshot ? { status: 'bound', snapshot } : { status: 'node_not_found' };
       },
       subscribeDeviceEvents: () => () => {},
+      requestPowerAction: () => Promise.reject(new Error('not implemented')),
     };
   }
 }
