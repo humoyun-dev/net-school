@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: false
+          submodules: true # compose testi pin qilingan agent release'ni upstream bilan solishtiradi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
