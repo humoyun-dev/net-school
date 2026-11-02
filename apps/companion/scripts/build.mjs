@@ -11,10 +11,10 @@ const tsconfig = join(root, 'tsconfig.json');
 const common = { bundle: true, sourcemap: true, tsconfig, logLevel: 'warning' };
 const external = ['electron', 'bufferutil', 'utf-8-validate'];
 
-// CLI va asosiy jarayon: Node 24 (Electron 45 ichidagi Node ham 24), ESM.
+// enroll CLI: Node 24, ESM.
 await build({
   ...common,
-  entryPoints: { enroll: join(root, 'src/cli/enroll.ts'), main: join(root, 'src/main/main.ts') },
+  entryPoints: { enroll: join(root, 'src/cli/enroll.ts') },
   outdir: dist,
   outExtension: { '.js': '.mjs' },
   platform: 'node',
@@ -23,6 +23,18 @@ await build({
   external,
   // Bundle ichidagi CJS paketlar (ws) uchun `require`.
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
+});
+
+// Asosiy jarayon CommonJS: Playwright (e2e) ESM entry'li Electron'ni ulay olmaydi.
+await build({
+  ...common,
+  entryPoints: { main: join(root, 'src/main/main.ts') },
+  outdir: dist,
+  outExtension: { '.js': '.cjs' },
+  platform: 'node',
+  target: 'node24',
+  format: 'cjs',
+  external,
 });
 
 // Preload sandbox'da ishlaydi: CommonJS, faqat `electron`ni require qiladi.

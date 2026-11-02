@@ -1,9 +1,16 @@
 import type { AgentStatus } from '../core/agent.ts';
 
 const root = document.getElementById('root') as HTMLElement;
-const strings = await window.netschool.strings();
 let last: AgentStatus | null = null;
 let notice = '';
+
+// Obuna sinxron, birinchi bo'lib qilinadi: main sahifa yuklanishi bilan joriy holatni yuboradi. Matnlar keyin keladi.
+let rendering: (() => void) | null = null;
+window.netschool.onStatus((status) => {
+  last = status;
+  rendering?.();
+});
+const strings = await window.netschool.strings();
 
 const HUB_TEXT = {
   connecting: strings.hubConnecting,
@@ -64,8 +71,5 @@ function render(): void {
   root.replaceChildren(...nodes);
 }
 
-window.netschool.onStatus((status) => {
-  last = status;
-  render();
-});
+rendering = render;
 render();

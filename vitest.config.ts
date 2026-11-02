@@ -10,6 +10,16 @@ export default defineConfig({
         },
       },
       {
+        // Haqiqiy Electron (xvfb/ekran kerak): `pnpm test`ga kirmaydi, alohida ishga tushiriladi.
+        test: {
+          name: 'companion-e2e',
+          include: ['apps/companion/e2e/**/*.e2e.ts'],
+          testTimeout: 90_000,
+          hookTimeout: 120_000,
+          fileParallelism: false,
+        },
+      },
+      {
         test: {
           name: 'contract',
           include: ['tests/contracts/**/*.test.ts'],
