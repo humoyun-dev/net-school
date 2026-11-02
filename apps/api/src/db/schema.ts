@@ -636,3 +636,106 @@ export const controlLeases = pgTable(
 
 // Global monoton fencing token'lar (lease olinganda nextval).
 export const controlFencingSeq = pgSequence('control_fencing_seq');
+
+// Markaziy quvvat boshqaruvi (P1h, ADR 0010). Darssiz va ko'p xonali, shuning uchun commands'dan alohida.
+export const powerSchedules = pgTable(
+  'power_schedules',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    type: text('type').notNull(),
+    scope: jsonb('scope').notNull(),
+    // Ruxsat tekshiruvi uchun: ko'lam site'lari (organization ko'lamida yaratilgan paytdagi hammasi).
+    siteIds: uuid('site_ids').array().notNull(),
+    daysOfWeek: integer('days_of_week').array().notNull(),
+    timeOfDay: text('time_of_day').notNull(),
+    timezone: text('timezone').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'power_schedules_creator_fk',
+      columns: [t.organizationId, t.createdBy],
+      foreignColumns: [users.organizationId, users.id],
+    }),
+    check('power_schedules_type', sql`${t.type} in ('shutdown', 'reboot', 'sleep', 'wake')`),
+    check('power_schedules_time', sql`${t.timeOfDay} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`),
+    check('power_schedules_next_run', sql`${t.enabled} or ${t.nextRunAt} is null`),
+    index('power_schedules_due').on(t.nextRunAt).where(sql`${t.enabled}`),
+  ],
+);
+
+export const powerActions = pgTable(
+  'power_actions',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    type: text('type').notNull(),
+    scope: jsonb('scope').notNull(),
+    siteIds: uuid('site_ids').array().notNull(),
+    status: text('status').notNull(),
+    runAt: timestamp('run_at', { withTimezone: true }).notNull(),
+    scheduleId: uuid('schedule_id').references(() => powerSchedules.id, { onDelete: 'set null' }),
+    // Jadval amalida null (tizim yaratgan).
+    requestedBy: uuid('requested_by'),
+    nextWaveAt: timestamp('next_wave_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: 'power_actions_requester_fk',
+      columns: [t.organizationId, t.requestedBy],
+      foreignColumns: [users.organizationId, users.id],
+    }),
+    check('power_actions_type', sql`${t.type} in ('shutdown', 'reboot', 'sleep', 'wake')`),
+    check('power_actions_status', sql`${t.status} in ('scheduled', 'running', 'completed', 'cancelled', 'missed')`),
+    // Bitta jadval vaqtiga bitta amal (bir nechta replika).
+    unique('power_actions_schedule_run').on(t.scheduleId, t.runAt),
+    index('power_actions_status_run').on(t.status, t.runAt),
+    index('power_actions_org_created').on(t.organizationId, t.createdAt.desc()),
+  ],
+);
+
+export const powerActionTargets = pgTable(
+  'power_action_targets',
+  {
+    actionId: uuid('action_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id').notNull(),
+    status: text('status').notNull(),
+    reason: text('reason'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    offlineSeenAt: timestamp('offline_seen_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'power_action_targets_pk', columns: [t.actionId, t.deviceId] }),
+    foreignKey({
+      name: 'power_action_targets_action_fk',
+      columns: [t.actionId],
+      foreignColumns: [powerActions.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'power_action_targets_device_fk',
+      columns: [t.siteId, t.deviceId],
+      foreignColumns: [devices.siteId, devices.id],
+    }),
+    check(
+      'power_action_targets_status',
+      sql`${t.status} in ('pending', 'sent', 'succeeded', 'failed', 'unknown', 'cancelled')`,
+    ),
+    check(
+      'power_action_targets_reason',
+      sql`(${t.status} = 'failed') = (${t.reason} is not null) and (${t.reason} is null or ${t.reason} in ('unbound', 'device_offline', 'wake_unsupported', 'node_missing', 'upstream_unavailable'))`,
+    ),
+    check('power_action_targets_sent', sql`${t.status} <> 'sent' or ${t.sentAt} is not null`),
+    index('power_action_targets_open').on(t.actionId).where(sql`${t.status} in ('pending', 'sent')`),
+  ],
+);

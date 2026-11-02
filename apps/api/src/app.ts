@@ -21,6 +21,7 @@ import { HelpRequestsModule } from './modules/help-requests/help-requests.module
 import { IdentityModule } from './modules/identity/identity.module.ts';
 import { LessonsModule } from './modules/lessons/lessons.module.ts';
 import { OrganizationModule } from './modules/organization/organization.module.ts';
+import { PowerModule } from './modules/power/power.module.ts';
 import { REMOTE_UPSTREAM, type RemoteUpstream } from './modules/remote-sessions/remote-gateway.ts';
 import { RemoteSessionsModule } from './modules/remote-sessions/remote-sessions.module.ts';
 import { ThumbnailsModule } from './modules/thumbnails/thumbnails.module.ts';
@@ -85,6 +86,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       HelpRequestsModule,
       ThumbnailsModule,
       RemoteSessionsModule,
+      PowerModule,
       WorkersModule,
       EventsApiModule,
     ],

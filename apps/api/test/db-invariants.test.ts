@@ -13,6 +13,9 @@ import {
   lessons,
   meshBindings,
   organizations,
+  powerActions,
+  powerActionTargets,
+  powerSchedules,
   remoteSessions,
   roleAssignments,
   rooms,
@@ -631,6 +634,82 @@ describe('lesson invariants', () => {
     const open = await help(s, l, d);
     await rejects(t.db.update(helpRequests).set({ clearedAt: new Date() }).where(sql`${helpRequests.id} = ${open.id}`));
     await rejects(t.db.update(helpRequests).set({ clearReason: 'device' }).where(sql`${helpRequests.id} = ${open.id}`));
+  });
+
+  test('power target reason goes with failed only', async () => {
+    const s = await setup();
+    const d = await device(s);
+    const [action] = await t.db
+      .insert(powerActions)
+      .values({
+        organizationId: s.orgId,
+        type: 'shutdown',
+        scope: { kind: 'organization' },
+        siteIds: [s.siteId],
+        status: 'running',
+        runAt: new Date(),
+        createdAt: new Date(),
+      })
+      .returning();
+    if (!action) throw new Error('action');
+    const target = (status: string, reason: string | null, extra: Record<string, unknown> = {}) =>
+      t.db.insert(powerActionTargets).values({
+        actionId: action.id,
+        deviceId: d.id,
+        organizationId: s.orgId,
+        siteId: s.siteId,
+        status,
+        reason,
+        updatedAt: new Date(),
+        ...extra,
+      });
+    await rejects(target('failed', null));
+    await rejects(target('succeeded', 'unbound'));
+    await rejects(target('failed', 'because'));
+    await rejects(target('sent', null));
+    await rejects(target('exploded', null));
+    await expect(target('failed', 'wake_unsupported')).resolves.toBeDefined();
+  });
+
+  test('one action per schedule occurrence', async () => {
+    const s = await setup();
+    const [schedule] = await t.db
+      .insert(powerSchedules)
+      .values({
+        organizationId: s.orgId,
+        type: 'shutdown',
+        scope: { kind: 'organization' },
+        siteIds: [s.siteId],
+        daysOfWeek: [1],
+        timeOfDay: '19:00',
+        timezone: 'Asia/Tashkent',
+        nextRunAt: new Date('2026-11-09T14:00:00Z'),
+        createdBy: s.teacherId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+    if (!schedule) throw new Error('schedule');
+    const runAt = new Date('2026-11-02T14:00:00Z');
+    const action = () =>
+      t.db.insert(powerActions).values({
+        organizationId: s.orgId,
+        type: 'shutdown',
+        scope: { kind: 'organization' },
+        siteIds: [s.siteId],
+        status: 'running',
+        runAt,
+        scheduleId: schedule.id,
+        createdAt: new Date(),
+      });
+    await expect(action()).resolves.toBeDefined();
+    await rejects(action());
+    await rejects(
+      t.db.update(powerSchedules).set({ enabled: false }).where(sql`${powerSchedules.id} = ${schedule.id}`),
+    );
+    await rejects(
+      t.db.update(powerSchedules).set({ timeOfDay: '24:00' }).where(sql`${powerSchedules.id} = ${schedule.id}`),
+    );
   });
 
   test('fencing values increase', async () => {
