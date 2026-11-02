@@ -1,16 +1,29 @@
-import type { DeviceManagementPort, DeviceSnapshot } from '@netschool/domain';
+import type {
+  DeviceManagementPort,
+  DeviceSnapshot,
+  PowerActionType,
+  PowerRequestResult,
+  PowerState,
+} from '@netschool/domain';
+import { AdapterError } from '@netschool/meshcentral-adapter';
 import type { DeviceManagementFactory, SiteScope } from '../../src/modules/devices/mesh.ts';
 
 export interface FakeNode {
   domain: string;
   name: string;
   online: boolean;
+  // Berilmasa online ? 'on' : 'unknown'.
+  powerState?: PowerState;
 }
 
 // MeshCentral o'rnida: site scope'i bo'yicha node'lar; `failing` — upstream uzilgan.
 export class FakeMesh {
   readonly nodes = new Map<string, FakeNode>();
   failing = false;
+  // Quvvat so'rovlari (yuborilish tartibida); powerFailing — requestPowerAction javob bermaydi (timeout).
+  readonly powerRequests: Array<{ siteId: string; nodeId: string; type: PowerActionType }> = [];
+  readonly wakeResults = new Map<string, PowerRequestResult>();
+  powerFailing = false;
   // Berilsa listDevices javobidan oldin bajariladi (agent holatini o'qish paytidagi poyga testlari uchun).
   beforeList: (() => Promise<void>) | null = null;
   // Berilsa reconcileEnrollment shu va'da bajarilguncha kutadi (poyga testlari uchun).
@@ -45,7 +58,7 @@ export class FakeMesh {
           hostname: `${n.name}.lan`,
           osDescription: 'Linux',
           agentOnline: n.online,
-          powerState: n.online ? 'on' : 'unknown',
+          powerState: n.powerState ?? (n.online ? 'on' : 'unknown'),
         }));
     };
     const held = () => this.#held;
@@ -65,7 +78,14 @@ export class FakeMesh {
         return snapshot ? { status: 'bound', snapshot } : { status: 'node_not_found' };
       },
       subscribeDeviceEvents: () => () => {},
-      requestPowerAction: () => Promise.reject(new Error('not implemented')),
+      requestPowerAction: async (request) => {
+        const scope = scopes.get(request.siteId);
+        if (!scope || scope.meshDomainId !== request.upstream.meshDomainId) throw new Error('scope_denied');
+        if (this.powerFailing) throw new AdapterError('upstream_timeout', 'No response to poweraction');
+        const nodeId = request.upstream.meshNodeId;
+        this.powerRequests.push({ siteId: request.siteId, nodeId, type: request.type });
+        return (request.type === 'wake' ? this.wakeResults.get(nodeId) : undefined) ?? { accepted: true };
+      },
     };
   }
 }

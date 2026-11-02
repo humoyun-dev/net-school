@@ -72,4 +72,72 @@ describe('MeshCentralDeviceManagement', () => {
     client.resync();
     expect(events).toHaveLength(2);
   });
+  describe('requestPowerAction', () => {
+    const upstream = { ...scope, meshNodeId: PC01_ID };
+    const node = `node/${scope.meshDomainId}/${PC01_ID}`;
+
+    test('power actions map to MeshCentral action types', async () => {
+      const { client, devices } = setup();
+      for (const type of ['shutdown', 'reboot', 'sleep'] as const) {
+        expect(await devices.requestPowerAction({ siteId: 'site-a', upstream, type })).toEqual({ accepted: true });
+      }
+      expect(client.sent).toEqual([
+        { action: 'poweraction', payload: { nodeids: [node], actiontype: 2 } },
+        { action: 'poweraction', payload: { nodeids: [node], actiontype: 3 } },
+        { action: 'poweraction', payload: { nodeids: [node], actiontype: 4 } },
+      ]);
+    });
+
+    test('a power reply other than ok is an invalid upstream message', async () => {
+      const { client, devices } = setup();
+      client.replies.set('poweraction', { action: 'poweraction', result: 'nope' });
+      const err = await devices.requestPowerAction({ siteId: 'site-a', upstream, type: 'reboot' }).catch((e) => e);
+      expect((err as AdapterError).code).toBe('invalid_upstream_message');
+    });
+
+    test('wake results map to accepted, wake_unsupported and node_missing', async () => {
+      const { client, devices } = setup();
+      const cases: [string, unknown][] = [
+        ['ok', { accepted: true }],
+        ['Used 2 device(s) to send wake packets', { accepted: true }],
+        ['Used 0 device(s) to send wake packets', { accepted: true }],
+        ['No known MAC addresses for this device', { accepted: false, reason: 'wake_unsupported' }],
+        ['No network information for this device', { accepted: false, reason: 'wake_unsupported' }],
+        ['Invalid nodeid', { accepted: false, reason: 'node_missing' }],
+        ['Invalid domain', { accepted: false, reason: 'node_missing' }],
+      ];
+      for (const [result, expected] of cases) {
+        // Haqiqiy MeshControlClient 'ok' bo'lmagan result'ni upstream_rejected qiladi, matn detail'da.
+        client.replies.set(
+          'wakedevices',
+          result === 'ok'
+            ? { action: 'wakedevices', result }
+            : new AdapterError('upstream_rejected', 'MeshCentral rejected wakedevices', result),
+        );
+        expect(await devices.requestPowerAction({ siteId: 'site-a', upstream, type: 'wake' }), result).toEqual(
+          expected,
+        );
+      }
+      expect(client.sent.at(-1)).toEqual({ action: 'wakedevices', payload: { nodeids: [node] } });
+      client.replies.set('wakedevices', new AdapterError('upstream_rejected', 'rejected', 'something else'));
+      const err = await devices.requestPowerAction({ siteId: 'site-a', upstream, type: 'wake' }).catch((e) => e);
+      expect((err as AdapterError).code).toBe('invalid_upstream_message');
+    });
+
+    test('a node outside the site scope is refused before sending', async () => {
+      const { client, devices } = setup();
+      for (const bad of [
+        { ...upstream, meshDomainId: 'other' },
+        { ...upstream, meshInstanceId: 'mc2' },
+      ]) {
+        const err = await devices
+          .requestPowerAction({ siteId: 'site-a', upstream: bad, type: 'shutdown' })
+          .catch((e) => e);
+        expect((err as AdapterError).code).toBe('scope_denied');
+      }
+      const err = await devices.requestPowerAction({ siteId: 'nope', upstream, type: 'shutdown' }).catch((e) => e);
+      expect((err as AdapterError).code).toBe('scope_denied');
+      expect(client.sent).toEqual([]);
+    });
+  });
 });
