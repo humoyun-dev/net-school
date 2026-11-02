@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest';
 import { run } from '../src/cli/run.ts';
@@ -10,7 +13,16 @@ import { seedOrg, seedUser } from './support/seed.ts';
 let t: TestDb;
 let out: string[];
 const stdout = { write: (s: string) => void out.push(s) };
-const cli = (...argv: string[]) => run(argv, { db: t.db, driver: t.driver, stdout });
+const agents = {
+  groups: [] as string[],
+  downloads: [] as { meshid: string; arch: string }[],
+  async installer(groupName: string, arch: 'x64' | 'arm64') {
+    this.groups.push(groupName);
+    this.downloads.push({ meshid: 'mesh//g1', arch });
+    return { meshid: 'mesh//g1', bytes: Buffer.from(`MZ agent ${arch}`) };
+  },
+};
+const cli = (...argv: string[]) => run(argv, { db: t.db, driver: t.driver, stdout, meshAgents: agents });
 const printedPassword = () => out.join('').match(/password: (\S+)/)?.[1] ?? '';
 
 beforeAll(async () => {
@@ -113,4 +125,55 @@ test('cli never writes the password to the audit log', async () => {
 test('unknown command prints usage and exits 1', async () => {
   expect(await cli('frobnicate')).toBe(1);
   expect(out.join('')).toMatch(/usage/i);
+});
+
+test('mesh-agent-installer writes the installer for the site group and links the site to the default domain', async () => {
+  const { orgId } = await seedOrg(t.db);
+  const out = join(mkdtempSync(join(tmpdir(), 'agent-')), 'agent.exe');
+  agents.groups.length = 0;
+  expect(await cli('mesh-agent-installer', '--site', 'Maktab 1 bino A', '--arch', 'arm64', '--out', out)).toBe(0);
+  expect(readFileSync(out).toString()).toBe('MZ agent arm64');
+  expect(agents.groups).toEqual(['NetSchool — Maktab 1 bino A']);
+  const [site] = await t.db.select().from(sites).where(eq(sites.name, 'Maktab 1 bino A'));
+  expect(site?.meshDomainId).toBe('');
+  const audits = await t.db.select().from(auditEvents).where(eq(auditEvents.organizationId, orgId));
+  expect(audits.map((a) => a.action)).toContain('mesh.agent_installer');
+});
+
+test('mesh-agent-installer: unknown site or bad arch exits 1', async () => {
+  await seedOrg(t.db);
+  expect(await cli('mesh-agent-installer', '--site', "Yo'q", '--arch', 'x64', '--out', '/tmp/x.exe')).toBe(1);
+  expect(await cli('mesh-agent-installer', '--site', 'Maktab 1 bino A', '--arch', 'ia64', '--out', '/tmp/x.exe')).toBe(
+    1,
+  );
+});
+
+test('mesh-agent-installer without MeshCentral exits 2 and explains the agent cache', async () => {
+  await seedOrg(t.db);
+  const code = await run(
+    ['mesh-agent-installer', '--site', 'Maktab 1 bino A', '--arch', 'x64', '--out', '/tmp/x.exe'],
+    {
+      db: t.db,
+      driver: t.driver,
+      stdout,
+      meshAgents: null,
+    },
+  );
+  expect(code).toBe(2);
+  expect(out.join('')).toMatch(/MESHCENTRAL_URL/);
+  const failing = {
+    installer: async () => {
+      throw new Error('HTTP 404');
+    },
+  };
+  out = [];
+  expect(
+    await run(['mesh-agent-installer', '--site', 'Maktab 1 bino A', '--arch', 'x64', '--out', '/tmp/x.exe'], {
+      db: t.db,
+      driver: t.driver,
+      stdout,
+      meshAgents: failing,
+    }),
+  ).toBe(2);
+  expect(out.join('')).toMatch(/pnpm meshcentral:agents/);
 });

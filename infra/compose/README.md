@@ -55,8 +55,10 @@ docker compose -f compose.yaml -f compose.poc.yaml up -d --build
 ```
 
 - MeshCentral `agentPort` 4433'da faqat agent ulanishlarini qabul qiladi. Admin UI (4430) ochilmaydi.
+- Sertifikat nomi `meshcentral.hub.internal`, nuqtali bo'lishi shart. Nuqtasiz nomda MeshCentral LAN-only rejimga o'tadi va agentga `MeshServer=local` yozadi (`meshcentral.js:1906`). API ham shu nom bilan ulanadi.
 - `MESH_AGENT_HOST` agent `.msh` fayliga yoziladi (`agentAliasDNS`). DHCP'da o'zgaradigan IP ishlatmang.
-- Sertifikat nomi `meshcentral` bo'lib qoladi: agent serverni sertifikat hash'i bo'yicha taniydi.
+- Agent serverni sertifikat hash'i (`ServerID`) bo'yicha taniydi, shuning uchun `MESH_AGENT_HOST` sertifikat nomiga mos kelishi shart emas.
+- Windows o'rnatuvchisi: `docker compose exec api node dist/cli.mjs mesh-agent-installer --site "<bino>" --arch x64|arm64 --out /tmp/agent.exe`, keyin `docker compose cp api:/tmp/agent.exe .`.
 - Faqat shu Mac'dan sinash uchun `MESH_AGENT_BIND=127.0.0.1`.
 
 ## Cheklovlar

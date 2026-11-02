@@ -1,9 +1,15 @@
 import type { Db, DbDriver } from '../db/client.ts';
 
+// MeshCentral'dan agent o'rnatuvchisi (main.ts'da haqiqiy klient; testda soxta). null — MeshCentral sozlanmagan.
+export interface MeshAgentSource {
+  installer(groupName: string, arch: 'x64' | 'arm64'): Promise<{ meshid: string; bytes: Buffer }>;
+}
+
 export interface CliEnv {
   db: Db;
   driver: DbDriver;
   stdout: { write(text: string): void };
+  meshAgents?: MeshAgentSource | null;
 }
 
 // Exit kodlari: 0 muvaffaqiyat, 1 noto'g'ri foydalanish/topilmadi, 2 holat ruxsat bermaydi.

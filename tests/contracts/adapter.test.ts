@@ -1,6 +1,8 @@
 import type { DeviceEvent, UpstreamDeviceRef } from '@netschool/domain';
 import {
   AdapterError,
+  agentDownloadPath,
+  ensureDeviceGroup,
   generateMeshPassword,
   MeshCentralDeviceManagement,
   MeshCentralPrincipals,
@@ -143,6 +145,14 @@ describe('MeshCentral adapter against pinned upstream', () => {
       type: 'wake',
     });
     expect(result).toEqual({ accepted: false, reason: 'wake_unsupported' });
+  });
+
+  test('ensureDeviceGroup creates then reuses a group', async () => {
+    const name = `NetSchool — contract ${Date.now()}`;
+    const first = await ensureDeviceGroup(admin, name);
+    expect(first.meshid).toMatch(/^mesh\/\/.+/);
+    expect(await ensureDeviceGroup(admin, name)).toEqual(first);
+    expect(agentDownloadPath(first.meshid, 'x64')).toContain('id=4&meshid=');
   });
 
   test('emits device.added when a device is added', async () => {

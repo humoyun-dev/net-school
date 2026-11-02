@@ -12,6 +12,11 @@ const ALIAS = /^[A-Za-z0-9.-]{1,253}$/;
 export function renderConfig(template, { dbPassword, certName, trustedProxy, agent }) {
   // Faqat IP literal: DNS nomini MeshCentral bir marta ishga tushishda aniqlaydi va api hali yo'q bo'lsa ishonch yo'qoladi.
   if (isIP(trustedProxy ?? '') === 0) throw new Error('MESHCENTRAL_TRUSTED_PROXY must be an IP address');
+  // Nuqtasiz nomda MeshCentral LAN-only rejimga o'tadi (meshcentral.js:1906) va .msh'ga MeshServer=local yozadi:
+  // agentAliasDNS jimgina e'tiborsiz qoladi.
+  if (agent && !certName.includes('.')) {
+    throw new Error('MESHCENTRAL_CERT_NAME must contain a dot when agents connect (e.g. meshcentral.hub.internal)');
+  }
   if (agent && !ALIAS.test(agent.aliasDns ?? '')) {
     throw new Error('MESHCENTRAL_AGENT_ALIAS_DNS must be a host name or IP without port, path or user');
   }
