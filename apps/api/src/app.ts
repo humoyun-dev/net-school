@@ -16,6 +16,7 @@ import { DEVICE_MANAGEMENT, type DeviceManagementFactory } from './modules/devic
 import { EventsModule } from './modules/events/events.module.ts';
 import { EventsApiModule } from './modules/events/events-api.module.ts';
 import { HealthController, MESH_LINK, type MeshLink } from './modules/health/health.controller.ts';
+import { HelpRequestsModule } from './modules/help-requests/help-requests.module.ts';
 import { IdentityModule } from './modules/identity/identity.module.ts';
 import { LessonsModule } from './modules/lessons/lessons.module.ts';
 import { OrganizationModule } from './modules/organization/organization.module.ts';
@@ -67,6 +68,7 @@ export async function createApp(config: ApiConfig, opts: CreateAppOptions): Prom
       DevicesModule,
       LessonsModule,
       CommandsModule,
+      HelpRequestsModule,
       RemoteSessionsModule,
       WorkersModule,
       EventsApiModule,

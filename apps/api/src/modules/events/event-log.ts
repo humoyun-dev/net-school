@@ -10,7 +10,9 @@ export type EventType =
   | 'command.created'
   | 'command.target_updated'
   | 'remote_session.opened'
-  | 'remote_session.closed';
+  | 'remote_session.closed'
+  | 'help_request.raised'
+  | 'help_request.cleared';
 
 export interface NewEvent {
   organizationId: string;

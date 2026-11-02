@@ -21,6 +21,7 @@ import {
 } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import { EventLog, Outbox } from '../events/event-log.ts';
+import { HelpRequestsService } from '../help-requests/help-requests.service.ts';
 import { closeRemoteSessions } from '../remote-sessions/closing.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort } from './mesh.ts';
 
@@ -38,6 +39,7 @@ export class DevicesService {
     @Inject(DEVICE_MANAGEMENT) private readonly factory: DeviceManagementFactory | null,
     @Inject(EventLog) private readonly events: EventLog,
     @Inject(Outbox) private readonly outbox: Outbox,
+    @Inject(HelpRequestsService) private readonly help: HelpRequestsService,
   ) {}
 
   async list(ctx: RequestContext, scope: DeviceListScope): Promise<Device[]> {
@@ -171,8 +173,8 @@ export class DevicesService {
     return row;
   }
 
-  // Xonadan chiqqan yoki retire qilingan qurilma eski xona darsida qolmaydi: a'zolik tugaydi, masofaviy sessiyalari
-  // yopiladi, ochiq target'lar bekor. Chaqiruvchi commit'dan keyin Outbox.kick() qiladi (remote.revoke).
+  // Xonadan chiqqan yoki retire qilingan qurilma eski xona darsida qolmaydi: a'zolik tugaydi, yordam so'rovi va masofaviy
+  // sessiyalari yopiladi, ochiq target'lar bekor. Chaqiruvchi commit'dan keyin Outbox.kick() qiladi (remote.revoke).
   async #leaveLesson(tx: Db, ctx: RequestContext, deviceId: string): Promise<void> {
     const at = new Date(this.now());
     const left = await tx
@@ -180,7 +182,10 @@ export class DevicesService {
       .set({ releasedAt: at })
       .where(and(eq(lessonDevices.deviceId, deviceId), isNull(lessonDevices.releasedAt)))
       .returning({ lessonId: lessonDevices.lessonId });
-    // Xona voqealaridan oldin: sessiya qatorlari xona lock'idan oldin olinadi (closing.ts dagi lock tartibi).
+    // Xona voqealaridan oldin: sessiya va yordam qatorlari xona lock'idan oldin olinadi (closing.ts dagi lock tartibi).
+    for (const { lessonId } of left) {
+      await this.help.clearOpen(tx, { lessonId, deviceId }, 'device_left', this.access.actor(ctx).userId);
+    }
     await closeRemoteSessions(tx, { deviceId }, 'device_left', at, this.access.actor(ctx).userId, ctx.correlationId, {
       events: this.events,
       outbox: this.outbox,
