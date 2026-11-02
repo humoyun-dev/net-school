@@ -16,6 +16,9 @@ export function renderConfig(template, { dbPassword, certName, trustedProxy }) {
     redirPort: 0,
     selfUpdate: false,
     autoBackup: false,
+    // Agentlar image'ga oldindan qo'yilgan (pnpm meshcentral:agents, upstream sha384 pin'lari bilan tekshirilgan):
+    // ishga tushishda GitHub'dan yuklanmaydi — hub oflayn ishlaydi va pin'dan boshqa binary berilmaydi.
+    agentdownloads: { enabled: false },
     // Gateway api konteynerida (compose'da qat'iy IP): X-Forwarded-For faqat shu manzildan ishoniladi.
     // Shablon (contract harness) 127.0.0.1 qoladi.
     trustedProxy,

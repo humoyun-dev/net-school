@@ -183,4 +183,31 @@ describe('meshcentral config rendering', () => {
     expect(() => render('api')).toThrow(/MESHCENTRAL_TRUSTED_PROXY/);
     expect(() => render(undefined)).toThrow(/MESHCENTRAL_TRUSTED_PROXY/);
   });
+  test('agent downloads stay offline: MeshCentral serves only the pinned agents baked into the image', () => {
+    const config = renderConfig(template, { dbPassword: 'x', certName: 'meshcentral', trustedProxy: '172.31.250.10' });
+    expect(config.settings.agentdownloads).toEqual({ enabled: false });
+  });
+
+  test('the lock records the pinned agent release of the upstream commit', () => {
+    const lock = JSON.parse(readFileSync(join(here, '..', '..', 'meshcentral', 'upstream.lock.json'), 'utf8'));
+    const defaults = JSON.parse(
+      readFileSync(join(here, '..', '..', 'meshcentral', 'upstream', 'agents', 'agent-defaults.json'), 'utf8'),
+    );
+    const pinned = defaults.releases.map((r: { repository: string; tag: string; files: unknown[] }) => ({
+      repository: r.repository,
+      tag: r.tag,
+      files: r.files.length,
+    }));
+    expect(lock.agentManifest.releases).toEqual(pinned);
+    const all = defaults.releases.flatMap((r: { files: { filename: string; sha384: string; size: number }[] }) => r.files);
+    for (const f of lock.agentManifest.windows) {
+      expect(all.find((x: { filename: string }) => x.filename === f.name)).toMatchObject({ sha384: f.sha384, size: f.bytes });
+    }
+    expect(lock.agentManifest.windows.map((f: { id: number }) => f.id)).toEqual([4, 43]);
+  });
+
+  test('the meshcentral image bakes in the verified agent cache', () => {
+    const dockerfile = readFileSync(join(here, '..', '..', 'meshcentral', 'Dockerfile'), 'utf8');
+    expect(dockerfile).toContain('COPY infra/meshcentral/agent-cache/ ./agents/');
+  });
 });

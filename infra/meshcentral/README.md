@@ -40,6 +40,18 @@ node meshcentral --datapath ../../../meshcentral-data --port 8443 --redirport 80
 
 Parollar `generateMeshPassword()` dan (`@netschool/meshcentral-adapter`): `base64url(32 bayt) + "-Aa1"`. `_` nonalpha hisoblanmaydi, shuning uchun `-Aa1` qo'shimchasi har sinfdan belgini kafolatlaydi.
 
+## Agent binary'lari (oflayn kesh)
+
+MeshAgent binary'lari git repo'da ham, npm paketida ham yo'q. Pin qilingan commit ularni `agents/agent-defaults.json`dagi GitHub release'laridan oladi: `Ylianst/MeshAgent`, tag va har faylning sha384 hash'i.
+
+```bash
+pnpm meshcentral:agents   # upstream agents/check-releases.js --output infra/meshcentral/agent-cache
+```
+
+Skript 31 faylni (~120 MiB) yuklab, sha384 va hajmini tekshiradi. Natija `infra/meshcentral/agent-cache/` katalogiga tushadi; bu katalog gitignored. Image build oldidan shu skriptni ishga tushirish shart, chunki `Dockerfile` keshni `agents/` ga ko'chiradi.
+
+Runtime'da `agentdownloads.enabled=false`: MeshCentral GitHub'ga chiqmaydi va faqat pin'ga mos bundled faylni beradi. Pin va Windows hash'lari `upstream.lock.json` (`agentManifest`) ichida ham yozilgan. Test lock'ning upstream pin'i bilan mosligini tekshiradi, shuning uchun submodule yangilansa lock ham yangilanishi kerak.
+
 ## Yangilash tartibi
 
 Arxitektura §5.3: upstream review → alohida branch → adapter contract testlari → OS integratsiya testlari → bitta sinf canary.

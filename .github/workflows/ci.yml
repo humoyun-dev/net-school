@@ -123,6 +123,12 @@ jobs:
           chmod 644 secrets/*
       # --wait bir martalik api-migrate tugaganini xato deb hisoblashi mumkin, shuning uchun healthz kutiladi.
       # api meshcentral healthy bo'lishini kutadi; bo'lmasa up xato bilan tugaydi — sababi loglarda.
+      # Pin qilingan agent binary'lari (upstream sha384 bilan tekshiriladi) image'ga kiradi.
+      - uses: actions/cache@v4
+        with:
+          path: infra/meshcentral/agent-cache
+          key: meshcentral-agents-${{ hashFiles('infra/meshcentral/upstream/agents/agent-defaults.json') }}
+      - run: node ../meshcentral/upstream/agents/check-releases.js --output ../meshcentral/agent-cache
       - run: docker compose up -d --build || { docker compose ps; docker compose logs meshcentral | tail -100; exit 1; }
       # api MeshCentral healthy bo'lgach ishga tushadi va fonda ulanadi — mesh "ok" bo'lguncha kutiladi.
       - name: API is healthy over TLS with the database and MeshCentral
