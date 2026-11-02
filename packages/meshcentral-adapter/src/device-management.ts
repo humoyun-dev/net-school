@@ -1,9 +1,11 @@
 import type {
+  AuthorizedPowerRequest,
   DeviceBinding,
   DeviceEvent,
   DeviceManagementPort,
   DeviceSnapshot,
   EnrollmentResult,
+  PowerRequestResult,
   Unsubscribe,
 } from '@netschool/domain';
 import type { MeshRequester } from './control-client.ts';
@@ -38,6 +40,10 @@ export class MeshCentralDeviceManagement implements DeviceManagementPort {
       (d) => d.upstream.meshNodeId === upstream.meshNodeId,
     );
     return snapshot ? { status: 'bound', snapshot } : { status: 'node_not_found' };
+  }
+
+  requestPowerAction(_request: AuthorizedPowerRequest): Promise<PowerRequestResult> {
+    return Promise.reject(new Error('not implemented'));
   }
 
   subscribeDeviceEvents(handler: (event: DeviceEvent) => void): Unsubscribe {

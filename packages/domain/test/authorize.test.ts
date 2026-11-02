@@ -202,6 +202,29 @@ describe('authorize', () => {
     expect(authorize(actors.teacher, 'remote.manage', foreign).allowed).toBe(false);
   });
 
+  test('site it_support and site admin may manage power on their site only', () => {
+    for (const who of ['siteAdmin', 'itSupport', 'orgAdmin'] as const) {
+      expect(authorize(actors[who], 'power.manage', site(SITE)).allowed, who).toBe(true);
+    }
+    expect(authorize(actors.siteAdmin, 'power.manage', site(OTHER_SITE)).allowed).toBe(false);
+    expect(authorize(actors.itSupport, 'power.manage', site(OTHER_SITE)).allowed).toBe(false);
+    expect(authorize(actors.orgAdmin, 'power.manage', site(OTHER_SITE)).allowed).toBe(true);
+  });
+
+  test('teacher and student may not manage power', () => {
+    for (const who of ['teacher', 'student', 'nobody'] as const) {
+      expect(authorize(actors[who], 'power.manage', site(SITE, room)).allowed, who).toBe(false);
+    }
+  });
+
+  test('organization-wide power needs an org school_admin', () => {
+    const whole: Target = { organizationId: ORG };
+    expect(authorize(actors.orgAdmin, 'power.manage', whole).allowed).toBe(true);
+    for (const who of ['siteAdmin', 'itSupport', 'teacher'] as const) {
+      expect(authorize(actors[who], 'power.manage', whole).allowed, who).toBe(false);
+    }
+  });
+
   test('actor without assignments is denied everything', () => {
     for (const [action, target] of ownSite) {
       expect(authorize(actors.nobody, action, target).allowed).toBe(false);

@@ -25,7 +25,8 @@ export type Action =
   | 'help.clear'
   | 'remote.view'
   | 'remote.control'
-  | 'remote.manage';
+  | 'remote.manage'
+  | 'power.manage';
 
 export interface Target {
   organizationId: string;
@@ -61,6 +62,7 @@ const SITE_ADMIN_ACTIONS = new Set<Action>([
   'remote.view',
   'remote.control',
   'remote.manage',
+  'power.manage',
 ]);
 // site.configure_mesh hech qaysi to'plamda yo'q: site → MeshCentral domain bog'lanishi faqat org admin'da.
 const IT_SUPPORT_ACTIONS = new Set<Action>([
@@ -71,6 +73,8 @@ const IT_SUPPORT_ACTIONS = new Set<Action>([
   'device.enroll',
   'lesson.read',
   'command.read',
+  // Quvvat: site IT admini (ADR 0007).
+  'power.manage',
 ]);
 const TEACHER_ROOM_ACTIONS = new Set<Action>([
   'room.read',
