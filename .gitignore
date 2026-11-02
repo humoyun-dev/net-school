@@ -21,3 +21,4 @@ infra/compose/.env
 
 # MeshAgent binary'lari (pnpm meshcentral:agents) — repoga kirmaydi
 infra/meshcentral/agent-cache/
+apps/companion/out/

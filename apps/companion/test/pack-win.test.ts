@@ -1,0 +1,86 @@
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { packWin } from '../scripts/pack-win.mjs';
+import { readZip, writeZip } from '../scripts/zip.mjs';
+
+let dir: string;
+let appDist: string;
+const requested: { version: string; arch: string }[] = [];
+
+function fakeElectronZip(arch: string): Buffer {
+  return writeZip([
+    { name: 'electron.exe', data: Buffer.from(`MZ electron ${arch}`) },
+    { name: 'ffmpeg.dll', data: Buffer.from('dll') },
+    { name: 'resources/default_app.asar', data: Buffer.from('default app') },
+    { name: 'version', data: Buffer.from('45.2.1') },
+  ]);
+}
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'pack-'));
+  appDist = join(dir, 'dist');
+  mkdirSync(join(appDist, 'renderer'), { recursive: true });
+  writeFileSync(join(appDist, 'main.cjs'), 'require("electron")');
+  writeFileSync(join(appDist, 'enroll.mjs'), 'export {}');
+  writeFileSync(join(appDist, 'renderer', 'status.html'), '<html></html>');
+  requested.length = 0;
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+const pack = (arch: 'x64' | 'arm64') =>
+  packWin({
+    arch,
+    appDistDir: appDist,
+    outDir: join(dir, 'out'),
+    getElectronZip: async (opts: { version: string; arch: string }) => {
+      requested.push(opts);
+      return fakeElectronZip(opts.arch);
+    },
+  });
+
+describe('Windows portable package', () => {
+  test('zip entries survive a write and read round trip', () => {
+    const entries = [
+      { name: 'a.txt', data: Buffer.from('hello'.repeat(100)) },
+      { name: 'dir/b.bin', data: Buffer.from([0, 1, 2, 255]) },
+    ];
+    expect(readZip(writeZip(entries)).map((e) => [e.name, e.data.toString('hex')])).toEqual(
+      entries.map((e) => [e.name, e.data.toString('hex')]),
+    );
+  });
+
+  test('the zip name and Electron binary match the requested arch', async () => {
+    const out = await pack('arm64');
+    expect(out).toMatch(/netschool-companion-win32-arm64\.zip$/);
+    expect(requested).toEqual([{ version: '45.2.1', arch: 'arm64' }]);
+    const names = new Map(readZip(readFileSync(out)).map((e) => [e.name, e.data]));
+    expect(names.get('NetSchool Companion.exe')?.toString()).toBe('MZ electron arm64');
+    expect(names.has('electron.exe')).toBe(false);
+    expect(names.has('resources/default_app.asar')).toBe(false);
+    expect(names.has('ffmpeg.dll')).toBe(true);
+  });
+
+  test('the app bundle is a production build without the hidden test mode', async () => {
+    const out = await pack('x64');
+    const names = new Map(readZip(readFileSync(out)).map((e) => [e.name, e.data]));
+    expect(JSON.parse(names.get('resources/app/package.json')?.toString() ?? '{}')).toMatchObject({
+      main: 'dist/main.cjs',
+    });
+    expect(names.has('resources/app/dist/main.cjs')).toBe(true);
+    expect(names.has('resources/app/dist/renderer/status.html')).toBe(true);
+    writeFileSync(join(appDist, 'main.cjs'), 'const x = "NETSCHOOL_COMPANION_TEST_HIDDEN";');
+    await expect(pack('x64')).rejects.toThrow(/test build/);
+  });
+
+  test('enroll.cmd runs enroll.mjs through Electron as Node', async () => {
+    const out = await pack('x64');
+    const names = new Map(readZip(readFileSync(out)).map((e) => [e.name, e.data.toString()]));
+    const enroll = names.get('enroll.cmd') ?? '';
+    expect(enroll).toContain('set ELECTRON_RUN_AS_NODE=1');
+    expect(enroll).toContain('"%~dp0NetSchool Companion.exe" "%~dp0resources\\app\\dist\\enroll.mjs" %*');
+    expect(enroll).toContain('\r\n');
+    expect(names.get('start.cmd')).toContain('"%~dp0NetSchool Companion.exe"');
+  });
+});
