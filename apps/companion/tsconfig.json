@@ -4,5 +4,5 @@
     "lib": ["ES2023", "DOM"],
     "experimentalDecorators": true
   },
-  "include": ["src", "test", "scripts"]
+  "include": ["src", "test", "scripts", "e2e"]
 }

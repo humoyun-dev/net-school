@@ -11,13 +11,34 @@ export class Windows {
   readonly #preload: string;
   readonly #rendererDir: string;
   #status: AgentStatus | null = null;
+  // Chiqish boshlangach (OS o'chirilmoqda/chiqilmoqda) oynalar yopilishiga to'sqinlik qilmaydi.
+  #quitting = false;
   #overlays = new Map<number, BrowserWindow>();
   #statusWindow: BrowserWindow | null = null;
   readonly #messages = new Map<string, BrowserWindow>();
 
-  constructor(opts: { preload: string; rendererDir: string }) {
+  // Sinov rejimi: oynalar yaratiladi va tekshiriladi, lekin ekranda ko'rsatilmaydi (ishlab chiquvchi ekranini qoplamasligi uchun).
+  readonly #hidden: boolean;
+
+  constructor(opts: { preload: string; rendererDir: string; hidden?: boolean }) {
+    this.#hidden = opts.hidden ?? false;
     this.#preload = opts.preload;
     this.#rendererDir = opts.rendererDir;
+  }
+
+  #reveal(win: BrowserWindow): void {
+    if (!this.#hidden) win.show();
+  }
+
+  // Chiqish (OS o'chirilishi, tizimdan chiqish): macOS `closable: false` oynani yopmaydi, shuning uchun overlay va xabar
+  // oynalari yo'q qilinadi — aks holda ilova o'chirishni to'sib qo'yadi.
+  allowClose(): void {
+    this.#quitting = true;
+    this.#hideOverlays();
+    for (const [id, win] of this.#messages) {
+      this.#messages.delete(id);
+      if (!win.isDestroyed()) win.destroy();
+    }
   }
 
   get rendererDir(): string {
@@ -70,14 +91,16 @@ export class Windows {
         closable: false,
         focusable: true,
         fullscreenable: false,
+        enableLargerThanScreen: true,
         backgroundColor: '#0b0e13',
       });
       win.setAlwaysOnTop(true, 'screen-saver');
+      win.setBounds(display.bounds); // macOS menyu satri ostiga ham yetishi uchun (enableLargerThanScreen)
       win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       win.on('close', (event) => {
-        if (this.#status?.overlay.locked) event.preventDefault();
+        if (!this.#quitting && this.#status?.overlay.locked) event.preventDefault();
       });
-      win.once('ready-to-show', () => win.show());
+      win.once('ready-to-show', () => this.#reveal(win));
       this.#overlays.set(display.id, win);
     }
   }
@@ -104,7 +127,7 @@ export class Windows {
     });
     this.#messages.set(id, win);
     win.webContents.once('did-finish-load', () => win.webContents.send('message:show', { id, text }));
-    win.once('ready-to-show', () => win.show());
+    win.once('ready-to-show', () => this.#reveal(win));
     win.once('closed', () => this.#messages.delete(id));
     setTimeout(() => this.dismissMessage(id), MESSAGE_AUTO_CLOSE_MS).unref();
   }
@@ -117,8 +140,7 @@ export class Windows {
 
   showStatus(): void {
     if (this.#statusWindow && !this.#statusWindow.isDestroyed()) {
-      this.#statusWindow.show();
-      this.#statusWindow.focus();
+      this.#reveal(this.#statusWindow);
       return;
     }
     const win = this.#create('status.html', {
@@ -131,10 +153,11 @@ export class Windows {
     });
     // Yopilganda yashirinadi, ilova ishlashda davom etadi (tray orqali qayta ochiladi).
     win.on('close', (event) => {
+      if (this.#quitting) return;
       event.preventDefault();
       win.hide();
     });
-    win.once('ready-to-show', () => win.show());
+    win.once('ready-to-show', () => this.#reveal(win));
     this.#statusWindow = win;
   }
 }
