@@ -21,7 +21,9 @@ beforeAll(async () => {
   panel = createServer({ key: stack.tls.key, cert: stack.tls.cert }, (req, res) => {
     const src = new URL(req.url ?? '/', panelOrigin).searchParams.get('src') ?? '';
     res.writeHead(200, { 'content-type': 'text/html' });
-    res.end(`<!doctype html><iframe id="viewer" width="1024" height="768" src="${src.replace(/"/g, '&quot;')}"></iframe>`);
+    res.end(
+      `<!doctype html><iframe id="viewer" width="1024" height="768" src="${src.replace(/"/g, '&quot;')}"></iframe>`,
+    );
   });
   await new Promise<void>((resolve) => panel?.listen(panelPort, '127.0.0.1', resolve));
   // TLS tekshiruvi yoqiq: faqat gateway sinov sertifikati SPKI pin orqali ishoniladi.

@@ -19,9 +19,7 @@ describe('gateway response headers for the embedded viewer', () => {
       { 'content-security-policy': "default-src 'self'; frame-ancestors 'none'; img-src 'self' data:" },
       { frameAncestor: PANEL },
     );
-    expect(out['content-security-policy']).toBe(
-      `default-src 'self'; img-src 'self' data:; frame-ancestors ${PANEL}`,
-    );
+    expect(out['content-security-policy']).toBe(`default-src 'self'; img-src 'self' data:; frame-ancestors ${PANEL}`);
   });
 
   test('without a frame ancestor the headers pass through unchanged', () => {
