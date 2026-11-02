@@ -191,9 +191,15 @@ export function filterControlUp(text: string, ctx: ViewerContext): FrameVerdict 
   return reason;
 }
 
-// Faqat TCP/UDP'siz, node'ga bog'langan relay tunnel; rauth handle real qiymatga almashtiriladi.
+// Faqat userSessions so'rovi yoki TCP/UDP'siz, node'ga bog'langan relay tunnel; rauth handle real qiymatga almashtiriladi.
 function filterMsg(frame: Frame, ctx: ViewerContext): FrameVerdict {
   const type = frame.type;
+  // Windows'da Connect avval agentdan foydalanuvchi sessiyalarini so'raydi (faqat ro'yxat; javob tsid tanlashga ketadi).
+  if (type === 'userSessions') {
+    return keysMatch(frame, ['action', 'type', 'nodeid']) && frame.nodeid === ctx.nodeId
+      ? { ok: true, data: JSON.stringify(frame) }
+      : deny('msg:userSessions');
+  }
   if (type !== 'tunnel') return deny('msg:<other>');
   const reason = deny('msg:tunnel');
   if (!keysMatch(frame, ['action', 'type', 'nodeid', 'value', 'usage'])) return reason;
