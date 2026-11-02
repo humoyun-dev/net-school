@@ -1,17 +1,6 @@
-export type ApiErrorCode =
-  | 'validation_failed'
-  | 'unauthenticated'
-  | 'scope_denied'
-  | 'password_change_required'
-  | 'not_found'
-  | 'conflict'
-  | 'control_busy'
-  | 'capability_unavailable'
-  | 'confirmation_required'
-  | 'rate_limited'
-  | 'upstream_unavailable'
-  | 'device_offline'
-  | 'internal';
+import type { ApiErrorCode } from '@netschool/contracts';
+
+export type { ApiErrorCode };
 
 export const ERROR_STATUS: Record<ApiErrorCode, number> = {
   validation_failed: 400,
