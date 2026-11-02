@@ -266,7 +266,31 @@ describe('filterControlUp', () => {
     expect(filterControlUp(maxFilter, ctx).ok).toBe(true);
   });
 
-  test('filterControlUp rejects every non-tunnel msg', () => {
+  // MeshCentral 1.3.1 Windows'da Connect bosilganda avval agentdan foydalanuvchi sessiyalarini so'raydi;
+  // javobsiz desktop ulanmaydi (P0c Windows sinovi).
+  test('filterControlUp allows the userSessions lookup for the session node in both modes', () => {
+    for (const mode of ['view', 'control'] as const) {
+      const ctx = makeCtx(mode);
+      const text = JSON.stringify({ action: 'msg', type: 'userSessions', nodeid: NODE });
+      expect(filterControlUp(text, ctx), mode).toEqual({ ok: true, data: text });
+    }
+  });
+
+  test('filterControlUp rejects userSessions for a foreign node or with extra keys', () => {
+    const ctx = makeCtx('control');
+    const frames = [
+      { action: 'msg', type: 'userSessions', nodeid: 'node//other' },
+      { action: 'msg', type: 'userSessions' },
+      { action: 'msg', type: 'userSessions', nodeid: NODE, value: 'x' },
+      { action: 'msg', type: 'userSessions', nodeid: NODE, responseid: 'r' },
+    ];
+    for (const f of frames) {
+      const text = JSON.stringify(f);
+      expect(filterControlUp(text, ctx), text).toEqual({ ok: false, reason: 'msg:userSessions' });
+    }
+  });
+
+  test('filterControlUp rejects every other non-tunnel msg', () => {
     const ctx = makeCtx('control');
     for (const type of ['pskill', 'serviceStop', 'openUrl', 'setclip', 'getclip', 'console', 'localapp']) {
       const v = filterControlUp(JSON.stringify({ action: 'msg', type, nodeid: NODE, value: 'x', usage: 2 }), ctx);
