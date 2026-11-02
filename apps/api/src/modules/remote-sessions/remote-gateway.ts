@@ -88,6 +88,8 @@ export class RemoteGateway implements OnModuleDestroy {
         tls: config.tls,
         upstream: { origin: meshHttpsOrigin(mesh), ca: mesh.ca },
         publicOrigin: gateway.publicOrigin,
+        // Viewer o'qituvchi panelida (API origin'i) iframe bo'lib ochiladi.
+        frameAncestor: config.publicOrigin,
         broker,
         tickets,
         registry,

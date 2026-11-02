@@ -164,6 +164,7 @@ export interface GatewayStack {
   gatewayOrigin: string;
   ca: string;
   spki: string; // gateway sertifikati public key'ining SHA-256 base64 qiymati (Chromium SPKI pin)
+  tls: { key: string; cert: string };
   broker: RemoteSessionBroker;
   registry: SessionRegistry;
   events: GatewayEvent[];
@@ -194,7 +195,7 @@ export function spkiSha256Base64(certPem: string): string {
 
 export async function startGatewayStack(
   mc: MeshCentralInstance,
-  opts: { now?: () => number } = {},
+  opts: { now?: () => number; frameAncestor?: string } = {},
 ): Promise<GatewayStack> {
   const mcUrl = new URL(mc.url);
   const upstreamEndpoint: UpstreamEndpoint = { origin: `https://${mcUrl.hostname}:${mcUrl.port}`, ca: mc.ca };
@@ -255,6 +256,7 @@ export async function startGatewayStack(
     tls,
     upstream: upstreamEndpoint,
     publicOrigin: gatewayOrigin,
+    ...(opts.frameAncestor ? { frameAncestor: opts.frameAncestor } : {}),
     broker,
     tickets,
     registry,
@@ -272,6 +274,7 @@ export async function startGatewayStack(
     gatewayOrigin,
     ca: tls.cert,
     spki: spkiSha256Base64(tls.cert),
+    tls,
     broker,
     registry,
     events,

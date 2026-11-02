@@ -51,7 +51,12 @@ export function sanitizeRequestHeaders(h: IncomingHttpHeaders): Record<string, s
 }
 
 // Brauzerga qaytadigan javob headerlari: set-cookie (upstream cookie'si) va hop-by-hop olib tashlanadi.
-export function sanitizeResponseHeaders(h: IncomingHttpHeaders): Record<string, string | string[]> {
+// frameAncestor berilsa viewer faqat shu panel origin'ida iframe bo'lib ochiladi (ADR 0003): x-frame-options
+// olib tashlanadi, CSP frame-ancestors almashtiriladi (boshqa direktivalar saqlanadi).
+export function sanitizeResponseHeaders(
+  h: IncomingHttpHeaders,
+  opts: { frameAncestor?: string } = {},
+): Record<string, string | string[]> {
   const named = connectionTokens(h);
   const out: Record<string, string | string[]> = {};
   for (const [rawName, value] of Object.entries(h)) {
@@ -59,6 +64,16 @@ export function sanitizeResponseHeaders(h: IncomingHttpHeaders): Record<string, 
     const name = rawName.toLowerCase();
     if (name === 'set-cookie' || HOP_BY_HOP.has(name) || named.has(name)) continue;
     out[name] = value;
+  }
+  if (opts.frameAncestor) {
+    delete out['x-frame-options'];
+    const upstream = out['content-security-policy'];
+    const directives = (Array.isArray(upstream) ? upstream.join('; ') : (upstream ?? ''))
+      .split(';')
+      .map((d) => d.trim())
+      .filter((d) => d && !/^frame-ancestors(\s|$)/i.test(d));
+    directives.push(`frame-ancestors ${opts.frameAncestor}`);
+    out['content-security-policy'] = directives.join('; ');
   }
   return out;
 }

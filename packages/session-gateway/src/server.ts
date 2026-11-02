@@ -21,6 +21,7 @@ export interface GatewayOptions {
   tickets: TicketStore;
   registry: SessionRegistry;
   publicOrigin: string; // brauzer ko'radigan origin; WS Origin tekshiruvi shunga teng bo'lishi shart
+  frameAncestor?: string; // viewer'ni iframe'da ochadigan panel origin'i (berilmasa upstream XFO o'zgarmaydi)
   maxHtmlBytes?: number;
   upstreamTimeoutMs?: number; // upstream soketi shuncha jim tursa 504 (default 30 s)
   wsHighWaterMark?: number; // WS manzil buferi shundan oshsa manba pauza qilinadi, 4x da juft yopiladi (default 8 MiB)
@@ -222,7 +223,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
           }
         }
         const status = upRes.statusCode ?? 502;
-        const outHeaders = sanitizeResponseHeaders(upRes.headers);
+        const outHeaders = sanitizeResponseHeaders(upRes.headers, { frameAncestor: opts.frameAncestor });
         outHeaders['x-content-type-options'] = 'nosniff';
         const isHtml = String(upRes.headers['content-type'] ?? '')
           .trim()
