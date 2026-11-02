@@ -29,7 +29,7 @@ P0c (OS PoC) hali bajarilmagan. P1b capability'ni faqat qurilma hisobotidan saql
 - MeshAgent online eventlari (`subscribeDeviceEvents`) bilan doimiy holat — P1c events; hozircha so'rov paytida.
 - Compose'da MeshCentral service account va `MESHCENTRAL_*` env — P1d (gateway bilan birga). Shu paytgacha deploy qilingan hub'da binding endpointlari 409 `capability_unavailable`.
 - Qurilmani boshqa site'ga ko'chirish va nomini o'zgartirish; enrollment'ni ommaviy yaratish.
-- Companion klienti — P1e.
+- Companion klienti — P1e'da bajarildi ([ADR 0009](0009-companion.md)): mashina bo'yicha kalit, admin `enroll` CLI.
 
 ## Ma'lum cheklovlar
 
