@@ -27,7 +27,7 @@ const defaultFeed: FeedFactory = (lessonId, onFrame, accept) =>
 
 export function RoomPage(props: {
   createFeed?: FeedFactory;
-  renderActions?: (deviceId: string, lessonId: string) => ReactNode;
+  renderActions?: (deviceId: string, lessonId: string, hostname: string) => ReactNode;
 }) {
   const { roomId = '' } = useParams();
   const roomName = (useLocation().state as { name?: string } | null)?.name;
@@ -178,7 +178,7 @@ export function RoomPage(props: {
               canCommand={canCommand}
               onToggle={() => setSelected((s) => (s.includes(d.id) ? s.filter((x) => x !== d.id) : [...s, d.id]))}
               onClearHelp={clearHelp}
-              actions={lesson && canCommand ? props.renderActions?.(d.id, lesson.id) : null}
+              actions={lesson && canCommand ? props.renderActions?.(d.id, lesson.id, d.hostname) : null}
             />
           );
         })}
