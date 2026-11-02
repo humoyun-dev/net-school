@@ -38,4 +38,16 @@ describe('intent idempotency keys', () => {
     const intent = createIntent(async (key) => key);
     expect(await intent.run()).toMatch(/^[A-Za-z0-9_-]{8,128}$/);
   });
+  test('a changed request after a network error uses a new key', async () => {
+    const keys: string[] = [];
+    const intent = createIntent(async (key) => {
+      keys.push(key);
+      throw new TypeError('Failed to fetch');
+    });
+    await intent.run('{"text":"Salom"}').catch(() => {});
+    await intent.run('{"text":"Salom"}').catch(() => {});
+    await intent.run('{"text":"Salom, sinf"}').catch(() => {});
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
 });

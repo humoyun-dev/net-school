@@ -92,7 +92,7 @@ function fakeApi(opts: { activeLesson: Lesson | null }) {
   return { api: api as unknown as Api, sent };
 }
 
-function renderRoom(api: Api) {
+function renderRoom(api: Api, who = me) {
   const router = createMemoryRouter(
     [{ path: '/rooms/:roomId', element: <RoomPage createFeed={() => ({ close() {} })} /> }],
     {
@@ -102,7 +102,7 @@ function renderRoom(api: Api) {
   render(
     <LocaleProvider initial="uz">
       <ApiProvider api={api}>
-        <SessionContextForTest me={me}>
+        <SessionContextForTest me={who}>
           <RouterProvider router={router} />
         </SessionContextForTest>
       </ApiProvider>
@@ -140,5 +140,42 @@ describe('room page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Bloklash' }));
     await waitFor(() => expect(sent.some((s) => s.path.endsWith('/commands'))).toBe(true));
     expect(sent.find((s) => s.path.endsWith('/commands'))?.body).toEqual({ type: 'overlay.lock', payload: {} });
+  });
+  test('a school admin of another site sees the room but gets no commands or stream', async () => {
+    const { api } = fakeApi({ activeLesson: lesson });
+    const created: string[] = [];
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/rooms/:roomId',
+          element: (
+            <RoomPage
+              createFeed={(lessonId) => {
+                created.push(lessonId);
+                return { close() {} };
+              }}
+            />
+          ),
+        },
+      ],
+      { initialEntries: [`/rooms/${ROOM}`] },
+    );
+    const otherSiteAdmin = {
+      ...me,
+      user: { ...me.user, id: id(77) },
+      assignments: [{ role: 'school_admin' as const, siteId: id(8) }],
+    };
+    render(
+      <LocaleProvider initial="uz">
+        <ApiProvider api={api}>
+          <SessionContextForTest me={otherSiteAdmin}>
+            <RouterProvider router={router} />
+          </SessionContextForTest>
+        </ApiProvider>
+      </LocaleProvider>,
+    );
+    await screen.findByText('pc-01');
+    expect(screen.queryByRole('button', { name: 'Xabar yuborish' })).toBeNull();
+    expect(created).toEqual([]);
   });
 });

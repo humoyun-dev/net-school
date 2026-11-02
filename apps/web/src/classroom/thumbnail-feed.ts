@@ -6,9 +6,12 @@ interface Deps {
   accept: (deviceId: string) => boolean;
   onUnauthenticated?: () => void;
   onEnded?: () => void;
+  retryMs?: number;
 }
 
 const RETRY_MIN_MS = 1_000;
+// Upgrade rad etilsa brauzer faqat 1006 ko'radi: shuncha marta bir marta ham ochilmasa to'xtaymiz (audit to'lmasin).
+const MAX_REFUSALS = 5;
 const RETRY_MAX_MS = 30_000;
 
 function uuidOf(bytes: Uint8Array): string {
@@ -23,6 +26,8 @@ export class ThumbnailFeed {
   readonly #urls = new Map<string, string>();
   #socket: WebSocket | null = null;
   #retryMs = RETRY_MIN_MS;
+  #minRetryMs = RETRY_MIN_MS;
+  #refusals = 0;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #closed = false;
 
@@ -36,6 +41,8 @@ export class ThumbnailFeed {
       onUnauthenticated: deps.onUnauthenticated,
       onEnded: deps.onEnded,
     };
+    this.#minRetryMs = deps.retryMs ?? RETRY_MIN_MS;
+    this.#retryMs = this.#minRetryMs;
     this.#connect();
   }
 
@@ -44,7 +51,8 @@ export class ThumbnailFeed {
     ws.binaryType = 'arraybuffer';
     this.#socket = ws;
     ws.onopen = () => {
-      this.#retryMs = RETRY_MIN_MS;
+      this.#retryMs = this.#minRetryMs;
+      this.#refusals = 0;
     };
     ws.onmessage = (e: MessageEvent) => {
       if (!(e.data instanceof ArrayBuffer) || e.data.byteLength <= 16) return;
@@ -60,6 +68,8 @@ export class ThumbnailFeed {
       if (this.#closed || this.#socket !== ws) return;
       if (e.code === 4401) return this.#deps.onUnauthenticated?.();
       if (e.code === 4410) return this.#deps.onEnded?.();
+      this.#refusals += 1;
+      if (this.#refusals >= MAX_REFUSALS) return this.#deps.onEnded?.();
       this.#timer = setTimeout(() => this.#connect(), this.#retryMs);
       this.#retryMs = Math.min(RETRY_MAX_MS, this.#retryMs * 2);
     };

@@ -50,6 +50,8 @@ export class RemoteSessionController {
   #state: ViewerState = { kind: 'closed', reason: 'closed' };
   #session: RemoteSession | null = null;
   #renewing = false;
+  // Har open/close yangi avlod: kechikkan javob yopilgan panel sessiyasini tiriltirmaydi.
+  #generation = 0;
 
   constructor(deps: { api: ViewerApi; timer: RenewTimer; idempotencyKey: () => string }) {
     this.#api = deps.api;
@@ -81,31 +83,37 @@ export class RemoteSessionController {
   }
 
   async open(lessonId: string, deviceId: string, mode: ViewerMode): Promise<void> {
+    const gen = ++this.#generation;
     this.#set({ kind: 'opening' });
+    let session: RemoteSession | null = null;
     try {
-      const session = await this.#api.openSession(lessonId, deviceId, mode, this.#key());
+      session = await this.#api.openSession(lessonId, deviceId, mode, this.#key());
+      // Kutish paytida yopildi: sessiya darhol o'chiriladi, yangilash boshlanmaydi.
+      if (gen !== this.#generation) return void (await this.#api.close(session.id).catch(() => {}));
       this.#session = session;
       if (session.status !== 'active') {
         this.#set({ kind: 'closed', reason: closedReason(session) });
         return;
       }
       const { url } = await this.#api.ticket(session.id);
+      if (gen !== this.#generation) return;
       this.#set({ kind: 'open', url, mode, session });
       this.#timer.start(RENEW_INTERVAL_MS, () => void this.#renew());
     } catch (err) {
-      this.#fail(err);
+      if (gen === this.#generation) this.#fail(err);
     }
   }
 
   async #renew(): Promise<void> {
     const session = this.#session;
     const state = this.#state;
+    const gen = this.#generation;
     if (!session || state.kind !== 'open' || this.#renewing) return;
     this.#renewing = true;
     try {
       const fencing = state.mode === 'control' ? (session.lease?.fencing ?? undefined) : undefined;
       const next = await this.#api.renew(session.id, fencing);
-      if (this.#state.kind !== 'open') return;
+      if (gen !== this.#generation || this.#state.kind !== 'open') return;
       this.#session = next;
       if (next.status !== 'active') {
         this.#timer.stop();
@@ -124,6 +132,7 @@ export class RemoteSessionController {
   }
 
   async close(): Promise<void> {
+    this.#generation += 1;
     this.#timer.stop();
     const session = this.#session;
     this.#session = null;

@@ -73,4 +73,14 @@ describe('api client', () => {
     const { api } = setup(() => new Response(null, { status: 204 }));
     expect(await api.send('DELETE', '/api/v1/x', undefined, null)).toBeNull();
   });
+  test('a caller can opt out of the global 401 handling', async () => {
+    const { api, onUnauthenticated } = setup(() =>
+      json(401, { error: { code: 'unauthenticated', message: 'no', correlationId: null } }),
+    );
+    const err = await api
+      .send('POST', '/api/v1/auth/password', {}, null, { noAuthRedirect: true })
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 401 });
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+  });
 });
