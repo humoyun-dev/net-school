@@ -80,6 +80,24 @@ jobs:
       # test:e2e:companion o'zi test build yig'adi (oynalar yashirin rejimda).
       - run: xvfb-run -a pnpm test:e2e:companion
 
+  web-e2e:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      # Panel build + headless Chromium (TLS tekshiruvi SPKI pin bilan, ekran kerak emas).
+      - run: pnpm test:e2e:web
+
   compose-smoke:
     runs-on: ubuntu-latest
     defaults:

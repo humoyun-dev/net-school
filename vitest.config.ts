@@ -20,6 +20,16 @@ export default defineConfig({
         },
       },
       {
+        // Headless Chromium + panel build: `pnpm test`ga kirmaydi (pnpm test:e2e:web).
+        test: {
+          name: 'web-e2e',
+          include: ['apps/web/e2e/**/*.e2e.ts'],
+          testTimeout: 90_000,
+          hookTimeout: 120_000,
+          fileParallelism: false,
+        },
+      },
+      {
         test: {
           name: 'contract',
           include: ['tests/contracts/**/*.test.ts'],
