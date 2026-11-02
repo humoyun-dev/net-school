@@ -21,7 +21,7 @@ import {
 } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import { EventLog, Outbox } from '../events/event-log.ts';
-import { HelpRequestsService } from '../help-requests/help-requests.service.ts';
+import { type ClearedHelp, HelpRequestsService } from '../help-requests/help-requests.service.ts';
 import { closeRemoteSessions } from '../remote-sessions/closing.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort } from './mesh.ts';
 
@@ -182,15 +182,19 @@ export class DevicesService {
       .set({ releasedAt: at })
       .where(and(eq(lessonDevices.deviceId, deviceId), isNull(lessonDevices.releasedAt)))
       .returning({ lessonId: lessonDevices.lessonId });
-    // Xona voqealaridan oldin: sessiya va yordam qatorlari xona lock'idan oldin olinadi (closing.ts dagi lock tartibi).
+    // Xona voqealaridan oldin: qator lock'lari (yordam, sessiya) xona lock'idan oldin olinadi (closing.ts dagi lock
+    // tartibi); yordam voqealari sessiyalardan keyin.
+    const actorUserId = this.access.actor(ctx).userId;
+    const clearedHelp: ClearedHelp[] = [];
     for (const { lessonId } of left) {
-      await this.help.clearOpen(tx, { lessonId, deviceId }, 'device_left', this.access.actor(ctx).userId);
+      clearedHelp.push(...(await this.help.clearOpen(tx, { lessonId, deviceId }, 'device_left', actorUserId)));
     }
-    await closeRemoteSessions(tx, { deviceId }, 'device_left', at, this.access.actor(ctx).userId, ctx.correlationId, {
+    await closeRemoteSessions(tx, { deviceId }, 'device_left', at, actorUserId, ctx.correlationId, {
       events: this.events,
       outbox: this.outbox,
       audit: this.audit,
     });
+    await this.help.announceCleared(tx, clearedHelp);
     for (const { lessonId } of left) {
       const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId));
       if (!lesson) continue;

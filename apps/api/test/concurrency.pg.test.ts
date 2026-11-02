@@ -202,6 +202,38 @@ describe.skipIf(!realPg)('concurrency on real PostgreSQL', () => {
     }
   });
 
+  // ADR 0008: yopuvchi tranzaksiyalar avval hamma qator lock'larini (help, sessiya), keyin xona lock'ini oladi.
+  // Ochiq help + faol sessiya bilan dars tugashi sessiyani yopish (DELETE) bilan parallel: 40P01 (500) bo'lmasligi kerak.
+  test('ending a lesson with open help never deadlocks with remote session close', async () => {
+    for (let round = 0; round < 15; round += 1) {
+      const lesson = (await startLesson(app, teacher, roomId)).json;
+      now += 1;
+      expect(
+        (await deviceRequest(app, device.key, device.id, 'POST', '/api/v1/device/help-request', {}, now)).status,
+      ).toBe(200);
+      const session = await app.request('POST', `/api/v1/lessons/${lesson.id}/remote-sessions`, {
+        body: { deviceId: device.id, mode: 'view' },
+        cookie: teacher,
+        headers: idem(),
+      });
+      expect(session.status).toBe(201);
+      const [ended, closed] = await Promise.all([
+        sleep(Math.random() * 6).then(() => endLesson(app, teacher, lesson.id)),
+        sleep(Math.random() * 6).then(() =>
+          app.request('DELETE', `/api/v1/remote-sessions/${session.json.id}`, { cookie: teacher }),
+        ),
+      ]);
+      expect([ended.status, closed.status]).toEqual([200, 204]);
+      expect(await app.db.db.select().from(helpRequests).where(isNull(helpRequests.clearedAt))).toEqual([]);
+      expect(
+        await app.db.db
+          .select()
+          .from(remoteSessions)
+          .where(and(eq(remoteSessions.lessonId, lesson.id), ne(remoteSessions.status, 'closed'))),
+      ).toEqual([]);
+    }
+  });
+
   test('control lease is exclusive under concurrency', async () => {
     const lesson = (await startLesson(app, teacher, roomId)).json;
     const results = await Promise.all(
