@@ -51,3 +51,9 @@ export function useMe(): MeResponse {
 export const hasRole = (me: MeResponse, roles: Role[]) => me.assignments.some((a) => roles.includes(a.role));
 export const isOrgAdmin = (me: MeResponse) =>
   me.assignments.some((a) => a.role === 'school_admin' && a.siteId === null);
+
+// Testlar uchun: tayyor `me` bilan sessiya (API so'rovisiz).
+export function SessionContextForTest(props: { me: MeResponse; children: ReactNode }) {
+  const value: Session = { me: props.me, loading: false, refresh: async () => {}, logout: async () => {} };
+  return <SessionContext.Provider value={value}>{props.children}</SessionContext.Provider>;
+}

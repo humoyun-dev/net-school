@@ -114,3 +114,155 @@ label {
 .content {
   padding: 1.2rem;
 }
+.room-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.room-head h1 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+.room-head .spacer {
+  flex: 1;
+}
+.start-lesson {
+  display: grid;
+  gap: 0.7rem;
+  max-width: 420px;
+}
+.command-bar {
+  display: grid;
+  gap: 0.7rem;
+  margin-bottom: 1rem;
+}
+.command-bar .row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.command-bar .grow {
+  flex: 1;
+  min-width: 220px;
+}
+.command-bar .scope {
+  margin: 0;
+  display: flex;
+  gap: 0.8rem;
+  color: var(--muted);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.8rem;
+}
+.tile {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.4rem;
+}
+.tile header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.tile-help {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 2px #f3d19c;
+}
+.tile-selected {
+  border-color: var(--accent);
+}
+.thumb {
+  aspect-ratio: 16 / 10;
+  background: #e9edf2;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.badges {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.badge {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: var(--muted);
+}
+.presence-online,
+.agent-online {
+  background: #e3f3ea;
+  color: var(--ok);
+}
+.presence-stale,
+.agent-offline {
+  background: #fbeee0;
+  color: var(--warn);
+}
+.help {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--warn);
+  font-weight: 600;
+}
+.result {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.result-succeeded {
+  color: var(--ok);
+}
+.result-failed,
+.result-expired {
+  color: var(--bad);
+}
+.results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.results .count {
+  margin-left: 0.6rem;
+  font-size: 0.85rem;
+}
+.room-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  list-style: none;
+  padding: 0;
+}
+.room-list li > a {
+  display: block;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--accent);
+}
+.site {
+  margin-bottom: 1rem;
+}
