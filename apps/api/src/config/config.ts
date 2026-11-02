@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 
 export interface ApiConfig {
@@ -13,6 +14,8 @@ export interface ApiConfig {
   meshInstanceId: string;
   // Remote session gateway (ikkinchi HTTPS listener); mesh null bo'lsa null — gateway ishga tushmaydi.
   gateway: GatewayConfig | null;
+  // Veb-panel build katalogi (index.html bilan); null — API panel bermaydi.
+  webDistDir?: string | null;
 }
 
 export interface GatewayConfig {
@@ -87,6 +90,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     gateway = { port: gatewayPort, publicOrigin: gatewayOrigin ?? '' };
   }
 
+  const webDistDir = read(env, 'WEB_DIST_DIR') || null;
+  if (webDistDir && !existsSync(join(webDistDir, 'index.html'))) problems.push('WEB_DIST_DIR must contain index.html');
+
   // Xabar faqat o'zgaruvchi nomlarini aytadi, qiymatlarni emas.
   if (problems.length > 0) throw new Error(`Invalid configuration: ${problems.join('; ')}`);
   return {
@@ -98,6 +104,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     mesh,
     meshInstanceId,
     gateway,
+    webDistDir,
   };
 }
 

@@ -74,4 +74,15 @@ describe('secret files', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  test('WEB_DIST_DIR must contain index.html', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'web-'));
+    try {
+      expect(problemsOf({ ...base, WEB_DIST_DIR: dir })).toContain('WEB_DIST_DIR must contain index.html');
+      writeFileSync(join(dir, 'index.html'), '<!doctype html>');
+      expect(loadConfig({ ...base, WEB_DIST_DIR: dir }).webDistDir).toBe(dir);
+      expect(loadConfig(base).webDistDir).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
