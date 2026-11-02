@@ -215,4 +215,50 @@ describe('meshcentral config rendering', () => {
     const dockerfile = readFileSync(join(here, '..', '..', 'meshcentral', 'Dockerfile'), 'utf8');
     expect(dockerfile).toContain('COPY infra/meshcentral/agent-cache/ ./agents/');
   });
+  test('agent alias settings are rendered', () => {
+    const config = renderConfig(template, {
+      dbPassword: 'x',
+      certName: 'meshcentral',
+      trustedProxy: '172.31.250.10',
+      agent: { port: 4433, aliasDns: 'hub.school.lan', aliasPort: 4433 },
+    });
+    expect(config.settings).toMatchObject({ agentPort: 4433, agentAliasDNS: 'hub.school.lan', agentAliasPort: 4433 });
+    // API hali ichki `meshcentral` nomi bilan ulanadi (hostname tekshiruvi o'zgarmaydi).
+    expect(config.settings.cert).toBe('meshcentral');
+  });
+
+  test('an alias with a port or path is rejected', () => {
+    for (const aliasDns of ['hub.lan:4433', 'hub.lan/agent', 'user@hub', '']) {
+      expect(
+        () =>
+          renderConfig(template, {
+            dbPassword: 'x',
+            certName: 'meshcentral',
+            trustedProxy: '172.31.250.10',
+            agent: { port: 4433, aliasDns, aliasPort: 4433 },
+          }),
+        aliasDns,
+      ).toThrow(/MESHCENTRAL_AGENT_ALIAS_DNS/);
+    }
+  });
+
+  test('without agent settings nothing changes', () => {
+    const config = renderConfig(template, { dbPassword: 'x', certName: 'meshcentral', trustedProxy: '172.31.250.10' });
+    expect(config.settings.agentPort).toBeUndefined();
+    expect(config.settings.agentAliasDNS).toBeUndefined();
+  });
+
+  test('the poc overlay publishes only the agent port of meshcentral', () => {
+    const poc = parse(readFileSync(join(here, '..', 'compose.poc.yaml'), 'utf8'));
+    const mc = poc.services.meshcentral as Service;
+    expect(mc.ports).toEqual(['${MESH_AGENT_BIND:-0.0.0.0}:${MESH_AGENT_PORT:-4433}:4433']);
+    expect(JSON.stringify(mc.ports)).not.toContain('4430');
+    expect(mc.environment).toMatchObject({
+      MESHCENTRAL_AGENT_PORT: '4433',
+      MESHCENTRAL_AGENT_ALIAS_PORT: '${MESH_AGENT_PORT:-4433}',
+    });
+    expect(mc.environment?.MESHCENTRAL_AGENT_ALIAS_DNS).toMatch(/^\$\{MESH_AGENT_HOST:\?/);
+    // Overlay boshqa servislarga port qo'shmaydi.
+    expect(Object.keys(poc.services)).toEqual(['meshcentral']);
+  });
 });
