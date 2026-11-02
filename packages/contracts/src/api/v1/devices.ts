@@ -55,11 +55,17 @@ export const heartbeatLessonSchema = z.object({
     leaseExpiresAt: timestamp,
     leaseSeconds: z.int().positive(),
   }),
+  // Faqat faol darsda; null — miniatura so'ralmaydi. Interval va kenglikni server beradi.
+  thumbnails: z.object({ intervalMs: z.int().positive(), maxWidth: z.int().min(160).max(480) }).nullable(),
+  // Qurilmaning ochiq yordam so'rovi (Task 2 to'ldiradi).
+  helpRequest: z.object({ id: z.uuid(), raisedAt: timestamp }).nullable(),
 });
+export type HeartbeatLesson = z.infer<typeof heartbeatLessonSchema>;
 export const heartbeatResponseSchema = z.object({
   heartbeatIntervalSeconds: z.literal(10),
   lesson: heartbeatLessonSchema.nullable(),
 });
+export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
 export const deviceSchema = z.object({
   id: z.uuid(),

@@ -22,6 +22,7 @@ export type Action =
   | 'lesson.end'
   | 'command.issue'
   | 'command.read'
+  | 'help.clear'
   | 'remote.view'
   | 'remote.control'
   | 'remote.manage';
@@ -31,7 +32,7 @@ export interface Target {
   siteId?: string | null;
   roomId?: string;
   role?: RoleAssignment; // role.assign / role.remove uchun berilayotgan yoki olinayotgan rol
-  ownerUserId?: string; // dars egasi (lesson.end, command.issue, remote.view, remote.control)
+  ownerUserId?: string; // dars egasi (lesson.end, command.issue, help.clear, remote.view, remote.control)
 }
 
 export type Decision = { allowed: true } | { allowed: false; reason: 'scope_denied' };
@@ -56,6 +57,7 @@ const SITE_ADMIN_ACTIONS = new Set<Action>([
   'lesson.end',
   'command.issue',
   'command.read',
+  'help.clear',
   'remote.view',
   'remote.control',
   'remote.manage',
@@ -77,9 +79,15 @@ const TEACHER_ROOM_ACTIONS = new Set<Action>([
   'lesson.read',
   'command.read',
 ]);
-// Faqat o'z darsida: boshqa teacher darsini yopish, unga buyruq berish yoki masofaviy sessiya ochish mumkin emas.
+// Faqat o'z darsida: boshqa teacher darsini yopish, unga buyruq berish yoki yordam so'rovini yopish (help.clear = command.issue) yoki masofaviy sessiya ochish mumkin emas.
 // remote.manage (boshqaning sessiyasini yopish) teacher'da yo'q; it_support va student'da ham remote.* yo'q.
-const TEACHER_OWNER_ACTIONS = new Set<Action>(['lesson.end', 'command.issue', 'remote.view', 'remote.control']);
+const TEACHER_OWNER_ACTIONS = new Set<Action>([
+  'lesson.end',
+  'command.issue',
+  'help.clear',
+  'remote.view',
+  'remote.control',
+]);
 
 // Sof qoida: rad etish default; har ruxsat aniq rol va ko'lamdan kelib chiqadi.
 export function authorize(actor: Actor, action: Action, target: Target): Decision {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  eventsResponseSchema,
   heartbeatResponseSchema,
   idempotencyKeySchema,
   issueCommandRequestSchema,
@@ -7,6 +8,13 @@ import {
 } from '../src/index.ts';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+const lesson = () => ({
+  id: id(1),
+  overlay: { locked: true, sequence: '42', leaseExpiresAt: '2026-10-28T10:00:00.000Z', leaseSeconds: 120 },
+  thumbnails: { intervalMs: 1000, maxWidth: 480 },
+  helpRequest: null as { id: string; raisedAt: string } | null,
+});
 
 describe('command contracts', () => {
   test('command payload must match its type', () => {
@@ -59,11 +67,55 @@ describe('command contracts', () => {
     expect(
       heartbeatResponseSchema.safeParse({
         heartbeatIntervalSeconds: 10,
-        lesson: {
-          id: id(1),
-          overlay: { locked: true, sequence: '42', leaseExpiresAt: '2026-10-28T10:00:00.000Z', leaseSeconds: 120 },
-        },
+        lesson: lesson(),
       }).success,
     ).toBe(true);
+  });
+
+  test('heartbeat lesson requires thumbnails and helpRequest fields', () => {
+    const { thumbnails: _t, ...noThumbnails } = lesson();
+    const { helpRequest: _h, ...noHelp } = lesson();
+    for (const bad of [noThumbnails, noHelp]) {
+      expect(heartbeatResponseSchema.safeParse({ heartbeatIntervalSeconds: 10, lesson: bad }).success).toBe(false);
+    }
+    const ok = (l: unknown) => heartbeatResponseSchema.safeParse({ heartbeatIntervalSeconds: 10, lesson: l }).success;
+    expect(
+      ok({ ...lesson(), thumbnails: null, helpRequest: { id: id(2), raisedAt: '2026-11-02T10:00:00.000Z' } }),
+    ).toBe(true);
+    expect(ok({ ...lesson(), thumbnails: { intervalMs: 1000, maxWidth: 481 } })).toBe(false);
+    expect(ok({ ...lesson(), thumbnails: { intervalMs: 1000, maxWidth: 159 } })).toBe(false);
+    expect(ok({ ...lesson(), thumbnails: { intervalMs: 0, maxWidth: 480 } })).toBe(false);
+  });
+
+  test('events carry help request types and snapshot', () => {
+    const request = {
+      id: id(2),
+      lessonId: id(1),
+      deviceId: id(3),
+      raisedAt: '2026-11-02T10:00:00.000Z',
+      clearedAt: null,
+      clearReason: null,
+    };
+    const event = (type: string) => ({ seq: '1', type, at: '2026-11-02T10:00:00.000Z', lessonId: id(1), data: {} });
+    for (const type of ['help_request.raised', 'help_request.cleared'])
+      expect(eventsResponseSchema.safeParse({ cursor: '1', resync: false, events: [event(type)] }).success, type).toBe(
+        true,
+      );
+    expect(
+      eventsResponseSchema.safeParse({
+        cursor: '1',
+        resync: true,
+        snapshot: { lesson: null, commands: [], remoteSessions: [], helpRequests: [request] },
+        events: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      eventsResponseSchema.safeParse({
+        cursor: '1',
+        resync: true,
+        snapshot: { lesson: null, commands: [], remoteSessions: [] },
+        events: [],
+      }).success,
+    ).toBe(false);
   });
 });
