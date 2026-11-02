@@ -52,7 +52,15 @@ Maktab kompyuterida o'quvchi Companion'i: IT admin uni bir marta ro'yxatdan o'tk
 - Teacher help'ni yopsa qurilma buni keyingi heartbeat'da (≤ 10 s) ko'radi.
 - Miniatura ombori bitta API jarayonining xotirasida (ADR 0006 cheklovi).
 - Installer, imzolash, avtoyangilash — P2e.
-- Yakuniy review'ga qoldirilgan kichik nuqtalar ledger'da (`.superpowers/sdd/`), shu jumladan P1c/P1d'dan qolgan `#leaveLesson` buyruq target'larini xona lock'idan keyin bekor qilishi.
+- Tekshirilmagan: macOS/Windows'da overlay qulflangan va hub o'chiq paytda tizimdan chiqish/o'chirish (`before-quit`) — qo'lda sinash kerak.
+
+## Keyingi ishlar (review'larda topilgan, merge'ni to'smaydi)
+
+- **Kuzatiladigan (P1c/P1d'dan qolgan):** `#leaveLesson` buyruq target'larini xona lock'idan keyin bekor qiladi, receipt yo'li esa target → xona tartibida — Companion receipt'lari bilan deadlock (500) ehtimoli oshadi. Alohida issue.
+- Help: takroriy `raise` va bir vaqtdagi yopilishda 500 ehtimoli (qayta urinish yoki 409); `device_left` testida `clearedBy` tekshirilmaydi; `FOR SHARE` poyga testi uchun RED dalili yo'q.
+- Miniatura qabuli: noto'g'ri so'rov manzili (`//[`) 500 va error log beradi (400 bo'lishi kerak); qayta tekshiruv sekin bo'lsa soket navbati chegarasiz; handshake oldidagi DB bosqichida muddat yo'q; boshqa upgrade yo'llari 400 bilan rad etiladi (kelajakdagi WS marshrutlarini buzadi); rad javoblarida xato konverti va correlation ID yo'q; ping/TTL chegarasi/maksimal kadr testlari yo'q.
+- Companion: osilib qolgan capture miniaturani butunlay to'xtatadi (timeout kerak); qulf paytida displey qo'shilsa/olinsa overlay qayta hisoblanmaydi; xabar oynalari soni cheklanmagan; `#thumbnailCapability` boshlang'ich qiymati `available`; session-type aniqlash ikki joyda; macOS ekran ruxsati ilovani qayta ishga tushirishni talab qilishi mumkin (README'dagi "30 s" Mac'da tekshirilmagan).
+- Mayda: `helpClearReasonSchema` domain turi bilan bog'lanmagan; `thumbnails.controller.ts` DB so'rovlari service'da emas; ayrim izohlar.
 
 ## Dalillar
 
