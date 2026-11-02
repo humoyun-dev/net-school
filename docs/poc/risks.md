@@ -11,3 +11,5 @@
 | 7 | UAC secure desktop | Control paytida UAC oynasi ko'rinmasligi mumkin | Qo'lda tekshiruv 10-band; natija matrix'da |
 | 8 | Faqat Windows sinaladi | macOS, Linux X11 va Wayland bo'yicha da'vo yo'q | Matrix'da `not_tested`; release sharti (ADR 0007) bajarilmaguncha release yo'q |
 | 9 | Hub ish Mac'ida | Mac uxlasa yoki tarmoq o'zgarsa sinov uziladi | Sinov vaqtida Mac uyquga ketmasin (`caffeinate`) |
+| 10 | Agent porti (4433) LAN'ga agent yo'llarini ochadi, jumladan autentifikatsiyasiz `meshagents` yuklab olishni | `meshid`ni bilgan LAN foydalanuvchisi o'rnatuvchi olib, guruhga begona node qo'sha oladi | Node NetSchool qurilmasiga faqat admin `mesh bind` qilganda aylanadi. Pilotda `lockagentdownload` va LAN segmentlash ko'rib chiqiladi |
+| 11 | Intel AMT MPS server'i standart 4433'ni oladi | Port to'qnashuvi: agent server 4434'ga surilishi mumkin | `mpsPort: 0`. Runbook MeshCentral logini tekshiradi |

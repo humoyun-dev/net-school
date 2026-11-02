@@ -86,27 +86,27 @@ export async function hubctl(c, argv, print = console.log) {
   }
 }
 
-export function cliOptions(argv) {
+// --origin/--ca/--user yoki NETSCHOOL_HUB_ORIGIN/NETSCHOOL_HUB_CA/NETSCHOOL_HUB_USER; parol faqat NETSCHOOL_PASSWORD.
+export function cliOptions(argv, env = process.env) {
   const { values } = parseArgs({
     args: argv,
     options: { origin: { type: 'string' }, ca: { type: 'string' }, user: { type: 'string' } },
     allowPositionals: true,
     strict: false,
   });
-  const password = process.env.NETSCHOOL_PASSWORD;
-  if (!values.origin || !values.user || !password) {
-    throw new Error('--origin, --user and NETSCHOOL_PASSWORD are required (--ca for a private hub CA)');
+  const origin = values.origin ?? env.NETSCHOOL_HUB_ORIGIN;
+  const user = values.user ?? env.NETSCHOOL_HUB_USER;
+  const ca = values.ca ?? env.NETSCHOOL_HUB_CA;
+  const password = env.NETSCHOOL_PASSWORD;
+  if (!origin || !user || !password) {
+    throw new Error(
+      'set NETSCHOOL_HUB_ORIGIN, NETSCHOOL_HUB_USER and NETSCHOOL_PASSWORD (NETSCHOOL_HUB_CA for a private hub CA)',
+    );
   }
+  const own = ['--origin', '--ca', '--user'];
   return {
-    hub: {
-      origin: values.origin,
-      ca: values.ca ? readFileSync(values.ca) : undefined,
-      username: values.user,
-      password,
-    },
-    rest: argv.filter(
-      (a, i) => !['--origin', '--ca', '--user'].includes(a) && !['--origin', '--ca', '--user'].includes(argv[i - 1]),
-    ),
+    hub: { origin, ca: ca ? readFileSync(ca) : undefined, username: user, password },
+    rest: argv.filter((a, i) => !own.includes(a) && !own.includes(argv[i - 1])),
   };
 }
 

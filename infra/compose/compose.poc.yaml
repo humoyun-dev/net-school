@@ -1,6 +1,8 @@
 # P0c / pilot: LAN'dagi test kompyuterlarining MeshAgent'i hub'ga ulanishi uchun.
 #   docker compose -f compose.yaml -f compose.poc.yaml up -d
-# Faqat agent porti ochiladi; MeshCentral admin UI (4430) ichki tarmoqda qoladi.
+# Faqat MeshCentral agent porti ochiladi: admin UI va control.ashx (4430) ichki tarmoqda qoladi. Agent portida
+# agent yo'llari ham bor (agent.ashx, meshrelay, agent o'rnatuvchisini yuklab olish — meshid'ni bilgan LAN
+# foydalanuvchisi o'rnatuvchi ola oladi, lekin node faqat admin bog'lagandan keyin NetSchool qurilmasi bo'ladi).
 services:
   meshcentral:
     environment:
