@@ -2,6 +2,8 @@
 export const uz = {
   'power.forced': 'Majburan',
   'power.forcedHint': "Dastur to'sdi, 60 s dan keyin majburan bajarildi",
+  'remote.fullscreen': "To'liq ekran",
+  'remote.fullscreenHint': "Klaviatura to'liq Windows'da. Chiqish: Esc ni bosib turing",
   'remote.keys': 'Maxsus tugmalar',
   'remote.key.start': 'Start menyusi (Win)',
   'remote.key.taskbar': 'Vazifalar paneli (Win+T)',
@@ -185,6 +187,8 @@ export type Strings = Record<StringKey, string>;
 const ru: Strings = {
   'power.forced': 'Принудительно',
   'power.forcedHint': 'Приложение мешало, через 60 с выполнено принудительно',
+  'remote.fullscreen': 'Полный экран',
+  'remote.fullscreenHint': 'Клавиатура полностью в Windows. Выход: удерживайте Esc',
   'remote.keys': 'Спец. клавиши',
   'remote.key.start': 'Меню «Пуск» (Win)',
   'remote.key.taskbar': 'Панель задач (Win+T)',
@@ -365,6 +369,8 @@ const ru: Strings = {
 const en: Strings = {
   'power.forced': 'Forced',
   'power.forcedHint': 'An app blocked it; forced after 60 s',
+  'remote.fullscreen': 'Full screen',
+  'remote.fullscreenHint': 'Keyboard goes to Windows. To exit, hold Esc',
   'remote.keys': 'Special keys',
   'remote.key.start': 'Start menu (Win)',
   'remote.key.taskbar': 'Taskbar (Win+T)',

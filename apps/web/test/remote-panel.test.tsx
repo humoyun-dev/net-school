@@ -137,4 +137,44 @@ describe('remote panel', () => {
     expect(screen.getByText('Ulandi')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Maxsus tugmalar' })).toBeNull();
   });
+
+  // Mac'da Cmd+E/Cmd+L brauzerda qolib ketdi: to'liq ekran + Keyboard Lock bilan klaviatura butunlay Windows'ga.
+  test('immersive mode goes fullscreen and locks the keyboard until it is left', async () => {
+    const send = vi.fn(async (_method: string, path: string) => {
+      if (path.endsWith('/remote-sessions')) return { ...session, mode: 'control' };
+      if (path.endsWith('/ticket')) return { url: 'https://hub:8444/rs/redeem?ticket=t1', expiresAt: AT };
+      return null;
+    });
+    let fullscreen: Element | null = null;
+    const requestFullscreen = vi.fn(async function (this: Element) {
+      fullscreen = this;
+    });
+    Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', { configurable: true, value: requestFullscreen });
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => fullscreen });
+    const lock = vi.fn(async () => {});
+    const unlock = vi.fn();
+    Object.defineProperty(navigator, 'keyboard', { configurable: true, value: { lock, unlock } });
+
+    renderPanel(send as unknown as Api['send'], vi.fn(), 'control');
+    const frame = (await screen.findByTitle('pc-01')) as HTMLIFrameElement;
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: frame.contentWindow,
+          origin: 'https://hub:8444',
+          data: { source: 'netschool-viewer', state: 'connected' },
+        }),
+      );
+    });
+    fireEvent.click(screen.getByRole('button', { name: "To'liq ekran" }));
+    await waitFor(() => expect(lock).toHaveBeenCalled());
+    expect(requestFullscreen).toHaveBeenCalled();
+    expect((fullscreen as Element | null)?.classList.contains('remote-panel')).toBe(true);
+    // Esc ni bosib turish yoki brauzer to'liq ekrandan chiqarsa — klaviatura qo'yib yuboriladi.
+    fullscreen = null;
+    act(() => {
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+    expect(unlock).toHaveBeenCalled();
+  });
 });
