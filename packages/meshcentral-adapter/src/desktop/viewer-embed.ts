@@ -33,6 +33,7 @@ export function viewerBridge(win: BridgeWindow, panelOrigin: string): void {
     taskbar: 0x100054,
     lock: 0x10004c,
     desktop: 0x100044,
+    explorer: 0x100045,
     alt_tab: 0x020009,
     alt_f4: 0x020073,
     task_manager: 0x09001b,
