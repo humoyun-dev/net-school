@@ -162,6 +162,7 @@ describe('power page', () => {
               status: done ? 'succeeded' : 'sent',
               reason: null,
               sentAt: AT,
+              forcedAt: done ? AT : null,
               finishedAt: null,
             },
             {
@@ -172,6 +173,7 @@ describe('power page', () => {
               status: done ? 'failed' : 'sent',
               reason: done ? 'device_offline' : null,
               sentAt: AT,
+              forcedAt: null,
               finishedAt: null,
             },
           ],
@@ -181,6 +183,9 @@ describe('power page', () => {
     fireEvent.click(await screen.findByRole('button', { name: /O'chirish/ }));
     expect(await screen.findByText('pc-02')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('Kompyuter tarmoqda emas edi')).toBeTruthy(), { timeout: 4_000 });
+    // Yumshoq o'chirish to'silib, majburan bajarilgan kompyuter alohida belgilanadi.
+    expect(screen.getAllByText('Majburan')).toHaveLength(1);
+    expect(screen.getByText("Dastur to'sdi, 60 s dan keyin majburan bajarildi")).toBeTruthy();
     const after = calls;
     await act(() => new Promise((r) => setTimeout(r, 2_500)));
     expect(calls).toBe(after);

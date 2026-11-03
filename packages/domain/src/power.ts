@@ -64,6 +64,28 @@ export function judgePowerTarget(
   return { status: expired ? 'unknown' : 'sent', offlineSeenAt };
 }
 
+// Yumshoq o'chirish/qayta yuklashni Windows dasturi to'sib qo'yishi mumkin: shuncha vaqtdan keyin ham agent onlayn
+// bo'lsa bir marta majburiy buyruq yuboriladi (saqlanmagan ish yo'qoladi; admin natijada `forcedAt` ni ko'radi).
+export const POWER_FORCE_AFTER_MS = 60_000;
+
+export function shouldForcePowerTarget(
+  type: PowerActionType,
+  target: { sentAt: number; offlineSeenAt: number | null; forcedAt: number | null },
+  observation: PowerObservation | null,
+  now: number,
+): boolean {
+  if (type !== 'shutdown' && type !== 'reboot') return false;
+  if (target.forcedAt !== null || now - target.sentAt < POWER_FORCE_AFTER_MS) return false;
+  if (!observation?.agentOnline || observation.powerState === 'off') return false;
+  return type === 'shutdown' || target.offlineSeenAt === null;
+}
+
+// Majburiy buyruq oilasi; OS noma'lum bo'lsa null (majburiy bosqich o'tkazib yuboriladi).
+export function powerPlatform(osDescription: string | null): 'windows' | 'posix' | null {
+  if (!osDescription?.trim()) return null;
+  return /windows/i.test(osDescription) ? 'windows' : 'posix';
+}
+
 export interface WeeklyRule {
   daysOfWeek: number[]; // 1 = dushanba … 7 = yakshanba
   timeOfDay: string; // 'HH:MM'

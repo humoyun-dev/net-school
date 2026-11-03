@@ -54,6 +54,8 @@ export const powerTargetSchema = z.object({
   status: powerTargetStatusSchema,
   reason: powerFailureReasonSchema.nullable(),
   sentAt: timestamp.nullable(),
+  // Yumshoq amal 60 s ichida natija bermagani uchun majburiy buyruq yuborilgan vaqt (saqlanmagan ish yo'qolgan bo'lishi mumkin).
+  forcedAt: timestamp.nullable(),
   finishedAt: timestamp.nullable(),
 });
 export type PowerTarget = z.infer<typeof powerTargetSchema>;

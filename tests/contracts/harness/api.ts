@@ -115,6 +115,7 @@ export async function startApi(mc: MeshCentralInstance): Promise<ApiInstance> {
     reconcileEnrollment: (binding) => port.reconcileEnrollment(binding),
     subscribeDeviceEvents: (handler) => port.subscribeDeviceEvents(handler),
     requestPowerAction: (request) => port.requestPowerAction(request),
+    forcePowerAction: (request) => port.forcePowerAction(request),
   });
 
   const launch = async (): Promise<Running> => {

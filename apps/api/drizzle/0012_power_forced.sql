@@ -1,0 +1,1 @@
+ALTER TABLE "power_action_targets" ADD COLUMN "forced_at" timestamp with time zone;

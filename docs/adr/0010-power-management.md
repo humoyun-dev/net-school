@@ -103,3 +103,12 @@ IT admin markazdan kompyuterlarni o'chiradi, qayta yuklaydi, uxlatadi va (WoL qo
   - `power-schedules.test.ts`;
   - `db-invariants.test.ts`;
   - `concurrency.pg.test.ts` (`concurrent workers send each target once`).
+
+## Qo'shimcha: majburiy bosqich (2026-11-03)
+
+P0c Windows sinovida yumshoq o'chirishni (`poweraction`, `forced=0`) ochiq dastur to'sib qo'ydi: Windows "dasturlar yopilmoqda" ekranida qoldi, agent onlayn turaverdi. Egasining qarori: avval yumshoq, 60 s dan keyin ham agent onlayn bo'lsa (qayta yuklashda — hali oflayn bo'lmagan bo'lsa) bir marta majburiy buyruq.
+
+- MeshCentral `poweraction` `forced` ni agentga uzatmaydi, shuning uchun majburiy buyruq `runcommands` orqali (SYSTEM): Windows `shutdown /s|/r /f /t 0`, Linux/macOS `shutdown -h|-r now`. Buyruq qat'iy, foydalanuvchi matni yo'q; OS MeshCentral `osDescription` dan aniqlanadi, noma'lum bo'lsa majburiy bosqich yo'q.
+- Ko'pi bilan bir marta: `power_action_targets.forced_at` commit qilinadi, keyin yuboriladi; javob kelmasa qayta yuborilmaydi. Audit: `power.forced` (qurilma, platforma).
+- Natijada `forcedAt` ko'rinadi (panelda "Majburan"): saqlanmagan ish yo'qolgan bo'lishi mumkin. Uxlatish va yoqish majburiy bosqichsiz.
+
