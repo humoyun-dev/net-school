@@ -8,7 +8,7 @@ import {
   type ViewerState,
   workerRenewTimer,
 } from '@netschool/remote-viewer';
-import { Eye, Keyboard, LoaderCircle, MousePointer2, RotateCw, X as XIcon } from 'lucide-react';
+import { Eye, Keyboard, LoaderCircle, Maximize, MousePointer2, RotateCw, X as XIcon } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useApi } from '../api/api-context.tsx';
 import { type Api, ApiFailure } from '../api/client.ts';
@@ -23,6 +23,11 @@ import { TileActions, TileButton } from './device-tile.tsx';
 // Gateway ko'prigidagi ro'yxat bilan bir xil (viewer-embed.ts KEY_COMBOS): Mac/brauzer ushlaydigan Windows kombinatsiyalari.
 const KEY_COMBOS = ['start', 'taskbar', 'lock', 'desktop', 'alt_tab', 'alt_f4', 'task_manager'] as const;
 type KeyCombo = (typeof KEY_COMBOS)[number];
+
+// Keyboard Lock API (Chrome/Edge) TS lib.dom'da yo'q.
+type KeyboardLock = { lock?: () => Promise<void>; unlock?: () => void };
+const keyboardOf = (nav: Navigator): KeyboardLock | undefined =>
+  (nav as Navigator & { keyboard?: KeyboardLock }).keyboard;
 
 // apps/web Api → viewer paketi interfeysi; HTTP xatolari ViewerApiError bo'ladi.
 export function viewerApi(api: Api): ViewerApi {
@@ -94,6 +99,33 @@ export function RemotePanel(props: {
 
   const title = t('remote.title', { name: props.label });
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [immersive, setImmersive] = useState(false);
+  // To'liq ekran + Keyboard Lock (Chrome/Edge): Cmd+E, Cmd+L kabi brauzer kombinatsiyalari ham Windows'ga ketadi.
+  // Chiqish — Esc ni bosib turish (brauzer qoidasi) yoki qizil tugma. Keyboard Lock yo'q brauzerda faqat to'liq ekran.
+  const enterImmersive = async () => {
+    const panel = panelRef.current;
+    if (!panel?.requestFullscreen) return;
+    await panel.requestFullscreen();
+    await keyboardOf(navigator)
+      ?.lock?.()
+      .catch(() => {});
+    setImmersive(true);
+    frameRef.current?.focus();
+  };
+  useEffect(() => {
+    const onChange = () => {
+      if (document.fullscreenElement) return;
+      keyboardOf(navigator)?.unlock?.();
+      setImmersive(false);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+      keyboardOf(navigator)?.unlock?.();
+    };
+  }, []);
   const [link, setLink] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const viewerOrigin = state.kind === 'open' ? new URL(state.url).origin : null;
   // Gateway ko'prigi (viewer-embed): faqat shu iframe va gateway origin'idan kelgan holat qabul qilinadi.
@@ -130,8 +162,9 @@ export function RemotePanel(props: {
   return (
     <Dialog open onOpenChange={(open) => !open && props.onClose()}>
       <DialogContent
+        ref={panelRef}
         aria-describedby={undefined}
-        className="remote-panel flex h-[min(90vh,940px)] w-[min(96vw,1480px)] flex-col overflow-hidden p-0"
+        className="remote-panel flex h-[min(90vh,940px)] w-[min(96vw,1480px)] flex-col overflow-hidden p-0 [&:fullscreen]:top-0 [&:fullscreen]:left-0 [&:fullscreen]:h-screen [&:fullscreen]:w-screen [&:fullscreen]:max-w-none [&:fullscreen]:translate-x-0 [&:fullscreen]:translate-y-0 [&:fullscreen]:rounded-none"
         overlayClassName="bg-black/45 backdrop-blur-[2px]"
       >
         <header className="relative flex h-10 shrink-0 items-center gap-2 border-b-[0.5px] border-separator bg-window px-3">
@@ -169,6 +202,15 @@ export function RemotePanel(props: {
                   <RotateCw />
                   {t('remote.reconnect')}
                 </Button>
+              )}
+              {props.mode === 'control' && link === 'connected' && !immersive && (
+                <Button size="sm" variant="secondary" onClick={() => void enterImmersive()}>
+                  <Maximize />
+                  {t('remote.fullscreen')}
+                </Button>
+              )}
+              {immersive && (
+                <span className="hidden text-[11px] text-muted-foreground md:inline">{t('remote.fullscreenHint')}</span>
               )}
               {props.mode === 'control' && link === 'connected' && (
                 <DropdownMenu>
