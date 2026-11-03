@@ -4,13 +4,18 @@
 
 export interface BridgeWindow {
   parent: { postMessage(message: unknown, targetOrigin: string): void } | null;
-  desktop?: { State?: number } | null;
+  desktop?: {
+    State?: number;
+    // MeshCentral agent-desktop: e.code'ni skan-kodga aylantirib yuboradi.
+    m?: { KeyAction: { DOWN: number; UP: number }; SendKeyMsg(action: number, event: unknown): void };
+  } | null;
   currentNode?: unknown;
   connectDesktop?: (event: null, contype: number) => void;
   sendCAD?: () => void;
   setInterval(fn: () => void, ms: number): unknown;
   addEventListener(type: 'message', fn: (event: { source: unknown; origin: string; data: unknown }) => void): void;
   addEventListener(type: 'mousedown', fn: () => void, capture: boolean): void;
+  addEventListener(type: 'keydown' | 'keyup', fn: (event: BridgeKeyEvent) => void, capture: boolean): void;
   focus(): void;
   // MeshCentral: #deskkeys select qiymati (bayroqlar << 16 | tugma) va uni yuboradigan deskSendKeys().
   deskSendKeys?: () => void;
@@ -22,6 +27,16 @@ export interface BridgeWindow {
     } | null;
     createElement(tag: 'option'): { value: string };
   };
+}
+
+export interface BridgeKeyEvent {
+  key: string;
+  code: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  preventDefault(): void;
+  stopImmediatePropagation(): void;
 }
 
 // Sahifaga `toString()` bilan joylanadi: tashqi o'zgaruvchi va import ishlatilmaydi.
@@ -89,6 +104,32 @@ export function viewerBridge(win: BridgeWindow, panelOrigin: string): void {
   // MeshCentral canvas mousedown'da preventDefault qiladi va brauzer iframe'ga fokus bermaydi: klaviatura
   // (document.onkeydown) yetmaydi. Har bosishda iframe oynasi fokus oladi (capture — MeshCentral'dan oldin).
   win.addEventListener('mousedown', () => win.focus(), true);
+  // macOS: Cmd bosib turilganda brauzer keypress chiqarmaydi, MeshCentral esa harfni faqat keypress'da yuboradi —
+  // Windows faqat Win'ni olardi. Cmd+harf bu yerda (window capture, MeshCentral'dan oldin) kod bilan yuboriladi;
+  // Mac Cmd bosilganda harfning keyup'ini yo'qotishi mumkin, shuning uchun bosish va qo'yish birga.
+  const cmdLetter = (e: BridgeKeyEvent) =>
+    e.metaKey && !e.ctrlKey && !e.altKey && typeof e.key === 'string' && e.key.length === 1;
+  win.addEventListener(
+    'keydown',
+    (e) => {
+      const m = win.desktop?.m;
+      if (!cmdLetter(e) || stateNow() !== CONNECTED || !m) return;
+      m.SendKeyMsg(m.KeyAction.DOWN, e);
+      m.SendKeyMsg(m.KeyAction.UP, e);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    },
+    true,
+  );
+  win.addEventListener(
+    'keyup',
+    (e) => {
+      if (!cmdLetter(e) || stateNow() !== CONNECTED) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    },
+    true,
+  );
   win.addEventListener('message', (event) => {
     const data = event.data as { target?: unknown; command?: unknown } | null;
     if (event.source !== win.parent || event.origin !== panelOrigin || !data || data.target !== 'netschool-viewer') {
