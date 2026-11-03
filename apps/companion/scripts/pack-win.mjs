@@ -10,6 +10,8 @@ import { readZip, writeZip } from './zip.mjs';
 export const ELECTRON_VERSION = '45.2.1';
 const EXE = 'NetSchool Companion.exe';
 const crlf = (lines) => `${lines.join('\r\n')}\r\n`;
+const RUN_KEY = 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run';
+const RUN_VALUE = 'NetSchool Companion';
 
 const ENROLL_CMD = crlf([
   '@echo off',
@@ -17,6 +19,16 @@ const ENROLL_CMD = crlf([
   'setlocal',
   'set ELECTRON_RUN_AS_NODE=1',
   `"%~dp0${EXE}" "%~dp0resources\\app\\dist\\enroll.mjs" %*`,
+  'if errorlevel 1 exit /b %errorlevel%',
+  "rem Har foydalanuvchi kirishida Companion o'zi ishga tushadi (HKLM: oddiy foydalanuvchi o'chira olmaydi).",
+  `reg add "${RUN_KEY}" /v "${RUN_VALUE}" /t REG_SZ /d "\\"%~dp0${EXE}\\"" /f >nul`,
+  'if errorlevel 1 (echo autostart yozilmadi: enroll.cmd ni administrator sifatida oching & exit /b 5)',
+  'echo autostart: NetSchool Companion har kirishda ishga tushadi',
+]);
+const REMOVE_AUTOSTART_CMD = crlf([
+  '@echo off',
+  "rem Autostart'ni olib tashlash (administrator sifatida).",
+  `reg delete "${RUN_KEY}" /v "${RUN_VALUE}" /f`,
 ]);
 const START_CMD = crlf(['@echo off', `start "" "%~dp0${EXE}"`]);
 
@@ -60,6 +72,7 @@ export async function packWin({ arch, appDistDir, outDir, getElectronZip, versio
   entries.push(
     { name: 'enroll.cmd', data: Buffer.from(ENROLL_CMD) },
     { name: 'start.cmd', data: Buffer.from(START_CMD) },
+    { name: 'remove-autostart.cmd', data: Buffer.from(REMOVE_AUTOSTART_CMD) },
   );
   mkdirSync(outDir, { recursive: true });
   const out = join(outDir, `netschool-companion-win32-${arch}.zip`);

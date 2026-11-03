@@ -83,4 +83,25 @@ describe('Windows portable package', () => {
     expect(enroll).toContain('\r\n');
     expect(names.get('start.cmd')).toContain('"%~dp0NetSchool Companion.exe"');
   });
+
+  // Companion har foydalanuvchi kirishida o'zi ishga tushadi: HKLM Run (oddiy o'quvchi o'chira olmaydi).
+  test('a successful enroll registers Companion to start at every sign-in', async () => {
+    const out = await pack('x64');
+    const names = new Map(readZip(readFileSync(out)).map((e) => [e.name, e.data.toString()]));
+    const lines = (names.get('enroll.cmd') ?? '').split('\r\n');
+    const run = lines.findIndex((l) => l.includes('enroll.mjs'));
+    const stop = lines.indexOf('if errorlevel 1 exit /b %errorlevel%');
+    const reg = lines.findIndex((l) => l.startsWith('reg add '));
+    // Ro'yxatdan o'tish yiqilsa autostart yozilmaydi.
+    expect(run).toBeGreaterThanOrEqual(0);
+    expect(stop).toBe(run + 1);
+    expect(reg).toBeGreaterThan(stop);
+    expect(lines[reg]).toBe(
+      'reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run" /v "NetSchool Companion" /t REG_SZ /d "\\"%~dp0NetSchool Companion.exe\\"" /f >nul',
+    );
+    const off = names.get('remove-autostart.cmd') ?? '';
+    expect(off).toContain(
+      'reg delete "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run" /v "NetSchool Companion" /f',
+    );
+  });
 });
