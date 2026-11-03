@@ -1,5 +1,5 @@
 // MeshCentral viewer sahifasiga gateway qo'shadigan "ko'prik": MeshCentral'ning o'z panellari yashiriladi, ekran
-// o'zi ulanadi, holat panel oynasiga postMessage bilan yuboriladi, paneldan faqat `connect` va `cad` qabul qilinadi.
+// o'zi ulanadi, holat panel oynasiga postMessage bilan yuboriladi, paneldan faqat `connect`, `focus` va `cad` qabul qilinadi.
 // Ruxsatlar o'zgarmaydi: har kadr baribir viewer-policy filtridan o'tadi (ko'rish rejimida kiritish tashlanadi).
 
 export interface BridgeWindow {
@@ -10,6 +10,8 @@ export interface BridgeWindow {
   sendCAD?: () => void;
   setInterval(fn: () => void, ms: number): unknown;
   addEventListener(type: 'message', fn: (event: { source: unknown; origin: string; data: unknown }) => void): void;
+  addEventListener(type: 'mousedown', fn: () => void, capture: boolean): void;
+  focus(): void;
 }
 
 // Sahifaga `toString()` bilan joylanadi: tashqi o'zgaruvchi va import ishlatilmaydi.
@@ -46,12 +48,16 @@ export function viewerBridge(win: BridgeWindow, panelOrigin: string): void {
       post('connecting');
     } else post('disconnected');
   }, 300);
+  // MeshCentral canvas mousedown'da preventDefault qiladi va brauzer iframe'ga fokus bermaydi: klaviatura
+  // (document.onkeydown) yetmaydi. Har bosishda iframe oynasi fokus oladi (capture — MeshCentral'dan oldin).
+  win.addEventListener('mousedown', () => win.focus(), true);
   win.addEventListener('message', (event) => {
     const data = event.data as { target?: unknown; command?: unknown } | null;
     if (event.source !== win.parent || event.origin !== panelOrigin || !data || data.target !== 'netschool-viewer') {
       return;
     }
     if (data.command === 'connect') connect();
+    else if (data.command === 'focus') win.focus();
     else if (data.command === 'cad' && stateNow() === CONNECTED && typeof win.sendCAD === 'function') win.sendCAD();
   });
 }

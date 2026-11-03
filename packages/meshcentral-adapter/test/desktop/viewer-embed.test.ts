@@ -9,6 +9,8 @@ function fakePage() {
   const calls: string[] = [];
   let tick: () => void = () => {};
   let onMessage: (e: { source: unknown; origin: string; data: unknown }) => void = () => {};
+  let onMouseDown: () => void = () => {};
+  let focused = 0;
   const parent = { postMessage: (msg: unknown, origin: string) => posted.push({ msg, origin }) };
   const win: BridgeWindow = {
     parent,
@@ -26,6 +28,10 @@ function fakePage() {
     },
     addEventListener: (type: string, fn: typeof onMessage) => {
       if (type === 'message') onMessage = fn;
+      if (type === 'mousedown') onMouseDown = fn as unknown as () => void;
+    },
+    focus: () => {
+      focused += 1;
     },
   };
   const states = () => posted.map((p) => (p.msg as { state: string }).state);
@@ -37,6 +43,8 @@ function fakePage() {
     states,
     tick: () => tick(),
     send: (e: Parameters<typeof onMessage>[0]) => onMessage(e),
+    mouseDown: () => onMouseDown(),
+    focused: () => focused,
   };
 }
 
@@ -88,6 +96,22 @@ describe('viewer bridge', () => {
     p.send({ source: p.parent, origin: PANEL, data: cmd('cad') });
     p.send({ source: p.parent, origin: PANEL, data: { target: 'netschool-viewer', command: 'eval' } });
     expect(p.calls).toEqual(['connect:null:3', 'connect:null:3', 'cad']);
+  });
+
+  // MeshCentral canvas mousedown'da preventDefault qiladi: iframe fokus olmaydi va klaviatura yetmaydi (P0c topilmasi).
+  test('a click on the remote screen focuses the viewer so the keyboard reaches it', () => {
+    const p = fakePage();
+    viewerBridge(p.win, PANEL);
+    expect(p.focused()).toBe(0);
+    p.mouseDown();
+    expect(p.focused()).toBe(1);
+  });
+
+  test('the panel can hand keyboard focus to the viewer', () => {
+    const p = fakePage();
+    viewerBridge(p.win, PANEL);
+    p.send({ source: p.parent, origin: PANEL, data: { target: 'netschool-viewer', command: 'focus' } });
+    expect(p.focused()).toBe(1);
   });
 
   test('the embed is one style and one self-contained script bound to the panel origin', () => {

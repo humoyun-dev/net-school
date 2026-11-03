@@ -93,6 +93,9 @@ describe('remote panel', () => {
     expect(screen.queryByRole('button', { name: 'Ctrl+Alt+Del' })).toBeNull();
     bridge('connected');
     expect(screen.getByText('Ulandi')).toBeTruthy();
+    // Boshqarish rejimida ulangan zahoti klaviatura fokusi ekranga beriladi (o'qituvchi bosmasdan yoza oladi).
+    await waitFor(() => expect(document.activeElement).toBe(frame));
+    expect(toInner).toHaveBeenCalledWith({ target: 'netschool-viewer', command: 'focus' }, 'https://hub:8444');
     fireEvent.click(screen.getByRole('button', { name: 'Ctrl+Alt+Del' }));
     expect(toInner).toHaveBeenLastCalledWith({ target: 'netschool-viewer', command: 'cad' }, 'https://hub:8444');
   });

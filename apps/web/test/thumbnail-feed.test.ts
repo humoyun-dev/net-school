@@ -92,28 +92,42 @@ describe('thumbnail feed', () => {
     expect(FakeSocket.last).toBe(first);
     feed.close();
   });
-  test('a stream refused before it ever opens stops after a few attempts', async () => {
+  // P0c: hub 2 daqiqa to'xtadi — panel 5 urinishdan keyin butunlay to'xtab, sahifa yangilanguncha miniatura
+  // ko'rsatmadi. Endi tez urinishlar tugagach sekin oraliqda davom etadi va hub qaytsa o'zi tiklanadi.
+  test('a stream that keeps failing slows down but recovers when the hub is back', async () => {
     const urls = fakeUrl();
     const events: string[] = [];
     let created = 0;
-    class Counting extends FakeSocket {
+    let hubBack = false;
+    const sockets: FakeSocket[] = [];
+    class Flaky extends FakeSocket {
       constructor(url: string) {
         super(url);
         created += 1;
-        // Upgrade rad etildi: brauzer faqat 1006 ko'radi, onopen chaqirilmaydi.
-        setTimeout(() => this.onclose?.({ code: 1006 }), 0);
+        sockets.push(this);
+        // Hub o'chiq: brauzer faqat 1006 ko'radi, onopen chaqirilmaydi.
+        setTimeout(() => (hubBack ? this.onopen?.() : this.onclose?.({ code: 1006 })), 0);
       }
     }
     const feed = new ThumbnailFeed('wss://hub/x', () => {}, {
-      WebSocket: Counting as unknown as typeof WebSocket,
+      WebSocket: Flaky as unknown as typeof WebSocket,
       URL: urls,
       accept: () => true,
-      onEnded: () => events.push('gave-up'),
+      onEnded: () => events.push('ended'),
       retryMs: 1,
+      slowRetryMs: 20,
     });
-    await new Promise((r) => setTimeout(r, 200));
-    expect(created).toBe(5);
-    expect(events).toEqual(['gave-up']);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(created).toBeGreaterThan(5);
+    expect(created).toBeLessThan(15);
+    expect(events).toEqual([]);
+    hubBack = true;
+    await new Promise((r) => setTimeout(r, 60));
+    const live = sockets.at(-1);
+    expect(live?.onopen).toBeTypeOf('function');
+    const opened = created;
+    await new Promise((r) => setTimeout(r, 60));
+    expect(created).toBe(opened);
     feed.close();
   });
 });
