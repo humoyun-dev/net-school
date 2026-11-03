@@ -1,0 +1,26 @@
+{
+  "startedAt": "2026-11-03T04:44:08.335Z",
+  "hub": "https://10.10.0.189",
+  "room": "Lab-1",
+  "device": {
+    "id": "5e08a7af-9e3d-4eb6-9ce2-36877bbbc197",
+    "hostname": "DESKTOP-NAF58T0"
+  },
+  "note": "Panel orqali yuborilgan; Notepad saqlanmagan matn bilan o‘chishni to‘sdi, 60 s dan keyin majburiy bosqich (PR #15).",
+  "steps": [
+    {
+      "id": "power_shutdown",
+      "title": "Quvvat: shutdown",
+      "status": "passed",
+      "evidence": {
+        "actionId": "9a370ee3-e57e-474f-a25b-e2020e68aa86",
+        "actionStatus": "completed",
+        "target": "succeeded",
+        "sentAt": "2026-11-03T04:44:08.702Z",
+        "forcedAt": "2026-11-03T04:45:08.865Z",
+        "finishedAt": "2026-11-03T04:46:06.051Z"
+      }
+    }
+  ],
+  "finishedAt": "2026-11-03T04:46:06.051Z"
+}
