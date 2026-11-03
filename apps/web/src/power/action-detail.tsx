@@ -102,16 +102,21 @@ export function ActionDetail(props: { id: string; onBack: () => void }) {
                   <tr key={target.deviceId} className="border-separator [&+&]:border-t-[0.5px]">
                     <td className="px-3.5 py-2 font-medium">{target.hostname}</td>
                     <td className={`px-2 py-2 power-${target.status}`}>
-                      <Badge tone={TARGET_TONE[target.status] ?? 'neutral'}>
-                        {t(`power.target.${target.status}` as StringKey)}
-                      </Badge>
+                      <span className="flex flex-wrap gap-1">
+                        <Badge tone={TARGET_TONE[target.status] ?? 'neutral'}>
+                          {t(`power.target.${target.status}` as StringKey)}
+                        </Badge>
+                        {target.forcedAt && <Badge tone="warning">{t('power.forced')}</Badge>}
+                      </span>
                     </td>
                     <td className="px-3.5 py-2 text-[12px] text-muted-foreground">
                       {target.reason
                         ? t(`power.reason.${target.reason}` as StringKey)
-                        : target.status === 'unknown'
-                          ? t('power.unknownHint')
-                          : ''}
+                        : target.forcedAt
+                          ? t('power.forcedHint')
+                          : target.status === 'unknown'
+                            ? t('power.unknownHint')
+                            : ''}
                     </td>
                   </tr>
                 ))}

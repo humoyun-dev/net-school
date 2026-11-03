@@ -1,4 +1,5 @@
 import type {
+  AuthorizedForcedPowerRequest,
   AuthorizedPowerRequest,
   DeviceBinding,
   DeviceEvent,
@@ -7,6 +8,7 @@ import type {
   EnrollmentResult,
   PowerRequestResult,
   Unsubscribe,
+  UpstreamDeviceRef,
 } from '@netschool/domain';
 import type { MeshRequester } from './control-client.ts';
 import { AdapterError } from './errors.ts';
@@ -16,6 +18,11 @@ import { formatNodeId, type SiteMeshScope } from './node-id.ts';
 
 // Upstream meshctrl.js devicepower: 2 — o'chirish, 3 — qayta yuklash, 4 — uxlatish.
 const POWER_ACTION_TYPE = { shutdown: 2, reboot: 3, sleep: 4 } as const;
+// runcommands type: 1 — Windows cmd, 3 — Linux/BSD/macOS shell (meshuser.js).
+const FORCED_COMMAND = {
+  windows: { shutdown: { shell: 1, cmds: 'shutdown /s /f /t 0' }, reboot: { shell: 1, cmds: 'shutdown /r /f /t 0' } },
+  posix: { shutdown: { shell: 3, cmds: 'shutdown -h now' }, reboot: { shell: 3, cmds: 'shutdown -r now' } },
+} as const;
 
 // wakedevices bitta node uchun diagnostik matn qaytaradi (meshuser.js).
 function wakeResult(result: unknown): PowerRequestResult {
@@ -56,15 +63,18 @@ export class MeshCentralDeviceManagement implements DeviceManagementPort {
     return snapshot ? { status: 'bound', snapshot } : { status: 'node_not_found' };
   }
 
-  // Har chaqiruv bitta node uchun: ko'p nodeid'li poweraction bitta responseid bilan bir nechta javob yuboradi.
-  // poweraction javobi huquq tekshiruvidan oldin 'ok' — bajarilgani faqat kuzatuv bilan aniqlanadi.
-  async requestPowerAction(request: AuthorizedPowerRequest): Promise<PowerRequestResult> {
-    const scope = this.#sites.get(request.siteId);
-    const { upstream } = request;
+  #scoped(siteId: string, upstream: UpstreamDeviceRef): UpstreamDeviceRef {
+    const scope = this.#sites.get(siteId);
     if (!scope || scope.meshInstanceId !== upstream.meshInstanceId || scope.meshDomainId !== upstream.meshDomainId) {
       throw new AdapterError('scope_denied', 'Node is outside the site scope');
     }
-    const nodeids = [formatNodeId(upstream)];
+    return upstream;
+  }
+
+  // Har chaqiruv bitta node uchun: ko'p nodeid'li poweraction bitta responseid bilan bir nechta javob yuboradi.
+  // poweraction javobi huquq tekshiruvidan oldin 'ok' — bajarilgani faqat kuzatuv bilan aniqlanadi.
+  async requestPowerAction(request: AuthorizedPowerRequest): Promise<PowerRequestResult> {
+    const nodeids = [formatNodeId(this.#scoped(request.siteId, request.upstream))];
     if (request.type === 'wake') {
       // Klient 'ok' bo'lmagan result'ni upstream_rejected qiladi; diagnostik matn detail'da.
       const result = await this.#client.request<{ result?: unknown }>('wakedevices', { nodeids }).then(
@@ -83,6 +93,19 @@ export class MeshCentralDeviceManagement implements DeviceManagementPort {
     if (reply.result !== 'ok')
       throw new AdapterError('invalid_upstream_message', 'Unexpected poweraction reply', reply);
     return { accepted: true };
+  }
+
+  // MeshCentral `poweraction` `forced` ni agentga uzatmaydi: majburiy amal qat'iy (foydalanuvchi matnisiz) buyruq bilan
+  // runcommands orqali SYSTEM huquqida. Server muvaffaqiyatda `result: 'OK'` qaytaradi (klient uni rad deb o'qiydi).
+  async forcePowerAction(request: AuthorizedForcedPowerRequest): Promise<void> {
+    const nodeids = [formatNodeId(this.#scoped(request.siteId, request.upstream))];
+    const command = FORCED_COMMAND[request.platform][request.type];
+    await this.#client
+      .request('runcommands', { nodeids, type: command.shell, cmds: command.cmds, runAsUser: 0 })
+      .catch((err: unknown) => {
+        if (err instanceof AdapterError && err.code === 'upstream_rejected' && err.detail === 'OK') return;
+        throw err;
+      });
   }
 
   subscribeDeviceEvents(handler: (event: DeviceEvent) => void): Unsubscribe {

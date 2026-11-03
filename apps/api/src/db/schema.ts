@@ -716,6 +716,8 @@ export const powerActionTargets = pgTable(
     reason: text('reason'),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     offlineSeenAt: timestamp('offline_seen_at', { withTimezone: true }),
+    // Yumshoq amal 60 s ichida natija bermadi: majburiy buyruq yuborilgan vaqt (ko'pi bilan bir marta).
+    forcedAt: timestamp('forced_at', { withTimezone: true }),
     // Site snapshot'i olinmadi: target shu vaqtgacha kechiktiriladi; deferred_since'dan 10 daqiqa o'tsa — failed.
     retryAt: timestamp('retry_at', { withTimezone: true }),
     deferredSince: timestamp('deferred_since', { withTimezone: true }),

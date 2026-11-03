@@ -10,6 +10,8 @@ import {
   POWER_WAVE_SIZE,
   type PowerActionType,
   type PowerTargetStatus,
+  powerPlatform,
+  shouldForcePowerTarget,
 } from '@netschool/domain';
 import { and, asc, eq, inArray, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 import { CLOCK, type Clock } from '../../common/clock.ts';
@@ -350,6 +352,7 @@ export class PowerWorker implements OnApplicationBootstrap, OnModuleDestroy {
         siteId: powerActionTargets.siteId,
         sentAt: powerActionTargets.sentAt,
         offlineSeenAt: powerActionTargets.offlineSeenAt,
+        forcedAt: powerActionTargets.forcedAt,
         type: powerActions.type,
         nodeId: meshBindings.meshNodeId,
       })
@@ -370,6 +373,23 @@ export class PowerWorker implements OnApplicationBootstrap, OnModuleDestroy {
         observation,
         now,
       );
+      if (
+        judged.status === 'sent' &&
+        node &&
+        r.nodeId !== null &&
+        shouldForcePowerTarget(
+          r.type as PowerActionType,
+          {
+            sentAt: r.sentAt?.getTime() ?? now,
+            offlineSeenAt: judged.offlineSeenAt,
+            forcedAt: r.forcedAt?.getTime() ?? null,
+          },
+          observation,
+          now,
+        )
+      ) {
+        await this.#force({ ...r, nodeId: r.nodeId }, node, now);
+      }
       if (judged.status === 'sent' && judged.offlineSeenAt === prevOffline) continue;
       await this.db
         .update(powerActionTargets)
@@ -386,6 +406,49 @@ export class PowerWorker implements OnApplicationBootstrap, OnModuleDestroy {
             eq(powerActionTargets.status, 'sent'),
           ),
         );
+    }
+  }
+
+  // Yumshoq amal to'sildi: bir marta majburiy buyruq. forcedAt avval commit qilinadi (ko'pi bilan bir marta, javob
+  // kelmasa ham qayta yuborilmaydi), keyin MeshCentral'ga ketadi. OS noma'lum bo'lsa majburiy bosqich yo'q.
+  async #force(
+    r: { actionId: string; deviceId: string; siteId: string; nodeId: string; type: string },
+    node: DeviceSnapshot,
+    now: number,
+  ): Promise<void> {
+    const platform = powerPlatform(node.osDescription);
+    if (!platform || (r.type !== 'shutdown' && r.type !== 'reboot')) return;
+    const at = new Date(now);
+    const claimed = await this.db.transaction(async (tx) => {
+      const rows = await tx
+        .update(powerActionTargets)
+        .set({ forcedAt: at, updatedAt: at })
+        .where(
+          and(
+            eq(powerActionTargets.actionId, r.actionId),
+            eq(powerActionTargets.deviceId, r.deviceId),
+            eq(powerActionTargets.status, 'sent'),
+            isNull(powerActionTargets.forcedAt),
+          ),
+        )
+        .returning({ deviceId: powerActionTargets.deviceId });
+      if (rows.length === 0) return false;
+      const [action] = await tx.select().from(powerActions).where(eq(powerActions.id, r.actionId));
+      if (action) await this.#systemAudit(tx, action, 'power.forced', { deviceId: r.deviceId, platform });
+      return true;
+    });
+    if (!claimed) return;
+    try {
+      const { port, scope } = this.#port(r.siteId, node.upstream.meshDomainId);
+      await port.forcePowerAction({
+        siteId: r.siteId,
+        upstream: { ...scope, meshNodeId: r.nodeId },
+        type: r.type,
+        platform,
+      });
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      this.#log.warn(`forced power request failed${typeof code === 'string' ? `: ${code}` : ''}`);
     }
   }
 

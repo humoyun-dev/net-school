@@ -1,5 +1,7 @@
 // Panel matnlari. uz — asosiy; ru va en shu kalitlar bilan tiplanadi (kalit yetishmasa typecheck yiqiladi).
 export const uz = {
+  'power.forced': 'Majburan',
+  'power.forcedHint': "Dastur to'sdi, 60 s dan keyin majburan bajarildi",
   'remote.state.connected': 'Ulandi',
   'remote.state.disconnected': 'Ulanish uzildi',
   'remote.reconnect': 'Qayta ulanish',
@@ -173,6 +175,8 @@ export type StringKey = keyof typeof uz;
 export type Strings = Record<StringKey, string>;
 
 const ru: Strings = {
+  'power.forced': 'Принудительно',
+  'power.forcedHint': 'Приложение мешало, через 60 с выполнено принудительно',
   'remote.state.connected': 'Подключено',
   'remote.state.disconnected': 'Соединение прервано',
   'remote.reconnect': 'Переподключить',
@@ -343,6 +347,8 @@ const ru: Strings = {
 };
 
 const en: Strings = {
+  'power.forced': 'Forced',
+  'power.forcedHint': 'An app blocked it; forced after 60 s',
   'remote.state.connected': 'Connected',
   'remote.state.disconnected': 'Disconnected',
   'remote.reconnect': 'Reconnect',

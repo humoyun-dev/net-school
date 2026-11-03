@@ -85,6 +85,13 @@
       "when": 1793614039911,
       "tag": "0011_power_deferral",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793679696355,
+      "tag": "0012_power_forced",
+      "breakpoints": true
     }
   ]
 }

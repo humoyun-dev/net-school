@@ -15,6 +15,14 @@ export interface AuthorizedPowerRequest {
   type: PowerActionType;
 }
 
+// Yumshoq amal to'sib qo'yilganda yuboriladigan majburiy buyruq (saqlanmagan ish yo'qoladi).
+export interface AuthorizedForcedPowerRequest {
+  siteId: string;
+  upstream: UpstreamDeviceRef;
+  type: 'shutdown' | 'reboot';
+  platform: 'windows' | 'posix';
+}
+
 // accepted — MeshCentral qabul qildi (bajarilgani kuzatuv bilan aniqlanadi).
 export type PowerRequestResult = { accepted: true } | { accepted: false; reason: 'wake_unsupported' | 'node_missing' };
 
@@ -25,4 +33,5 @@ export interface DeviceManagementPort {
   reconcileEnrollment(binding: DeviceBinding): Promise<EnrollmentResult>;
   subscribeDeviceEvents(handler: (event: DeviceEvent) => void): Unsubscribe;
   requestPowerAction(request: AuthorizedPowerRequest): Promise<PowerRequestResult>;
+  forcePowerAction(request: AuthorizedForcedPowerRequest): Promise<void>;
 }

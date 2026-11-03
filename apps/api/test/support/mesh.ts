@@ -14,6 +14,8 @@ export interface FakeNode {
   online: boolean;
   // Berilmasa online ? 'on' : 'unknown'.
   powerState?: PowerState;
+  // MeshCentral osDescription; berilmasa 'Linux'.
+  os?: string | null;
 }
 
 // MeshCentral o'rnida: site scope'i bo'yicha node'lar; `failing` — upstream uzilgan.
@@ -28,6 +30,9 @@ export class FakeMesh {
   readonly powerRequests: Array<{ siteId: string; nodeId: string; type: PowerActionType }> = [];
   readonly wakeResults = new Map<string, PowerRequestResult>();
   powerFailing = false;
+  // Majburiy buyruqlar (forcePowerAction) tartibida.
+  readonly forcedRequests: Array<{ siteId: string; nodeId: string; type: 'shutdown' | 'reboot'; platform: string }> =
+    [];
   // Berilsa listDevices javobidan oldin bajariladi (agent holatini o'qish paytidagi poyga testlari uchun).
   beforeList: (() => Promise<void>) | null = null;
   // Berilsa reconcileEnrollment shu va'da bajarilguncha kutadi (poyga testlari uchun).
@@ -62,7 +67,7 @@ export class FakeMesh {
           upstream: { meshInstanceId: scope.meshInstanceId, meshDomainId: n.domain, meshNodeId: id },
           name: n.name,
           hostname: `${n.name}.lan`,
-          osDescription: 'Linux',
+          osDescription: n.os === undefined ? 'Linux' : n.os,
           agentOnline: n.online,
           powerState: n.powerState ?? (n.online ? 'on' : 'unknown'),
         }));
@@ -91,6 +96,17 @@ export class FakeMesh {
         const nodeId = request.upstream.meshNodeId;
         this.powerRequests.push({ siteId: request.siteId, nodeId, type: request.type });
         return (request.type === 'wake' ? this.wakeResults.get(nodeId) : undefined) ?? { accepted: true };
+      },
+      forcePowerAction: async (request) => {
+        const scope = scopes.get(request.siteId);
+        if (!scope || scope.meshDomainId !== request.upstream.meshDomainId) throw new Error('scope_denied');
+        if (this.powerFailing) throw new AdapterError('upstream_timeout', 'No response to runcommands');
+        this.forcedRequests.push({
+          siteId: request.siteId,
+          nodeId: request.upstream.meshNodeId,
+          type: request.type,
+          platform: request.platform,
+        });
       },
     };
   }

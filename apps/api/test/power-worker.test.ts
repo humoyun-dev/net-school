@@ -28,6 +28,7 @@ beforeEach(async () => {
   link.connected = true;
   mesh.nodes.clear();
   mesh.powerRequests.length = 0;
+  mesh.forcedRequests.length = 0;
   mesh.wakeResults.clear();
   mesh.powerFailing = false;
   mesh.failing = false;
@@ -114,6 +115,74 @@ describe('power worker', () => {
     setOnline(d.nodeId, true);
     await worker().tick(T0 + 40_000);
     expect(await target(id)).toMatchObject({ status: 'succeeded' });
+  });
+
+  // P0c: Windows'da ochiq dastur yumshoq o'chirishni to'sib qo'ydi. 60 s dan keyin ham onlayn — bir marta majburiy.
+  test('a shutdown still online after 60 s is forced once, recorded and audited', async () => {
+    const d = await bound();
+    const node = mesh.nodes.get(d.nodeId);
+    if (node) node.os = 'Microsoft Windows 11 Pro - 23H2/22631';
+    const id = await act('shutdown', 1);
+    await worker().tick(T0);
+    await worker().tick(T0 + 59_000);
+    expect(mesh.forcedRequests).toEqual([]);
+    await worker().tick(T0 + 60_000);
+    expect(mesh.forcedRequests).toEqual([{ siteId, nodeId: d.nodeId, type: 'shutdown', platform: 'windows' }]);
+    expect((await target(id))?.forcedAt?.getTime()).toBe(T0 + 60_000);
+    await worker().tick(T0 + 61_000);
+    await worker().tick(T0 + 90_000);
+    expect(mesh.forcedRequests).toHaveLength(1);
+    setOnline(d.nodeId, false);
+    await worker().tick(T0 + 95_000);
+    expect(await target(id)).toMatchObject({ status: 'succeeded' });
+    expect((await target(id))?.forcedAt?.getTime()).toBe(T0 + 60_000);
+    const [audit] = await app.db.db.select().from(auditEvents).where(eq(auditEvents.action, 'power.forced'));
+    expect(audit).toMatchObject({ actorUserId: null, targetId: id });
+    expect(audit?.details).toMatchObject({ type: 'shutdown', deviceId: d.deviceId, platform: 'windows' });
+    // Admin natijada qaysi kompyuter majburan o'chirilganini ko'radi.
+    const res = await app.request('GET', `/api/v1/power-actions/${id}`, { cookie: admin });
+    expect(res.json.targets[0]).toMatchObject({ status: 'succeeded', forcedAt: new Date(T0 + 60_000).toISOString() });
+  });
+
+  test('a device that shuts down within 60 s is never forced', async () => {
+    const quick = await bound();
+    const id = await act('shutdown', 1);
+    await worker().tick(T0);
+    setOnline(quick.nodeId, false);
+    await worker().tick(T0 + 30_000);
+    await worker().tick(T0 + 70_000);
+    expect(await target(id)).toMatchObject({ status: 'succeeded', forcedAt: null });
+    expect(mesh.forcedRequests).toEqual([]);
+  });
+
+  test('sleep and devices with an unknown OS are never forced', async () => {
+    const d = await bound();
+    const sleep = await act('sleep', 1);
+    await worker().tick(T0);
+    await worker().tick(T0 + 70_000);
+    expect((await target(sleep))?.forcedAt).toBeNull();
+    const node = mesh.nodes.get(d.nodeId);
+    if (node) node.os = null;
+    now = T0 + 200_000;
+    const shutdown = await act('shutdown', 1);
+    await worker().tick(T0 + 200_000);
+    await worker().tick(T0 + 270_000);
+    expect((await target(shutdown))?.forcedAt).toBeNull();
+    expect(mesh.forcedRequests).toEqual([]);
+  });
+
+  test('a forced reboot is sent with the platform command and a failure is not retried', async () => {
+    await bound();
+    mesh.powerFailing = false;
+    const id = await act('reboot', 1);
+    await worker().tick(T0);
+    mesh.powerFailing = true;
+    await worker().tick(T0 + 60_000);
+    mesh.powerFailing = false;
+    await worker().tick(T0 + 70_000);
+    // Ko'pi bilan bir marta: xato bo'lsa ham forcedAt yoziladi, qayta yuborilmaydi (reboot ikki marta bo'lmaydi).
+    expect((await target(id))?.forcedAt?.getTime()).toBe(T0 + 60_000);
+    expect(mesh.forcedRequests).toEqual([]);
   });
 
   test('an accepted request with no observed change ends unknown', async () => {

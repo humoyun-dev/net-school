@@ -88,6 +88,47 @@ describe('MeshCentralDeviceManagement', () => {
       ]);
     });
 
+    // Majburiy bosqich: MeshCentral poweraction `forced` ni agentga uzatmaydi, shuning uchun qat'iy buyruq runcommands
+    // orqali (SYSTEM). Haqiqiy server javobi `result: 'OK'` — klient uni upstream_rejected (detail 'OK') qiladi.
+    test('forced shutdown and reboot run a fixed command for the platform', async () => {
+      const { client, devices } = setup();
+      client.replies.set(
+        'runcommands',
+        new AdapterError('upstream_rejected', 'MeshCentral rejected runcommands', 'OK'),
+      );
+      const cases = [
+        ['shutdown', 'windows', 1, 'shutdown /s /f /t 0'],
+        ['reboot', 'windows', 1, 'shutdown /r /f /t 0'],
+        ['shutdown', 'posix', 3, 'shutdown -h now'],
+        ['reboot', 'posix', 3, 'shutdown -r now'],
+      ] as const;
+      for (const [type, platform, shell, cmds] of cases) {
+        await devices.forcePowerAction({ siteId: 'site-a', upstream, type, platform });
+        expect(client.sent.at(-1)).toEqual({
+          action: 'runcommands',
+          payload: { nodeids: [node], type: shell, cmds, runAsUser: 0 },
+        });
+      }
+    });
+
+    test('a forced command the server refuses is an error, and scope is enforced', async () => {
+      const { client, devices } = setup();
+      client.replies.set('runcommands', new AdapterError('upstream_rejected', 'rejected', 'Access denied'));
+      const err = await devices
+        .forcePowerAction({ siteId: 'site-a', upstream, type: 'shutdown', platform: 'windows' })
+        .catch((e) => e);
+      expect((err as AdapterError).code).toBe('upstream_rejected');
+      const foreign = await devices
+        .forcePowerAction({
+          siteId: 'site-a',
+          upstream: { ...upstream, meshDomainId: 'other' },
+          type: 'reboot',
+          platform: 'windows',
+        })
+        .catch((e) => e);
+      expect((foreign as AdapterError).code).toBe('scope_denied');
+    });
+
     test('a power reply other than ok is an invalid upstream message', async () => {
       const { client, devices } = setup();
       client.replies.set('poweraction', { action: 'poweraction', result: 'nope' });

@@ -307,6 +307,7 @@ export class PowerService {
           status: target.status as PowerTarget['status'],
           reason: target.reason as PowerTarget['reason'],
           sentAt: target.sentAt?.toISOString() ?? null,
+          forcedAt: target.forcedAt?.toISOString() ?? null,
           finishedAt: target.finishedAt?.toISOString() ?? null,
         }),
       );
