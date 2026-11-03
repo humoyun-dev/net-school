@@ -7,12 +7,15 @@ interface Deps {
   onUnauthenticated?: () => void;
   onEnded?: () => void;
   retryMs?: number;
+  slowRetryMs?: number;
 }
 
 const RETRY_MIN_MS = 1_000;
-// Upgrade rad etilsa brauzer faqat 1006 ko'radi: shuncha marta bir marta ham ochilmasa to'xtaymiz (audit to'lmasin).
+// Upgrade rad etilsa ham, hub o'chiq bo'lsa ham brauzer faqat 1006 ko'radi. Shuncha tez urinishdan keyin to'xtamaymiz
+// (hub qaytsa miniatura o'zi tiklanishi kerak), faqat sekin oraliqqa o'tamiz — rad etilgan oqim audit'ni to'ldirmaydi.
 const MAX_REFUSALS = 5;
 const RETRY_MAX_MS = 30_000;
+const SLOW_RETRY_MS = 60_000;
 
 function uuidOf(bytes: Uint8Array): string {
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -27,6 +30,7 @@ export class ThumbnailFeed {
   #socket: WebSocket | null = null;
   #retryMs = RETRY_MIN_MS;
   #minRetryMs = RETRY_MIN_MS;
+  #slowRetryMs = SLOW_RETRY_MS;
   #refusals = 0;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #closed = false;
@@ -43,6 +47,7 @@ export class ThumbnailFeed {
     };
     this.#minRetryMs = deps.retryMs ?? RETRY_MIN_MS;
     this.#retryMs = this.#minRetryMs;
+    this.#slowRetryMs = deps.slowRetryMs ?? SLOW_RETRY_MS;
     this.#connect();
   }
 
@@ -69,8 +74,8 @@ export class ThumbnailFeed {
       if (e.code === 4401) return this.#deps.onUnauthenticated?.();
       if (e.code === 4410) return this.#deps.onEnded?.();
       this.#refusals += 1;
-      if (this.#refusals >= MAX_REFUSALS) return this.#deps.onEnded?.();
-      this.#timer = setTimeout(() => this.#connect(), this.#retryMs);
+      const delay = this.#refusals >= MAX_REFUSALS ? this.#slowRetryMs : this.#retryMs;
+      this.#timer = setTimeout(() => this.#connect(), delay);
       this.#retryMs = Math.min(RETRY_MAX_MS, this.#retryMs * 2);
     };
   }

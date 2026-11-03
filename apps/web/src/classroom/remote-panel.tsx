@@ -104,10 +104,18 @@ export function RemotePanel(props: {
     addEventListener('message', onMessage);
     return () => removeEventListener('message', onMessage);
   }, [viewerOrigin]);
-  const command = (name: 'connect' | 'cad') => {
+  const command = (name: 'connect' | 'cad' | 'focus') => {
     if (viewerOrigin)
       frameRef.current?.contentWindow?.postMessage({ target: 'netschool-viewer', command: name }, viewerOrigin);
   };
+  // Boshqarish rejimida ulangan zahoti klaviatura ekranga yo'naladi (aks holda fokus panel tugmasida qoladi va
+  // MeshCentral canvas'i bosilganda ham fokus olmaydi).
+  const focusViewer = props.mode === 'control' && link === 'connected';
+  useEffect(() => {
+    if (!focusViewer || !viewerOrigin) return;
+    frameRef.current?.focus();
+    frameRef.current?.contentWindow?.postMessage({ target: 'netschool-viewer', command: 'focus' }, viewerOrigin);
+  }, [focusViewer, viewerOrigin]);
   return (
     <Dialog open onOpenChange={(open) => !open && props.onClose()}>
       <DialogContent
