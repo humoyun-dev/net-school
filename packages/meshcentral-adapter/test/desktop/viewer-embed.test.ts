@@ -3,6 +3,33 @@ import { type BridgeWindow, viewerBridge, viewerEmbedHtml } from '../../src/desk
 
 const PANEL = 'https://hub.school.lan';
 
+interface KeyLike {
+  key: string;
+  code: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  preventDefault(): void;
+  stopImmediatePropagation(): void;
+}
+
+function keyEvent(key: string, code: string, mods: Partial<Pick<KeyLike, 'metaKey' | 'ctrlKey' | 'altKey'>> = {}) {
+  const e = {
+    key,
+    code,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    ...mods,
+    stopped: false,
+    preventDefault() {},
+    stopImmediatePropagation() {
+      e.stopped = true;
+    },
+  };
+  return e;
+}
+
 // MeshCentral sahifasi global'larining soxta nusxasi: desktop.State, currentNode, connectDesktop, sendCAD.
 function fakePage() {
   const posted: { msg: unknown; origin: string }[] = [];
@@ -10,6 +37,7 @@ function fakePage() {
   let tick: () => void = () => {};
   let onMessage: (e: { source: unknown; origin: string; data: unknown }) => void = () => {};
   let onMouseDown: () => void = () => {};
+  const keyHandlers: Record<string, (e: KeyLike) => void> = {};
   let focused = 0;
   // MeshCentral'ning #deskkeys select'i va deskSendKeys(): tanlangan qiymatni parseInt bilan o'qiydi.
   const options: { value: string }[] = [];
@@ -37,10 +65,11 @@ function fakePage() {
       tick = fn;
       return 1;
     },
-    addEventListener: (type: string, fn: typeof onMessage) => {
-      if (type === 'message') onMessage = fn;
-      if (type === 'mousedown') onMouseDown = fn as unknown as () => void;
-    },
+    addEventListener: ((type: string, fn: unknown) => {
+      if (type === 'message') onMessage = fn as typeof onMessage;
+      if (type === 'mousedown') onMouseDown = fn as () => void;
+      if (type === 'keydown' || type === 'keyup') keyHandlers[type] = fn as (e: KeyLike) => void;
+    }) as BridgeWindow['addEventListener'],
     focus: () => {
       focused += 1;
     },
@@ -62,6 +91,7 @@ function fakePage() {
     tick: () => tick(),
     send: (e: Parameters<typeof onMessage>[0]) => onMessage(e),
     mouseDown: () => onMouseDown(),
+    key: (type: 'keydown' | 'keyup', e: KeyLike) => keyHandlers[type]?.(e),
     focused: () => focused,
     sentKeys,
     options,
@@ -150,6 +180,43 @@ describe('viewer bridge', () => {
     expect(p.sentKeys).toEqual([0x100000, 0x100054, 0x10004c, 0x100044, 0x100045, 0x020009, 0x020073, 0x09001b]);
     // Vaqtinchalik option MeshCentral ro'yxatida qolmaydi.
     expect(p.options).toEqual([]);
+  });
+
+  // macOS: Cmd bosib turilganda brauzer keypress chiqarmaydi, MeshCentral esa harfni faqat keypress'da yuboradi —
+  // Windows faqat Win'ni oladi (Cmd+E Start'ni ochdi). Ko'prik Cmd+harfni o'zi kod bilan yuboradi (bosish+qo'yish).
+  test('Cmd plus a letter reaches Windows as the letter key while Cmd is held as Win', () => {
+    const p = fakePage();
+    viewerBridge(p.win, PANEL);
+    const sent: string[] = [];
+    p.win.desktop = {
+      State: 3,
+      m: {
+        KeyAction: { DOWN: 4, UP: 5 },
+        SendKeyMsg: (action: number, e: { code: string }) => sent.push(`${action}:${e.code}`),
+      },
+    };
+    const cmdE = keyEvent('e', 'KeyE', { metaKey: true });
+    p.key('keydown', cmdE);
+    expect(sent).toEqual(['4:KeyE', '5:KeyE']);
+    expect(cmdE.stopped).toBe(true);
+    const cmdEUp = keyEvent('e', 'KeyE', { metaKey: true });
+    p.key('keyup', cmdEUp);
+    expect(sent).toHaveLength(2);
+    expect(cmdEUp.stopped).toBe(true);
+    // Oddiy harf, Ctrl/Alt kombinatsiyasi va Cmd'ning o'zi MeshCentral'ga qoladi.
+    for (const e of [
+      keyEvent('e', 'KeyE'),
+      keyEvent('c', 'KeyC', { metaKey: true, ctrlKey: true }),
+      keyEvent('Meta', 'MetaLeft', { metaKey: true }),
+    ]) {
+      p.key('keydown', e);
+      expect(e.stopped).toBe(false);
+    }
+    expect(sent).toHaveLength(2);
+    // Ulanmagan bo'lsa hech narsa yuborilmaydi.
+    p.win.desktop = null;
+    p.key('keydown', keyEvent('l', 'KeyL', { metaKey: true }));
+    expect(sent).toHaveLength(2);
   });
 
   test('the embed is one style and one self-contained script bound to the panel origin', () => {
