@@ -170,6 +170,10 @@ describe('remote panel', () => {
     await waitFor(() => expect(lock).toHaveBeenCalled());
     expect(requestFullscreen).toHaveBeenCalled();
     expect((fullscreen as Element | null)?.classList.contains('remote-panel')).toBe(true);
+    // Menyu to'liq ekran elementining ichida chiziladi (aks holda to'liq ekranda ko'rinmaydi).
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Maxsus tugmalar' }), { key: 'Enter' });
+    const item = await screen.findByRole('menuitem', { name: /Win\+E/ });
+    expect((fullscreen as Element | null)?.contains(item)).toBe(true);
     // Esc ni bosib turish yoki brauzer to'liq ekrandan chiqarsa — klaviatura qo'yib yuboriladi.
     fullscreen = null;
     act(() => {

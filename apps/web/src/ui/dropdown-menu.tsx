@@ -7,9 +7,15 @@ export const DropdownMenu = Menu.Root;
 export const DropdownMenuTrigger = Menu.Trigger;
 export const DropdownMenuRadioGroup = Menu.RadioGroup;
 
-export function DropdownMenuContent({ className, sideOffset = 6, ...props }: ComponentProps<typeof Menu.Content>) {
+// container: menyu shu element ichida chiziladi (masalan to'liq ekrandagi oyna — body'ga chizilsa ko'rinmaydi).
+export function DropdownMenuContent({
+  className,
+  sideOffset = 6,
+  container,
+  ...props
+}: ComponentProps<typeof Menu.Content> & { container?: HTMLElement | null }) {
   return (
-    <Menu.Portal>
+    <Menu.Portal container={container}>
       <Menu.Content
         sideOffset={sideOffset}
         className={cn(
