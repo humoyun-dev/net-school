@@ -30,6 +30,8 @@ export function buildRemoteUpstream(mesh: MeshRequester, config: ApiConfig): Rem
       endpoint: { origin: meshHttpsOrigin(config.mesh), ca: config.mesh.ca },
       // Viewer sahifasidagi host'lar brauzer ko'radigan gateway host'iga almashtiriladi.
       publicHost: new URL(config.gateway.publicOrigin).host,
+      // Viewer faqat panel ichida ochiladi (frame-ancestors); ko'prik holatni faqat shu origin'ga yuboradi.
+      panelOrigin: config.publicOrigin,
     }),
     listPrincipals: () => principals.listSessionPrincipals(),
     revokePrincipal: (userId) => principals.revoke(userId),

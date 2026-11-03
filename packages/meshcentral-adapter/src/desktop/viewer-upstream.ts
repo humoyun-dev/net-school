@@ -19,6 +19,8 @@ export interface MeshCentralViewerUpstreamOptions {
   admin: MeshRequester;
   endpoint: UpstreamEndpoint;
   publicHost: string;
+  // Panel origin (iframe egasi): berilsa viewer sahifasiga panel ko'prigi qo'shiladi (viewer-embed.ts).
+  panelOrigin?: string;
   login?: typeof loginPrincipal; // sinov uchun almashtiriladi; default: loginPrincipal
 }
 
@@ -46,6 +48,7 @@ export class MeshCentralViewerSession {
   readonly #ctx: ViewerContext;
   readonly #endpoint: UpstreamEndpoint;
   readonly #publicHost: string;
+  readonly #panelOrigin: string | undefined;
   readonly #principals: MeshCentralPrincipals;
   readonly #loginFn: typeof loginPrincipal;
   #jar: CookieJar | undefined;
@@ -65,6 +68,7 @@ export class MeshCentralViewerSession {
     this.#ctx = { nodeId: principal.nodeId, mode, handles: new CredentialHandles() };
     this.#endpoint = opts.endpoint;
     this.#publicHost = opts.publicHost;
+    this.#panelOrigin = opts.panelOrigin;
     this.#principals = principals;
     this.#loginFn = opts.login ?? loginPrincipal;
     this.entryPath = viewerEntryPath(principal.nodeId);
@@ -128,7 +132,7 @@ export class MeshCentralViewerSession {
 
   rewriteHtml(url: URL, html: string): string {
     this.#assertOpen();
-    return url.pathname === '/' ? rewriteViewerHtml(html, this.#ctx, this.#publicHost) : html;
+    return url.pathname === '/' ? rewriteViewerHtml(html, this.#ctx, this.#publicHost, this.#panelOrigin) : html;
   }
 
   // Birinchi chaqiruvdanoq sessiya butunlay yopiladi (deleteuser xato bersa ham); faqat deleteuser qayta uriniladi.

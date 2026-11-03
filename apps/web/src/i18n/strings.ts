@@ -1,5 +1,9 @@
 // Panel matnlari. uz — asosiy; ru va en shu kalitlar bilan tiplanadi (kalit yetishmasa typecheck yiqiladi).
 export const uz = {
+  'remote.state.connected': 'Ulandi',
+  'remote.state.disconnected': 'Ulanish uzildi',
+  'remote.reconnect': 'Qayta ulanish',
+  'remote.cad': 'Ctrl+Alt+Del',
   'nav.manage': 'Boshqaruv',
   'nav.account': 'Hisob',
   'login.subtitle': 'Sinf kompyuterlarini boshqarish paneli',
@@ -10,7 +14,6 @@ export const uz = {
   'grid.count': '{n} ta kompyuter darsda',
   'cmd.messagePlaceholder': 'Xabar yozing…',
   'cmd.lockPlaceholder': 'Bloklash matni',
-  'remote.connectHint': 'Ekran ochilmasa, oyna ichidagi «Connect» tugmasini bosing',
   'power.subtitle': "Kompyuterlarni o'chirish, qayta yuklash, uxlatish va yoqish",
   'app.title': 'NetSchool',
   'nav.rooms': 'Xonalar',
@@ -170,6 +173,10 @@ export type StringKey = keyof typeof uz;
 export type Strings = Record<StringKey, string>;
 
 const ru: Strings = {
+  'remote.state.connected': 'Подключено',
+  'remote.state.disconnected': 'Соединение прервано',
+  'remote.reconnect': 'Переподключить',
+  'remote.cad': 'Ctrl+Alt+Del',
   'nav.manage': 'Управление',
   'nav.account': 'Аккаунт',
   'login.subtitle': 'Панель управления компьютерами класса',
@@ -180,7 +187,6 @@ const ru: Strings = {
   'grid.count': 'Компьютеров в уроке: {n}',
   'cmd.messagePlaceholder': 'Напишите сообщение…',
   'cmd.lockPlaceholder': 'Текст блокировки',
-  'remote.connectHint': 'Если экран не открылся, нажмите «Connect» внутри окна',
   'power.subtitle': 'Выключение, перезагрузка, сон и включение компьютеров',
   'app.title': 'NetSchool',
   'nav.rooms': 'Кабинеты',
@@ -337,6 +343,10 @@ const ru: Strings = {
 };
 
 const en: Strings = {
+  'remote.state.connected': 'Connected',
+  'remote.state.disconnected': 'Disconnected',
+  'remote.reconnect': 'Reconnect',
+  'remote.cad': 'Ctrl+Alt+Del',
   'nav.manage': 'Manage',
   'nav.account': 'Account',
   'login.subtitle': 'Classroom computer control panel',
@@ -347,7 +357,6 @@ const en: Strings = {
   'grid.count': '{n} computers in the lesson',
   'cmd.messagePlaceholder': 'Write a message…',
   'cmd.lockPlaceholder': 'Lock message',
-  'remote.connectHint': 'If the screen does not open, press "Connect" inside the window',
   'power.subtitle': 'Shut down, restart, sleep and wake computers',
   'app.title': 'NetSchool',
   'nav.rooms': 'Rooms',

@@ -8,13 +8,14 @@ import {
   type ViewerState,
   workerRenewTimer,
 } from '@netschool/remote-viewer';
-import { Eye, LoaderCircle, MousePointer2, X as XIcon } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { Eye, Keyboard, LoaderCircle, MousePointer2, RotateCw, X as XIcon } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useApi } from '../api/api-context.tsx';
 import { type Api, ApiFailure } from '../api/client.ts';
 import { useT } from '../i18n/i18n.tsx';
 import type { StringKey } from '../i18n/strings.ts';
-import { Badge } from '../ui/badge.tsx';
+import { Badge, StatusDot } from '../ui/badge.tsx';
+import { Button } from '../ui/button.tsx';
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog.tsx';
 import { TileActions, TileButton } from './device-tile.tsx';
 
@@ -87,6 +88,26 @@ export function RemotePanel(props: {
   }, [api, makeTimer, props.lessonId, props.deviceId, props.mode]);
 
   const title = t('remote.title', { name: props.label });
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const [link, setLink] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const viewerOrigin = state.kind === 'open' ? new URL(state.url).origin : null;
+  // Gateway ko'prigi (viewer-embed): faqat shu iframe va gateway origin'idan kelgan holat qabul qilinadi.
+  useEffect(() => {
+    if (!viewerOrigin) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== viewerOrigin || event.source !== frameRef.current?.contentWindow) return;
+      const data = event.data as { source?: unknown; state?: unknown } | null;
+      if (data?.source !== 'netschool-viewer') return;
+      if (data.state === 'connecting' || data.state === 'connected' || data.state === 'disconnected')
+        setLink(data.state);
+    };
+    addEventListener('message', onMessage);
+    return () => removeEventListener('message', onMessage);
+  }, [viewerOrigin]);
+  const command = (name: 'connect' | 'cad') => {
+    if (viewerOrigin)
+      frameRef.current?.contentWindow?.postMessage({ target: 'netschool-viewer', command: name }, viewerOrigin);
+  };
   return (
     <Dialog open onOpenChange={(open) => !open && props.onClose()}>
       <DialogContent
@@ -115,9 +136,28 @@ export function RemotePanel(props: {
             </Badge>
           </div>
           {state.kind === 'open' && (
-            <span className="ml-auto hidden max-w-[40%] truncate text-[11px] text-muted-foreground lg:block">
-              {t('remote.connectHint')}
-            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                <StatusDot tone={link === 'connected' ? 'success' : link === 'disconnected' ? 'danger' : 'warning'} />
+                {link === 'connected'
+                  ? t('remote.state.connected')
+                  : link === 'disconnected'
+                    ? t('remote.state.disconnected')
+                    : t('remote.opening')}
+              </span>
+              {link === 'disconnected' && (
+                <Button size="sm" variant="secondary" onClick={() => command('connect')}>
+                  <RotateCw />
+                  {t('remote.reconnect')}
+                </Button>
+              )}
+              {props.mode === 'control' && link === 'connected' && (
+                <Button size="sm" variant="secondary" onClick={() => command('cad')}>
+                  <Keyboard />
+                  {t('remote.cad')}
+                </Button>
+              )}
+            </div>
           )}
         </header>
         <div className="relative flex flex-1 bg-black">
@@ -134,6 +174,7 @@ export function RemotePanel(props: {
           )}
           {state.kind === 'open' && (
             <iframe
+              ref={frameRef}
               title={props.label}
               src={state.url}
               className="size-full flex-1 border-0"

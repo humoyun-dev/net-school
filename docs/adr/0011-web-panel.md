@@ -110,3 +110,8 @@ Tillar: uz, ru, en.
   - `apps/web/test/{client,intent,i18n,login,lesson-state,thumbnail-feed,room-page,remote-panel,power-page}.test.*`;
   - `packages/remote-viewer/test/session-controller.test.ts`.
 - **E2E:** `apps/web/e2e/web.e2e.ts`.
+
+## Qo'shimcha: viewer ko'prigi (2026-11-03)
+
+MeshCentral viewer sahifasi iframe ichida eski interfeysi bilan ochilardi va "Connect" qo'lda bosilishi kerak edi. Gateway endi sahifaga (`rewriteViewerHtml`) kichik ko'prik qo'shadi (`viewer-embed.ts`): MeshCentral'ning boshqaruv satrlari va jarayonlar paneli yashiriladi, ekran o'zi ulanadi, holat (`connecting`/`connected`/`disconnected`) panelga `postMessage` bilan faqat panel origin'iga yuboriladi. Paneldan faqat `connect` va `cad` buyruqlari qabul qilinadi (manba — aynan ota oyna va panel origin'i). Ruxsatlar o'zgarmaydi: har kadr baribir viewer-policy filtridan o'tadi, ko'rish rejimida kiritish (Ctrl+Alt+Del ham) tashlanadi.
+

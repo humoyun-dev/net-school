@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { ApiProvider } from '../src/api/api-context.tsx';
 import { type Api, ApiFailure } from '../src/api/client.ts';
@@ -25,12 +25,12 @@ const session = {
 };
 const timer = () => ({ start: vi.fn(), stop: vi.fn() });
 
-function renderPanel(send: Api['send'], onClose = vi.fn()) {
+function renderPanel(send: Api['send'], onClose = vi.fn(), mode: 'view' | 'control' = 'view') {
   const api = { get: vi.fn(), send } as unknown as Api;
   render(
     <LocaleProvider initial="uz">
       <ApiProvider api={api}>
-        <RemotePanel lessonId={id(2)} deviceId={id(3)} label="pc-01" mode="view" onClose={onClose} timer={timer} />
+        <RemotePanel lessonId={id(2)} deviceId={id(3)} label="pc-01" mode={mode} onClose={onClose} timer={timer} />
       </ApiProvider>
     </LocaleProvider>,
   );
@@ -63,5 +63,58 @@ describe('remote panel', () => {
     });
     renderPanel(send as unknown as Api['send']);
     expect(await screen.findByText('Kompyuterni boshqa foydalanuvchi boshqaryapti')).toBeTruthy();
+  });
+
+  // Gateway ko'prigi (viewer-embed) iframe ichidan holat yuboradi; panel faqat shu iframe va gateway origin'ini tinglaydi.
+  test('the viewer bridge drives the status, reconnect and Ctrl+Alt+Del', async () => {
+    const send = vi.fn(async (_method: string, path: string) => {
+      if (path.endsWith('/remote-sessions')) return { ...session, mode: 'control' };
+      if (path.endsWith('/ticket')) return { url: 'https://hub:8444/rs/redeem?ticket=t1', expiresAt: AT };
+      return null;
+    });
+    renderPanel(send as unknown as Api['send'], vi.fn(), 'control');
+    const frame = (await screen.findByTitle('pc-01')) as HTMLIFrameElement;
+    const inner = frame.contentWindow as Window;
+    const toInner = vi.spyOn(inner, 'postMessage').mockImplementation(() => {});
+    const bridge = (state: string, origin = 'https://hub:8444', source: Window = inner) =>
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', { source, origin, data: { source: 'netschool-viewer', state } }),
+        );
+      });
+
+    bridge('disconnected', 'https://evil.example');
+    expect(screen.queryByRole('button', { name: 'Qayta ulanish' })).toBeNull();
+    bridge('disconnected');
+    expect(screen.getByText('Ulanish uzildi')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Qayta ulanish' }));
+    expect(toInner).toHaveBeenCalledWith({ target: 'netschool-viewer', command: 'connect' }, 'https://hub:8444');
+
+    expect(screen.queryByRole('button', { name: 'Ctrl+Alt+Del' })).toBeNull();
+    bridge('connected');
+    expect(screen.getByText('Ulandi')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Ctrl+Alt+Del' }));
+    expect(toInner).toHaveBeenLastCalledWith({ target: 'netschool-viewer', command: 'cad' }, 'https://hub:8444');
+  });
+
+  test('view mode has no Ctrl+Alt+Del', async () => {
+    const send = vi.fn(async (_method: string, path: string) => {
+      if (path.endsWith('/remote-sessions')) return session;
+      if (path.endsWith('/ticket')) return { url: 'https://hub:8444/rs/redeem?ticket=t1', expiresAt: AT };
+      return null;
+    });
+    renderPanel(send as unknown as Api['send']);
+    const frame = (await screen.findByTitle('pc-01')) as HTMLIFrameElement;
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: frame.contentWindow,
+          origin: 'https://hub:8444',
+          data: { source: 'netschool-viewer', state: 'connected' },
+        }),
+      );
+    });
+    expect(screen.getByText('Ulandi')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Ctrl+Alt+Del' })).toBeNull();
   });
 });
