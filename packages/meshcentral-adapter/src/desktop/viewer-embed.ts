@@ -1,5 +1,5 @@
 // MeshCentral viewer sahifasiga gateway qo'shadigan "ko'prik": MeshCentral'ning o'z panellari yashiriladi, ekran
-// o'zi ulanadi, holat panel oynasiga postMessage bilan yuboriladi, paneldan faqat `connect`, `focus` va `cad` qabul qilinadi.
+// o'zi ulanadi, holat panel oynasiga postMessage bilan yuboriladi, paneldan faqat `connect`, `focus`, `cad` va ro'yxatdagi `keys` qabul qilinadi.
 // Ruxsatlar o'zgarmaydi: har kadr baribir viewer-policy filtridan o'tadi (ko'rish rejimida kiritish tashlanadi).
 
 export interface BridgeWindow {
@@ -12,11 +12,31 @@ export interface BridgeWindow {
   addEventListener(type: 'message', fn: (event: { source: unknown; origin: string; data: unknown }) => void): void;
   addEventListener(type: 'mousedown', fn: () => void, capture: boolean): void;
   focus(): void;
+  // MeshCentral: #deskkeys select qiymati (bayroqlar << 16 | tugma) va uni yuboradigan deskSendKeys().
+  deskSendKeys?: () => void;
+  document: {
+    getElementById(id: 'deskkeys'): {
+      value: string;
+      appendChild(option: { value: string }): unknown;
+      removeChild(option: { value: string }): unknown;
+    } | null;
+    createElement(tag: 'option'): { value: string };
+  };
 }
 
 // Sahifaga `toString()` bilan joylanadi: tashqi o'zgaruvchi va import ishlatilmaydi.
 export function viewerBridge(win: BridgeWindow, panelOrigin: string): void {
   const CONNECTED = 3;
+  // Mac/brauzer o'zi ushlaydigan Windows kombinatsiyalari (MeshCentral formati: Shift 1, Alt 2, Ctrl 8, Win 16 << 16).
+  const KEY_COMBOS: Record<string, number> = {
+    start: 0x100000,
+    taskbar: 0x100054,
+    lock: 0x10004c,
+    desktop: 0x100044,
+    alt_tab: 0x020009,
+    alt_f4: 0x020073,
+    task_manager: 0x09001b,
+  };
   // Ulanish so'ralgach ~15 s "ulanmoqda": Windows'da desktop avval sessiyalar ro'yxatini kutadi.
   const GRACE_TICKS = 50;
   let last = '';
@@ -33,6 +53,23 @@ export function viewerBridge(win: BridgeWindow, panelOrigin: string): void {
     if (stateNow() !== 0 || !win.currentNode || typeof win.connectDesktop !== 'function') return;
     pending = GRACE_TICKS;
     win.connectDesktop(null, 3);
+  };
+  // Faqat ro'yxatdagi kombinatsiya va faqat ulangan holatda; vaqtinchalik option MeshCentral ro'yxatida qolmaydi.
+  const sendCombo = (combo: unknown) => {
+    if (typeof combo !== 'string' || !Object.hasOwn(KEY_COMBOS, combo) || stateNow() !== CONNECTED) return;
+    const select = win.document.getElementById('deskkeys');
+    if (!select || typeof win.deskSendKeys !== 'function') return;
+    const option = win.document.createElement('option');
+    option.value = `0x${(KEY_COMBOS[combo] ?? 0).toString(16)}`;
+    const previous = select.value;
+    select.appendChild(option);
+    select.value = option.value;
+    try {
+      win.deskSendKeys();
+    } finally {
+      select.removeChild(option);
+      select.value = previous;
+    }
   };
   win.setInterval(() => {
     if (!started && win.currentNode) {
@@ -58,6 +95,7 @@ export function viewerBridge(win: BridgeWindow, panelOrigin: string): void {
     }
     if (data.command === 'connect') connect();
     else if (data.command === 'focus') win.focus();
+    else if (data.command === 'keys') sendCombo((data as { combo?: unknown }).combo);
     else if (data.command === 'cad' && stateNow() === CONNECTED && typeof win.sendCAD === 'function') win.sendCAD();
   });
 }

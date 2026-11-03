@@ -11,6 +11,17 @@ function fakePage() {
   let onMessage: (e: { source: unknown; origin: string; data: unknown }) => void = () => {};
   let onMouseDown: () => void = () => {};
   let focused = 0;
+  // MeshCentral'ning #deskkeys select'i va deskSendKeys(): tanlangan qiymatni parseInt bilan o'qiydi.
+  const options: { value: string }[] = [];
+  const sentKeys: number[] = [];
+  const select = {
+    value: '',
+    get options() {
+      return options;
+    },
+    appendChild: (o: { value: string }) => options.push(o),
+    removeChild: (o: { value: string }) => options.splice(options.indexOf(o), 1),
+  };
   const parent = { postMessage: (msg: unknown, origin: string) => posted.push({ msg, origin }) };
   const win: BridgeWindow = {
     parent,
@@ -33,6 +44,13 @@ function fakePage() {
     focus: () => {
       focused += 1;
     },
+    deskSendKeys: () => {
+      sentKeys.push(Number.parseInt(select.value, 16));
+    },
+    document: {
+      getElementById: (id: string) => (id === 'deskkeys' ? select : null),
+      createElement: () => ({ value: '' }),
+    },
   };
   const states = () => posted.map((p) => (p.msg as { state: string }).state);
   return {
@@ -45,6 +63,8 @@ function fakePage() {
     send: (e: Parameters<typeof onMessage>[0]) => onMessage(e),
     mouseDown: () => onMouseDown(),
     focused: () => focused,
+    sentKeys,
+    options,
   };
 }
 
@@ -112,6 +132,23 @@ describe('viewer bridge', () => {
     viewerBridge(p.win, PANEL);
     p.send({ source: p.parent, origin: PANEL, data: { target: 'netschool-viewer', command: 'focus' } });
     expect(p.focused()).toBe(1);
+  });
+
+  // Mac klaviaturasida Win yo'q, brauzer Cmd+L/Cmd+Tab ni o'zi ushlaydi: panel menyusidan qat'iy ro'yxatdagi kombinatsiyalar.
+  test('the panel sends allowlisted key combinations only while connected', () => {
+    const p = fakePage();
+    viewerBridge(p.win, PANEL);
+    const keys = (combo: string) =>
+      p.send({ source: p.parent, origin: PANEL, data: { target: 'netschool-viewer', command: 'keys', combo } });
+    keys('lock');
+    expect(p.sentKeys).toEqual([]);
+    p.win.desktop = { State: 3 };
+    for (const combo of ['start', 'taskbar', 'lock', 'desktop', 'alt_tab', 'alt_f4', 'task_manager']) keys(combo);
+    keys('0x100052');
+    keys('constructor');
+    expect(p.sentKeys).toEqual([0x100000, 0x100054, 0x10004c, 0x100044, 0x020009, 0x020073, 0x09001b]);
+    // Vaqtinchalik option MeshCentral ro'yxatida qolmaydi.
+    expect(p.options).toEqual([]);
   });
 
   test('the embed is one style and one self-contained script bound to the panel origin', () => {

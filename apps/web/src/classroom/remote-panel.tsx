@@ -17,7 +17,12 @@ import type { StringKey } from '../i18n/strings.ts';
 import { Badge, StatusDot } from '../ui/badge.tsx';
 import { Button } from '../ui/button.tsx';
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog.tsx';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx';
 import { TileActions, TileButton } from './device-tile.tsx';
+
+// Gateway ko'prigidagi ro'yxat bilan bir xil (viewer-embed.ts KEY_COMBOS): Mac/brauzer ushlaydigan Windows kombinatsiyalari.
+const KEY_COMBOS = ['start', 'taskbar', 'lock', 'desktop', 'alt_tab', 'alt_f4', 'task_manager'] as const;
+type KeyCombo = (typeof KEY_COMBOS)[number];
 
 // apps/web Api → viewer paketi interfeysi; HTTP xatolari ViewerApiError bo'ladi.
 export function viewerApi(api: Api): ViewerApi {
@@ -108,6 +113,12 @@ export function RemotePanel(props: {
     if (viewerOrigin)
       frameRef.current?.contentWindow?.postMessage({ target: 'netschool-viewer', command: name }, viewerOrigin);
   };
+  // Menyu yopilgach fokus ekranga qaytadi (aks holda keyingi tugmalar panelda qoladi).
+  const sendKeys = (combo: KeyCombo) => {
+    if (!viewerOrigin) return;
+    frameRef.current?.contentWindow?.postMessage({ target: 'netschool-viewer', command: 'keys', combo }, viewerOrigin);
+    setTimeout(() => frameRef.current?.focus(), 0);
+  };
   // Boshqarish rejimida ulangan zahoti klaviatura ekranga yo'naladi (aks holda fokus panel tugmasida qoladi va
   // MeshCentral canvas'i bosilganda ham fokus olmaydi).
   const focusViewer = props.mode === 'control' && link === 'connected';
@@ -160,10 +171,22 @@ export function RemotePanel(props: {
                 </Button>
               )}
               {props.mode === 'control' && link === 'connected' && (
-                <Button size="sm" variant="secondary" onClick={() => command('cad')}>
-                  <Keyboard />
-                  {t('remote.cad')}
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="secondary">
+                      <Keyboard />
+                      {t('remote.keys')}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuItem onSelect={() => command('cad')}>{t('remote.cad')}</DropdownMenuItem>
+                    {KEY_COMBOS.map((combo) => (
+                      <DropdownMenuItem key={combo} onSelect={() => sendKeys(combo)}>
+                        {t(`remote.key.${combo}`)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
           )}

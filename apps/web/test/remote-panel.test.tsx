@@ -90,17 +90,34 @@ describe('remote panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Qayta ulanish' }));
     expect(toInner).toHaveBeenCalledWith({ target: 'netschool-viewer', command: 'connect' }, 'https://hub:8444');
 
-    expect(screen.queryByRole('button', { name: 'Ctrl+Alt+Del' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Maxsus tugmalar' })).toBeNull();
     bridge('connected');
     expect(screen.getByText('Ulandi')).toBeTruthy();
     // Boshqarish rejimida ulangan zahoti klaviatura fokusi ekranga beriladi (o'qituvchi bosmasdan yoza oladi).
     await waitFor(() => expect(document.activeElement).toBe(frame));
     expect(toInner).toHaveBeenCalledWith({ target: 'netschool-viewer', command: 'focus' }, 'https://hub:8444');
-    fireEvent.click(screen.getByRole('button', { name: 'Ctrl+Alt+Del' }));
+    // Mac'da yo'q yoki brauzer ushlaydigan kombinatsiyalar menyudan yuboriladi.
+    const menu = () => {
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Maxsus tugmalar' }), { key: 'Enter' });
+    };
+    menu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Ctrl+Alt+Del' }));
     expect(toInner).toHaveBeenLastCalledWith({ target: 'netschool-viewer', command: 'cad' }, 'https://hub:8444');
+    menu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Win\+L/ }));
+    expect(toInner).toHaveBeenLastCalledWith(
+      { target: 'netschool-viewer', command: 'keys', combo: 'lock' },
+      'https://hub:8444',
+    );
+    menu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Win\+T/ }));
+    expect(toInner).toHaveBeenLastCalledWith(
+      { target: 'netschool-viewer', command: 'keys', combo: 'taskbar' },
+      'https://hub:8444',
+    );
   });
 
-  test('view mode has no Ctrl+Alt+Del', async () => {
+  test('view mode has no special keys', async () => {
     const send = vi.fn(async (_method: string, path: string) => {
       if (path.endsWith('/remote-sessions')) return session;
       if (path.endsWith('/ticket')) return { url: 'https://hub:8444/rs/redeem?ticket=t1', expiresAt: AT };
@@ -118,6 +135,6 @@ describe('remote panel', () => {
       );
     });
     expect(screen.getByText('Ulandi')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Ctrl+Alt+Del' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Maxsus tugmalar' })).toBeNull();
   });
 });
