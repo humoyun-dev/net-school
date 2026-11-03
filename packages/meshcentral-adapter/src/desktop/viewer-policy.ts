@@ -1,6 +1,7 @@
 import type { RemoteMode } from '@netschool/domain';
 import { AdapterError } from '../errors.ts';
 import type { CredentialHandles } from './credential-handles.ts';
+import { viewerEmbedHtml } from './viewer-embed.ts';
 
 export type RouteVerdict = { ok: true; upstreamPath: string } | { ok: false; reason: string };
 export type FrameVerdict = { ok: true; data: string | Buffer } | { ok: false; reason: string };
@@ -298,7 +299,8 @@ function singleValue(html: string, pattern: RegExp, name: string): void {
 }
 
 // Sahifadagi real cookie'lar opaque handle'ga, upstream host gateway hostiga almashtiriladi.
-export function rewriteViewerHtml(html: string, ctx: ViewerContext, publicHost: string): string {
+// panelOrigin berilsa: MeshCentral sahifasiga panel ko'prigi qo'shiladi (viewer-embed.ts).
+export function rewriteViewerHtml(html: string, ctx: ViewerContext, publicHost: string, panelOrigin?: string): string {
   if (!PUBLIC_HOST.test(publicHost)) throw invalidPage('Viewer page: invalid public host');
   singleValue(html, AUTH_LINE, 'authCookie');
   singleValue(html, RELAY_LINE, 'authRelayCookie');
@@ -312,5 +314,8 @@ export function rewriteViewerHtml(html: string, ctx: ViewerContext, publicHost: 
   for (const real of ctx.handles.reals()) {
     if (real !== '' && out.includes(real)) throw invalidPage('Viewer page: credential left in page');
   }
-  return out;
+  if (panelOrigin === undefined) return out;
+  const end = out.lastIndexOf('</body>');
+  if (end < 0) throw invalidPage('Viewer page: no </body> for the panel bridge');
+  return `${out.slice(0, end)}${viewerEmbedHtml(panelOrigin)}${out.slice(end)}`;
 }

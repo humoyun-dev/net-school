@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { CredentialHandles } from '../../src/desktop/credential-handles.ts';
+import { viewerEmbedHtml } from '../../src/desktop/viewer-embed.ts';
 import {
   entryNodeKey,
   filterControlDown,
@@ -789,6 +790,18 @@ const REAL_AUTH = 'REAL-AUTH-COOKIE@1';
 const REAL_RELAY = 'REAL-RELAY-COOKIE$2';
 
 describe('rewriteViewerHtml', () => {
+  // Panel origin berilsa ko'prik (viewer-embed) </body> oldidan aynan bir marta qo'shiladi.
+  test('rewriteViewerHtml embeds the panel bridge once before </body>', () => {
+    const out = rewriteViewerHtml(PAGE, makeCtx(), PUBLIC_HOST, 'https://hub.school.lan');
+    const embed = viewerEmbedHtml('https://hub.school.lan');
+    expect(out.split(embed)).toHaveLength(2);
+    expect(out.indexOf(embed)).toBe(out.lastIndexOf('</body>') - embed.length);
+    expect(rewriteViewerHtml(PAGE, makeCtx(), PUBLIC_HOST)).not.toContain('netschool-viewer');
+    expect(() =>
+      rewriteViewerHtml(PAGE.replace('</body>', ''), makeCtx(), PUBLIC_HOST, 'https://hub.school.lan'),
+    ).toThrow(/body/);
+  });
+
   test('rewriteViewerHtml replaces credentials and public host', () => {
     const ctx = makeCtx();
     const out = rewriteViewerHtml(PAGE, ctx, PUBLIC_HOST);
