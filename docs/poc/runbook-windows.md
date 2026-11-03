@@ -87,7 +87,7 @@ Natijalar `docs/poc/results/` ga yoziladi:
    C:\NetSchool\companion\enroll.cmd --hub https://HUB --ca C:\NetSchool\hub-ca.pem
    ```
    Chiqish kodi `0` bo'lishi kerak.
-5. **Ishga tushirish.** Oddiy foydalanuvchi sessiyasida `start.cmd` ni oching. Tray'da NetSchool belgisi chiqadi.
+5. **Ishga tushirish.** `enroll.cmd` muvaffaqiyatli tugagach Companion'ni Windows autostart'iga yozadi (`HKLM\…\Run`, qiymat `NetSchool Companion`): keyingi har kirishda u o'zi ishga tushadi, oddiy foydalanuvchi buni o'chira olmaydi. Birinchi marta qayta kirmasdan ishga tushirish uchun oddiy foydalanuvchi sessiyasida `start.cmd` ni oching. Tray'da NetSchool belgisi chiqadi.
 6. **Bog'lash (Mac'da):** `node scripts/poc/hubctl.mjs mesh bind <Windows hostname> <nodeId>`. `nodeId` 3-bo'limdagi `mesh nodes` chiqishidan olinadi.
 
 ## 5. Avtomatik tekshiruv
@@ -152,7 +152,7 @@ Windows versiyasi: …  ·  VM/fizik: …  ·  Monitorlar: …
 ## 9. Tozalash
 
 1. Darsni tugating (panelda "Darsni tugatish"). Shundan keyin ochiq remote sessiya qolmasligi kerak: `verify` sessiyalarni o'zi yopadi, dars tugashi qolganlarini yopadi (ADR 0008).
-2. Windows'da MeshAgent'ni o'chiring: `meshagent-<arch>.exe` → **Uninstall**. `C:\NetSchool` va `%ProgramData%\NetSchool` ni ham o'chiring.
+2. Windows'da administrator `cmd` da `C:\NetSchool\companion\remove-autostart.cmd` ni ishga tushiring, keyin MeshAgent'ni o'chiring: `meshagent-<arch>.exe` → **Uninstall**. `C:\NetSchool` va `%ProgramData%\NetSchool` ni ham o'chiring.
 3. Mac'da PoC stack'ini ma'lumoti bilan o'chiring va zaxirani qaytaring:
    ```bash
    (cd infra/compose && docker compose down -v)   # faqat netschool-poc volume'lari
