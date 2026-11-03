@@ -3,7 +3,8 @@
   "commit": "adce1ec488dc884ce947ea4e4808e6a520609b17",
   "packageVersion": "1.3.1",
   "node": ">=20.0.0",
-  "imageDigest": null,
+  "imageDigest": "sha256:773d2d72764dce0ffc63176bba1bd32d528c0320a4a03cb29edb6c96cfbb51d8",
+  "imageDigestNote": "P0c Windows sinovida ishlatilgan lokal build (netschool-poc-meshcentral, 2026-11-02); registry yo'q — pilotda registry digest bilan almashtiriladi",
   "agentManifest": {
     "source": "infra/meshcentral/upstream/agents/agent-defaults.json (pinned GitHub releases, sha384)",
     "fetch": "pnpm meshcentral:agents",

@@ -8,22 +8,24 @@ Har katakning holati:
 
 | Imkoniyat | Windows x64 | Windows ARM64 | macOS | Linux X11 | Linux Wayland |
 |---|---|---|---|---|---|
-| `enrollment` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `inventory` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `remote.view` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `remote.control` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `remote.view_only_blocks_input` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `remote.revoke` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `power.shutdown` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `power.reboot` | not_tested | not_tested | not_tested | not_tested | not_tested |
+| `enrollment` | passed (results/windows-x64-2026-11-02.json#device_enrolled) | not_tested | not_tested | not_tested | not_tested |
+| `inventory` | passed (results/windows-x64-2026-11-02.json#agent_bound) | not_tested | not_tested | not_tested | not_tested |
+| `remote.view` | passed (results/windows-x64-2026-11-03-manual.md) | not_tested | not_tested | not_tested | not_tested |
+| `remote.control` | passed (results/windows-x64-2026-11-03-manual.md) | not_tested | not_tested | not_tested | not_tested |
+| `remote.view_only_blocks_input` | passed (results/windows-x64-2026-11-03-manual.md) | not_tested | not_tested | not_tested | not_tested |
+| `remote.revoke` | passed (results/windows-x64-2026-11-03-manual.md) | not_tested | not_tested | not_tested | not_tested |
+| `power.shutdown` | passed (results/windows-x64-2026-11-03-shutdown.json#power_shutdown) | not_tested | not_tested | not_tested | not_tested |
+| `power.reboot` | passed (results/windows-x64-2026-11-03-reboot.json#power_reboot) | not_tested | not_tested | not_tested | not_tested |
 | `power.sleep` | not_tested | not_tested | not_tested | not_tested | not_tested |
 | `power.wake` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `classroom.message` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `classroom.overlay` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `classroom.overlay_lease_expiry` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `classroom.help` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `classroom.thumbnails` | not_tested | not_tested | not_tested | not_tested | not_tested |
-| `uac_secure_desktop` | not_tested | not_tested | not_tested | not_tested | not_tested |
+| `classroom.message` | passed (results/windows-x64-2026-11-02.json#message) | not_tested | not_tested | not_tested | not_tested |
+| `classroom.overlay` | partial (results/windows-x64-2026-11-03-manual.md) | not_tested | not_tested | not_tested | not_tested |
+| `classroom.overlay_lease_expiry` | passed (results/windows-x64-2026-11-03-manual.md) | not_tested | not_tested | not_tested | not_tested |
+| `classroom.help` | passed (results/windows-x64-2026-11-03-manual.md) | not_tested | not_tested | not_tested | not_tested |
+| `classroom.thumbnails` | passed (results/windows-x64-2026-11-02.json#thumbnail) | not_tested | not_tested | not_tested | not_tested |
+| `uac_secure_desktop` | passed (results/windows-x64-2026-11-03-manual.md) | not_tested | not_tested | not_tested | not_tested |
 | `multi_monitor` | not_tested | not_tested | not_tested | not_tested | not_tested |
 
 Hozircha sinov uchun faqat Windows mashinasi bor (egasi, 2026-11-02). macOS va Linux ustunlari mashina paydo bo'lguncha `not_tested` bo'lib qoladi.
+
+Windows x64 (2026-11-02/03, Lenovo LOQ 15IRX9, Windows 11, hub Mac'da compose): `classroom.overlay` — `partial`: soft overlay Win, Ctrl+Shift+Esc va Ctrl+Alt+Del'ni to'smaydi (kuchli bloklash — alohida reja). `power.sleep` sinalmagan; `power.wake` — noutbuk iste'molchi modeli, WoL sozlamasi topilmadi, hub'dan to'g'ridan-to'g'ri sehrli paket keyinga qoldirildi. `multi_monitor` — bitta monitor.
