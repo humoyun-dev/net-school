@@ -143,10 +143,11 @@ describe('viewer bridge', () => {
     keys('lock');
     expect(p.sentKeys).toEqual([]);
     p.win.desktop = { State: 3 };
-    for (const combo of ['start', 'taskbar', 'lock', 'desktop', 'alt_tab', 'alt_f4', 'task_manager']) keys(combo);
+    for (const combo of ['start', 'taskbar', 'lock', 'desktop', 'explorer', 'alt_tab', 'alt_f4', 'task_manager'])
+      keys(combo);
     keys('0x100052');
     keys('constructor');
-    expect(p.sentKeys).toEqual([0x100000, 0x100054, 0x10004c, 0x100044, 0x020009, 0x020073, 0x09001b]);
+    expect(p.sentKeys).toEqual([0x100000, 0x100054, 0x10004c, 0x100044, 0x100045, 0x020009, 0x020073, 0x09001b]);
     // Vaqtinchalik option MeshCentral ro'yxatida qolmaydi.
     expect(p.options).toEqual([]);
   });

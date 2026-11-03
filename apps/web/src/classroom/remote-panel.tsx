@@ -21,7 +21,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { TileActions, TileButton } from './device-tile.tsx';
 
 // Gateway ko'prigidagi ro'yxat bilan bir xil (viewer-embed.ts KEY_COMBOS): Mac/brauzer ushlaydigan Windows kombinatsiyalari.
-const KEY_COMBOS = ['start', 'taskbar', 'lock', 'desktop', 'alt_tab', 'alt_f4', 'task_manager'] as const;
+const KEY_COMBOS = ['start', 'taskbar', 'lock', 'desktop', 'explorer', 'alt_tab', 'alt_f4', 'task_manager'] as const;
 type KeyCombo = (typeof KEY_COMBOS)[number];
 
 // Keyboard Lock API (Chrome/Edge) TS lib.dom'da yo'q.
