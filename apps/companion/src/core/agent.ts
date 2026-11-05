@@ -15,6 +15,8 @@ export interface AgentStatus {
   lastSeenAt: number | null;
   lessonId: string | null;
   overlay: OverlayView;
+  // O'quvchi oynasida «Yumshoq bloklash» yoki «Bloklangan» deb ko'rsatish uchun.
+  overlayEnforcement: 'soft' | 'hard';
   help: { id: string; raisedAt: string } | null;
   thumbnails: 'off' | 'on' | 'requires_permission' | 'unsupported';
 }
@@ -46,6 +48,8 @@ export interface AgentDeps {
   commands: CommandProcessor;
   thumbnails: ThumbnailUploader | null;
   facts: () => Promise<PlatformFacts>;
+  // Berilmasa overlay yumshoq.
+  enforcement?: () => 'soft' | 'hard';
   onStatus: (status: AgentStatus) => void;
 }
 
@@ -88,6 +92,7 @@ export class CompanionAgent {
       lastSeenAt: null,
       lessonId: null,
       overlay: deps.overlay.view(),
+      overlayEnforcement: deps.enforcement?.() ?? 'soft',
       help: null,
       thumbnails: 'off',
     };
@@ -246,7 +251,11 @@ export class CompanionAgent {
   }
 
   #emit(): void {
-    this.#status = { ...this.#status, overlay: this.#deps.overlay.view() };
+    this.#status = {
+      ...this.#status,
+      overlay: this.#deps.overlay.view(),
+      overlayEnforcement: this.#deps.enforcement?.() ?? 'soft',
+    };
     const json = JSON.stringify(this.#status);
     if (json === this.#lastEmitted) return;
     this.#lastEmitted = json;

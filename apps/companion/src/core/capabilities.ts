@@ -1,4 +1,5 @@
 import type { CapabilityReport } from '@netschool/contracts';
+import type { HardLockFacts } from './hard-lock.ts';
 
 // Qurilma haqidagi faktlar (Electron'siz): platforma, arxitektura, Linux sessiyasi va macOS ekran ruxsati.
 export interface PlatformFacts {
@@ -6,6 +7,8 @@ export interface PlatformFacts {
   arch: string;
   sessionType: 'x11' | 'wayland' | null;
   screenAccess: 'granted' | 'denied' | 'not-determined' | 'unknown';
+  // Faqat Windows: kuchli bloklash (klaviatura hook + siyosat) holati. Berilmasa overlay yumshoq hisoblanadi.
+  hardLock?: HardLockFacts;
 }
 
 type Capabilities = CapabilityReport['capabilities'];
@@ -35,6 +38,14 @@ function thumbnails(f: PlatformFacts): Capabilities[string] {
   return { state: 'available' };
 }
 
+// Overlay darajasi (ADR 0012): kuchli bloklash faqat Windows'da va hook bilan siyosat ikkalasi ishlasa "hard".
+// Biri ishlamasa "degraded" + sabab: yolg'on "hard" da'vo qilinmaydi (spec §7).
+function overlay(f: PlatformFacts): Capabilities[string] {
+  if (f.platform !== 'win32' || !f.hardLock) return { state: 'available', enforcement: 'soft' };
+  if (f.hardLock.enforced) return { state: 'available', enforcement: 'hard' };
+  return { state: 'degraded', enforcement: 'soft', reason: f.hardLock.reason ?? 'hard_lock_unavailable' };
+}
+
 // `remote.desktop` Companion hisobotida yo'q: uning manbai MeshAgent (ADR 0005, 0008).
 export function capabilityReport(f: PlatformFacts): CapabilityReport {
   return {
@@ -44,8 +55,7 @@ export function capabilityReport(f: PlatformFacts): CapabilityReport {
     desktopSession: desktopSession(f),
     capabilities: {
       'classroom.message': { state: 'available' },
-      // Soft overlay interfeysda ham soft sifatida ko'rsatiladi (spec §7).
-      'classroom.overlay': { state: 'available', enforcement: 'soft' },
+      'classroom.overlay': overlay(f),
       'classroom.help': { state: 'available' },
       'classroom.thumbnails': thumbnails(f),
     },

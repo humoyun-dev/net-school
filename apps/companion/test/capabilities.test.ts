@@ -26,6 +26,27 @@ describe('capability report', () => {
     });
   });
 
+  test('Windows with a working hard lock reports hard enforcement', () => {
+    const report = capabilityReport(facts({ hardLock: { enforced: true } }));
+    expect(report.capabilities['classroom.overlay']).toEqual({ state: 'available', enforcement: 'hard' });
+    expect(capabilityReportSchema.safeParse(report).success).toBe(true);
+  });
+
+  test('Windows with a broken hard lock is degraded and says why', () => {
+    const report = capabilityReport(facts({ hardLock: { enforced: false, reason: 'hook_failed' } }));
+    expect(report.capabilities['classroom.overlay']).toEqual({
+      state: 'degraded',
+      enforcement: 'soft',
+      reason: 'hook_failed',
+    });
+    expect(capabilityReportSchema.safeParse(report).success).toBe(true);
+  });
+
+  test('hard lock facts are ignored outside Windows', () => {
+    const report = capabilityReport(facts({ platform: 'darwin', hardLock: { enforced: true } }));
+    expect(report.capabilities['classroom.overlay']).toEqual({ state: 'available', enforcement: 'soft' });
+  });
+
   test('macOS without screen access requires permission for thumbnails', () => {
     for (const screenAccess of ['denied', 'not-determined', 'unknown'] as const) {
       const report = capabilityReport(facts({ platform: 'darwin', arch: 'arm64', screenAccess }));

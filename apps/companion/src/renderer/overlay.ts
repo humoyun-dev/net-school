@@ -1,4 +1,4 @@
-// Yumshoq overlay: o'quvchiga qulf sababi va "yumshoq" ekani ko'rsatiladi. Matn faqat textContent bilan qo'yiladi.
+// Overlay: o'quvchiga qulf sababi va darajasi (yumshoq yoki bloklangan) ko'rsatiladi. Matn faqat textContent bilan qo'yiladi.
 // Obuna sinxron, birinchi bo'lib qilinadi: main sahifa yuklanishi bilan joriy holatni yuboradi.
 import type { AgentStatus } from '../core/agent.ts';
 
@@ -15,7 +15,10 @@ function el(tag: string, text: string, className?: string): HTMLElement {
 
 function render(): void {
   if (!status || !strings) return;
-  const children = [el('h1', strings.overlayTitle), el('p', strings.overlayNote, 'muted')];
+  const children = [
+    el('h1', strings.overlayTitle),
+    el('p', status.overlayEnforcement === 'hard' ? strings.overlayNoteHard : strings.overlayNote, 'muted'),
+  ];
   if (status.overlay.message) children.push(el('p', status.overlay.message, 'teacher'));
   root.replaceChildren(...children);
 }
