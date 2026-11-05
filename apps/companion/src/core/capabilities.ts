@@ -39,11 +39,12 @@ function thumbnails(f: PlatformFacts): Capabilities[string] {
 }
 
 // Overlay darajasi (ADR 0012): kuchli bloklash faqat Windows'da va hook bilan siyosat ikkalasi ishlasa "hard".
-// Biri ishlamasa "degraded" + sabab: yolg'on "hard" da'vo qilinmaydi (spec §7).
+// Biri ishlamasa yumshoq bloklash baribir ishlaydi: holat `available` qoladi (hub `degraded`ni `unsupported` deb hisoblab,
+// lock buyrug'ini rad etardi), daraja `soft` va sabab bilan. Yolg'on "hard" da'vo qilinmaydi (spec §7).
 function overlay(f: PlatformFacts): Capabilities[string] {
   if (f.platform !== 'win32' || !f.hardLock) return { state: 'available', enforcement: 'soft' };
   if (f.hardLock.enforced) return { state: 'available', enforcement: 'hard' };
-  return { state: 'degraded', enforcement: 'soft', reason: f.hardLock.reason ?? 'hard_lock_unavailable' };
+  return { state: 'available', enforcement: 'soft', reason: f.hardLock.reason ?? 'hard_lock_unavailable' };
 }
 
 // `remote.desktop` Companion hisobotida yo'q: uning manbai MeshAgent (ADR 0005, 0008).

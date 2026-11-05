@@ -3,7 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "main": "main.cjs",
-  "scripts": { "start": "electron ." },
-  "dependencies": { "koffi": "3.3.6" },
-  "devDependencies": { "electron": "45.2.1" }
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "koffi": "3.3.6"
+  },
+  "devDependencies": {
+    "electron": "45.2.1"
+  }
 }

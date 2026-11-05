@@ -32,10 +32,10 @@ describe('capability report', () => {
     expect(capabilityReportSchema.safeParse(report).success).toBe(true);
   });
 
-  test('Windows with a broken hard lock is degraded and says why', () => {
+  test('Windows with a broken hard lock stays available as soft and says why', () => {
     const report = capabilityReport(facts({ hardLock: { enforced: false, reason: 'hook_failed' } }));
     expect(report.capabilities['classroom.overlay']).toEqual({
-      state: 'degraded',
+      state: 'available',
       enforcement: 'soft',
       reason: 'hook_failed',
     });

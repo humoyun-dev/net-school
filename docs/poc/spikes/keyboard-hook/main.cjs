@@ -23,7 +23,16 @@ if (process.platform !== 'win32') {
   app.exit(2);
 }
 
-const report = { electron: process.versions.electron, node: process.versions.node, installed: false, events: [], blocked: [], passed: 0, maxCallbackMs: 0, error: null };
+const report = {
+  electron: process.versions.electron,
+  node: process.versions.node,
+  installed: false,
+  events: [],
+  blocked: [],
+  passed: 0,
+  maxCallbackMs: 0,
+  error: null,
+};
 const down = new Set();
 const mods = () => ({
   ctrl: [...down].some((k) => CTRL.has(k)),
@@ -51,7 +60,9 @@ function finish(code) {
   const file = join(process.cwd(), 'spike-result.json');
   writeFileSync(file, JSON.stringify(report, null, 2));
   console.log(`\nNatija: ${file}`);
-  console.log(`hook o'rnatildi: ${report.installed}, to'silgan: ${report.blocked.length}, o'tgan: ${report.passed}, eng sekin callback: ${report.maxCallbackMs.toFixed(3)} ms`);
+  console.log(
+    `hook o'rnatildi: ${report.installed}, to'silgan: ${report.blocked.length}, o'tgan: ${report.passed}, eng sekin callback: ${report.maxCallbackMs.toFixed(3)} ms`,
+  );
   app.exit(code);
 }
 
@@ -71,8 +82,12 @@ app.whenReady().then(() => {
       dwExtraInfo: 'uintptr_t',
     });
     const HOOKPROC = koffi.proto('intptr_t __stdcall HOOKPROC(int nCode, uintptr_t wParam, void *lParam)');
-    const SetWindowsHookExW = user32.func('void *__stdcall SetWindowsHookExW(int idHook, HOOKPROC *lpfn, void *hMod, uint32 dwThreadId)');
-    const CallNextHookEx = user32.func('intptr_t __stdcall CallNextHookEx(void *hhk, int nCode, uintptr_t wParam, void *lParam)');
+    const SetWindowsHookExW = user32.func(
+      'void *__stdcall SetWindowsHookExW(int idHook, HOOKPROC *lpfn, void *hMod, uint32 dwThreadId)',
+    );
+    const CallNextHookEx = user32.func(
+      'intptr_t __stdcall CallNextHookEx(void *hhk, int nCode, uintptr_t wParam, void *lParam)',
+    );
     UnhookWindowsHookEx = user32.func('bool __stdcall UnhookWindowsHookEx(void *hhk)');
     const GetModuleHandleW = kernel32.func('void *__stdcall GetModuleHandleW(const wchar_t *name)');
 
@@ -104,9 +119,9 @@ app.whenReady().then(() => {
     report.installed = Boolean(hook);
     if (!hook) throw new Error('SetWindowsHookExW null qaytardi');
     console.log(`Hook o'rnatildi. ${RUN_MS / 1000} soniya ichida sinang:`);
-    console.log('  TO\'SILISHI KERAK: Win, Alt+Tab, Ctrl+Esc, Ctrl+Shift+Esc, Alt+F4, Alt+Space');
-    console.log('  O\'TISHI KERAK:   oddiy harflar, Ctrl+C, Shift+harf');
-    console.log('  Ctrl+Alt+Del va Win+L: hook bilan to\'silmaydi (kutilgan; siyosat bilan to\'siladi)');
+    console.log("  TO'SILISHI KERAK: Win, Alt+Tab, Ctrl+Esc, Ctrl+Shift+Esc, Alt+F4, Alt+Space");
+    console.log("  O'TISHI KERAK:   oddiy harflar, Ctrl+C, Shift+harf");
+    console.log("  Ctrl+Alt+Del va Win+L: hook bilan to'silmaydi (kutilgan; siyosat bilan to'siladi)");
     setTimeout(() => finish(0), RUN_MS);
   } catch (e) {
     report.error = String(e && e.stack ? e.stack : e);

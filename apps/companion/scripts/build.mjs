@@ -11,7 +11,8 @@ const dist = process.env.NETSCHOOL_COMPANION_OUT || join(root, 'dist');
 const testBuild = process.env.NETSCHOOL_COMPANION_TEST_BUILD === '1';
 const tsconfig = join(root, 'tsconfig.json');
 const common = { bundle: true, sourcemap: true, tsconfig, logLevel: 'warning' };
-const external = ['electron', 'bufferutil', 'utf-8-validate'];
+// koffi — native paket (Windows kuchli bloklash hook'i), bundle'ga kirmaydi; yo'q bo'lsa hook `hook_unavailable` bo'ladi.
+const external = ['electron', 'bufferutil', 'utf-8-validate', 'koffi'];
 
 // enroll CLI: Node 24, ESM.
 await build({
