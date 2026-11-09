@@ -61,10 +61,14 @@ export class HardLock {
     });
   }
 
-  // Qaytarilmay qolgan siyosatni qayta urinish (davriy chaqiriladi). Faol bloklashga tegmaydi.
-  retryRestore(): Promise<void> {
+  // Davriy tekshiruv (main.ts, har 30 s). Bloklash faol: yo'qolgan hook qayta o'rnatiladi (oqim o'lgan bo'lsa bloklash
+  // keyingi lock'gacha ochiq qolmasin). Bloklash yo'q: qaytarilmay qolgan siyosat qayta tiklanadi.
+  reconcile(): Promise<void> {
     return this.#run(async () => {
-      if (this.#locked) return;
+      if (this.#locked) {
+        if (!this.#hookInstalled) await this.#engage();
+        return;
+      }
       if (this.#restoreFailed || this.#deps.policy.hasPendingRestore()) await this.#release();
     });
   }

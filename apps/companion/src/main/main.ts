@@ -132,7 +132,7 @@ async function main(): Promise<void> {
 
     // Oldingi ishga tushishdan qolgan siyosat qaytariladi; lock bo'lsa overlay tiklanishi uni qayta qo'llaydi.
     await hardLock?.start();
-    const restoreTimer = hardLock ? setInterval(() => void hardLock.retryRestore(), 30_000) : null;
+    const restoreTimer = hardLock ? setInterval(() => void hardLock.reconcile(), 30_000) : null; // yo'qolgan hook va qolib ketgan siyosat
     restoreTimer?.unref();
     await agent.start();
     if (process.env.NETSCHOOL_COMPANION_SHOW_STATUS === '1') windows.showStatus();

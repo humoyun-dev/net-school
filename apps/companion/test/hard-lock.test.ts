@@ -110,6 +110,17 @@ describe('hard lock', () => {
     expect(lock.facts()).toEqual({ enforced: true });
   });
 
+  // Hook oqimi o'lsa, bloklash keyingi lock'gacha ochiq qolmasin: davriy tekshiruv uni qayta o'rnatadi.
+  test('the periodic reconcile reinstalls a hook lost while still locked', async () => {
+    const { hook, lock } = setup();
+    await lock.set(true);
+    hook.lose?.(new Error('thread exited'));
+    await lock.reconcile();
+    expect(hook.installed).toBe(true);
+    expect(hook.installs).toBe(2);
+    expect(lock.facts()).toEqual({ enforced: true });
+  });
+
   test('a failed restore is reported and retried until it succeeds', async () => {
     const { registry, lock, policy } = setup();
     await lock.set(true);
@@ -118,16 +129,16 @@ describe('hard lock', () => {
     expect(lock.facts()).toEqual({ enforced: false, reason: 'policy_restore_failed' });
     expect(policy.hasPendingRestore()).toBe(true);
     registry.failRemove = false;
-    await lock.retryRestore();
+    await lock.reconcile();
     expect(lock.facts()).toEqual({ enforced: true });
     expect(registry.values.size).toBe(0);
   });
 
-  // main.ts har 30 s retryRestore chaqiradi. Faol bloklash paytida jurnal har doim to'la: bu "qolib ketgan" siyosat emas.
+  // main.ts har 30 s reconcile chaqiradi. Faol bloklash paytida jurnal har doim to'la: bu "qolib ketgan" siyosat emas.
   test('the periodic restore retry leaves an active lock in place', async () => {
     const { registry, hook, lock } = setup();
     await lock.set(true);
-    await lock.retryRestore();
+    await lock.reconcile();
     expect(hook.installed).toBe(true);
     expect(registry.values.size).toBe(LOCK_POLICY.length);
     expect(lock.facts()).toEqual({ enforced: true });
