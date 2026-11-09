@@ -31,7 +31,11 @@ await build({
 // Asosiy jarayon CommonJS: Playwright (e2e) ESM entry'li Electron'ni ulay olmaydi.
 await build({
   ...common,
-  entryPoints: { main: join(root, 'src/main/main.ts') },
+  // Klaviatura hook'i alohida worker oqimida (main/keyboard-hook-thread.ts): asosiy oqim bandligi uni o'ldirmasin.
+  entryPoints: {
+    main: join(root, 'src/main/main.ts'),
+    'keyboard-hook-thread': join(root, 'src/main/keyboard-hook-thread.ts'),
+  },
   outdir: dist,
   outExtension: { '.js': '.cjs' },
   platform: 'node',

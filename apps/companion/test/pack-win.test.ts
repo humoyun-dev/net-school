@@ -27,12 +27,39 @@ beforeEach(() => {
   writeFileSync(join(appDist, 'renderer', 'status.html'), '<html></html>');
   requested.length = 0;
 });
+
+// koffi (kuchli bloklash hook'i) va uning win32 native paketi: faqat ishga tushishga kerakli fayllar.
+function fakeNodeModules(arch: string) {
+  const koffi = join(dir, 'nm', 'koffi');
+  const native = join(dir, 'nm', `koffi-win32-${arch}`);
+  const files: Record<string, string> = {
+    [join(koffi, 'package.json')]: '{"name":"koffi","main":"./index.cjs"}',
+    [join(koffi, 'index.cjs')]: 'module.exports = require("./src/koffi/index.cjs")',
+    [join(koffi, 'src/koffi/src/static.cjs')]: 'static',
+    [join(koffi, 'README.md')]: 'docs',
+    [join(koffi, 'vendor/node-api-headers/include/node_api.h')]: 'header',
+    [join(koffi, 'lib/native/base/base.cc')]: 'source',
+    [join(native, 'package.json')]: `{"name":"@koromix/koffi-win32-${arch}"}`,
+    [join(native, 'index.js')]: `module.exports = require('./win32_${arch}/koffi.node')`,
+    [join(native, `win32_${arch}/koffi.node`)]: 'MZ native',
+    [join(native, `win32_${arch}/koffi.lib`)]: 'import lib',
+  };
+  for (const [path, data] of Object.entries(files)) {
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, data);
+  }
+  return [
+    { name: 'koffi', dir: koffi },
+    { name: `@koromix/koffi-win32-${arch}`, dir: native },
+  ];
+}
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const pack = (arch: 'x64' | 'arm64') =>
+const pack = (arch: 'x64' | 'arm64', nodeModules = fakeNodeModules(arch)) =>
   packWin({
     arch,
     appDistDir: appDist,
+    nodeModules,
     outDir: join(dir, 'out'),
     getElectronZip: async (opts: { version: string; arch: string }) => {
       requested.push(opts);
@@ -103,5 +130,23 @@ describe('Windows portable package', () => {
     expect(off).toContain(
       'reg delete "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run" /v "NetSchool Companion" /f',
     );
+  });
+
+  // Hook koffi'siz yuklanmaydi va overlay jimgina yumshoq qoladi: bunday paket umuman yig'ilmaydi.
+  test('the keyboard hook native module ships next to the app, runtime files only', async () => {
+    const out = await pack('arm64');
+    const names = new Map(readZip(readFileSync(out)).map((e) => [e.name, e.data.toString()]));
+    const nm = 'resources/app/node_modules';
+    expect(names.get(`${nm}/koffi/index.cjs`)).toContain('require("./src/koffi/index.cjs")');
+    expect(names.has(`${nm}/koffi/package.json`)).toBe(true);
+    expect(names.has(`${nm}/koffi/src/koffi/src/static.cjs`)).toBe(true);
+    expect(names.get(`${nm}/@koromix/koffi-win32-arm64/win32_arm64/koffi.node`)).toBe('MZ native');
+    expect(names.has(`${nm}/@koromix/koffi-win32-arm64/index.js`)).toBe(true);
+    for (const name of names.keys()) expect(name).not.toMatch(/\.(md|h|cc|lib)$/);
+  });
+
+  test('a package without the native module for the requested arch is refused', async () => {
+    await expect(pack('x64', [])).rejects.toThrow(/koffi/);
+    await expect(pack('x64', fakeNodeModules('arm64'))).rejects.toThrow(/koffi-win32-x64/);
   });
 });

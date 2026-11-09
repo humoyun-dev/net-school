@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { StateCache } from '../src/core/cache.ts';
 import { HardLock, type KeyboardHook } from '../src/core/hard-lock.ts';
-import { type KeyEvent, type KeyVerdict, VK } from '../src/core/key-policy.ts';
 import { LOCK_POLICY, LockPolicy, type RegistryEntry, type RegistryPort } from '../src/core/lock-policy.ts';
 
 const id = (e: RegistryEntry) => `${e.key}|${e.name}`;
@@ -23,17 +22,24 @@ class FakeRegistry implements RegistryPort {
   }
 }
 
+// Haqiqiy hook o'z oqimida KeyPolicy bilan ishlaydi (main/win-keyboard-hook.ts); bu yerda faqat o'rnatilgan/yo'q.
 class FakeHook implements KeyboardHook {
-  handler: ((e: KeyEvent) => KeyVerdict) | null = null;
+  installed = false;
   installs = 0;
   failInstall = false;
-  install(handler: (e: KeyEvent) => KeyVerdict) {
+  lose: ((err: unknown) => void) | null = null;
+  async install(onLost: (err: unknown) => void) {
     if (this.failInstall) throw new Error('hook failed');
     this.installs += 1;
-    this.handler = handler;
+    this.installed = true;
+    this.lose = (err) => {
+      this.installed = false;
+      onLost(err);
+    };
   }
-  uninstall() {
-    this.handler = null;
+  async uninstall() {
+    this.installed = false;
+    this.lose = null;
   }
 }
 
@@ -54,13 +60,12 @@ describe('hard lock', () => {
   test('locking installs the hook and the policy, unlocking removes both', async () => {
     const { registry, hook, lock } = setup();
     await lock.set(true);
-    expect(hook.handler).not.toBeNull();
+    expect(hook.installed).toBe(true);
     expect(registry.values.size).toBe(LOCK_POLICY.length);
     expect(lock.facts()).toEqual({ enforced: true });
-    expect(hook.handler?.({ vkCode: VK.LWIN, flags: 0, kind: 'down' })).toBe('block');
 
     await lock.set(false);
-    expect(hook.handler).toBeNull();
+    expect(hook.installed).toBe(false);
     expect(registry.values.size).toBe(0);
   });
 
@@ -87,8 +92,22 @@ describe('hard lock', () => {
     const { registry, hook, lock } = setup();
     registry.failWrite = true;
     await lock.set(true);
-    expect(hook.handler).not.toBeNull();
+    expect(hook.installed).toBe(true);
     expect(lock.facts()).toEqual({ enforced: false, reason: 'policy_failed' });
+  });
+
+  // Windows sekin hook'ni olib tashlaydi yoki hook oqimi o'ladi: panel buni "kuchli" deb ko'rmasligi kerak.
+  test('a hook lost while locked is reported, and the next lock installs it again', async () => {
+    const { hook, lock, errors } = setup();
+    await lock.set(true);
+    hook.lose?.(new Error('thread exited'));
+    expect(lock.facts()).toEqual({ enforced: false, reason: 'hook_failed' });
+    expect(errors).toEqual(['hook_failed']);
+    await lock.set(false);
+    await lock.set(true);
+    expect(hook.installed).toBe(true);
+    expect(hook.installs).toBe(2);
+    expect(lock.facts()).toEqual({ enforced: true });
   });
 
   test('a failed restore is reported and retried until it succeeds', async () => {
@@ -104,6 +123,16 @@ describe('hard lock', () => {
     expect(registry.values.size).toBe(0);
   });
 
+  // main.ts har 30 s retryRestore chaqiradi. Faol bloklash paytida jurnal har doim to'la: bu "qolib ketgan" siyosat emas.
+  test('the periodic restore retry leaves an active lock in place', async () => {
+    const { registry, hook, lock } = setup();
+    await lock.set(true);
+    await lock.retryRestore();
+    expect(hook.installed).toBe(true);
+    expect(registry.values.size).toBe(LOCK_POLICY.length);
+    expect(lock.facts()).toEqual({ enforced: true });
+  });
+
   test('start repairs policy left behind by a crashed run', async () => {
     const { registry, lock, policy } = setup();
     await policy.apply(); // oldingi jarayon bloklab o'lgan
@@ -117,16 +146,7 @@ describe('hard lock', () => {
     const b = lock.set(false);
     const c = lock.set(true);
     await Promise.all([a, b, c]);
-    expect(hook.handler).not.toBeNull();
+    expect(hook.installed).toBe(true);
     expect(registry.values.size).toBe(LOCK_POLICY.length);
-  });
-
-  test('held modifiers do not leak from one lock to the next', async () => {
-    const { hook, lock } = setup();
-    await lock.set(true);
-    hook.handler?.({ vkCode: 0xa4, flags: 0, kind: 'down' }); // Alt bosildi, up hech qachon kelmadi
-    await lock.set(false);
-    await lock.set(true);
-    expect(hook.handler?.({ vkCode: VK.TAB, flags: 0, kind: 'down' })).toBe('pass');
   });
 });

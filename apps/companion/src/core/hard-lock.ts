@@ -1,10 +1,10 @@
-import { type KeyEvent, KeyPolicy, type KeyVerdict } from './key-policy.ts';
 import type { LockPolicy } from './lock-policy.ts';
 
-// Klaviatura hook'i (Windows'da koffi bilan, main/win-keyboard-hook.ts). `install` o'rnatolmasa xato tashlaydi.
+// Klaviatura hook'i (Windows'da main/win-keyboard-hook.ts: alohida oqim, ichida KeyPolicy). `install` o'rnatolmasa
+// rad etiladi; o'rnatilgandan keyin hook yo'qolsa (oqim o'ldi va h.k.) `onLost` chaqiriladi.
 export interface KeyboardHook {
-  install(handler: (event: KeyEvent) => KeyVerdict): void;
-  uninstall(): void;
+  install(onLost: (err: unknown) => void): Promise<void>;
+  uninstall(): Promise<void>;
 }
 
 export type HardLockReason =
@@ -22,7 +22,6 @@ export interface HardLockFacts {
 export interface HardLockDeps {
   policy: LockPolicy;
   hook: KeyboardHook;
-  keys?: KeyPolicy;
   // Qo'shimcha hodisalar uchun (log); xato sabablari faqat shu yerga yetadi, hub'ga emas.
   onError?: (reason: HardLockReason, err: unknown) => void;
 }
@@ -32,15 +31,15 @@ export interface HardLockDeps {
 // Chaqiruvlar ketma-ket bajariladi (overlay holati tez o'zgarsa ham poyga bo'lmasin).
 export class HardLock {
   readonly #deps: HardLockDeps;
-  readonly #keys: KeyPolicy;
   #queue: Promise<void> = Promise.resolve();
   #failure: HardLockReason | null = null;
   #restoreFailed = false;
   #hookInstalled = false;
+  // Overlay so'ragan holat: lock faol bo'lsa jurnal to'la bo'lishi kutilgan, uni "qolib ketgan" deb qaytarib bo'lmaydi.
+  #locked = false;
 
   constructor(deps: HardLockDeps) {
     this.#deps = deps;
-    this.#keys = deps.keys ?? new KeyPolicy();
   }
 
   // Joriy holat: o'rnatishda xato bo'lmagan bo'lsa "kuchli" mumkin. Tiklanmay qolgan siyosat alohida sabab.
@@ -51,22 +50,32 @@ export class HardLock {
 
   // Ishga tushganda: oldingi ishga tushishdan qolgan siyosat qaytariladi (lock keyin overlay'dan qayta qo'llanadi).
   start(): Promise<void> {
-    return this.#run(() => this.#release());
+    return this.#run(() => this.#unlock());
   }
 
   set(locked: boolean): Promise<void> {
-    return this.#run(() => (locked ? this.#engage() : this.#release()));
+    return this.#run(() => {
+      if (!locked) return this.#unlock();
+      this.#locked = true;
+      return this.#engage();
+    });
   }
 
-  // Qaytarilmay qolgan siyosatni qayta urinish (davriy chaqiriladi).
+  // Qaytarilmay qolgan siyosatni qayta urinish (davriy chaqiriladi). Faol bloklashga tegmaydi.
   retryRestore(): Promise<void> {
     return this.#run(async () => {
+      if (this.#locked) return;
       if (this.#restoreFailed || this.#deps.policy.hasPendingRestore()) await this.#release();
     });
   }
 
   dispose(): Promise<void> {
-    return this.#run(() => this.#release());
+    return this.#run(() => this.#unlock());
+  }
+
+  #unlock(): Promise<void> {
+    this.#locked = false;
+    return this.#release();
   }
 
   #run(task: () => Promise<void>): Promise<void> {
@@ -77,7 +86,6 @@ export class HardLock {
 
   async #engage(): Promise<void> {
     this.#failure = null;
-    this.#keys.reset();
     try {
       await this.#deps.policy.apply();
     } catch (err) {
@@ -85,7 +93,10 @@ export class HardLock {
     }
     if (!this.#hookInstalled) {
       try {
-        this.#deps.hook.install((event) => this.#keys.handle(event));
+        await this.#deps.hook.install((err) => {
+          this.#hookInstalled = false;
+          this.#fail('hook_failed', err);
+        });
         this.#hookInstalled = true;
       } catch (err) {
         this.#fail('hook_failed', err);
@@ -96,14 +107,13 @@ export class HardLock {
   async #release(): Promise<void> {
     this.#failure = null;
     if (this.#hookInstalled) {
+      this.#hookInstalled = false;
       try {
-        this.#deps.hook.uninstall();
+        await this.#deps.hook.uninstall();
       } catch (err) {
         this.#deps.onError?.('hook_failed', err);
       }
-      this.#hookInstalled = false;
     }
-    this.#keys.reset();
     try {
       await this.#deps.policy.restore();
       this.#restoreFailed = false;

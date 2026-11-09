@@ -1,30 +1,12 @@
+import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import type { KeyboardHook } from '../core/hard-lock.ts';
-import type { KeyEvent, KeyVerdict } from '../core/key-policy.ts';
+import type { HookThreadMessage } from './keyboard-hook-thread.ts';
+import { loadKoffi } from './koffi.ts';
 
-// Windows low-level klaviatura hook (WH_KEYBOARD_LL) koffi orqali. DIQQAT: Windows'da sinalmagan (P2d0 T1 spike natijasi
-// kutilmoqda, docs/poc/spikes/keyboard-hook). Hook callback'i faqat toza predicate'ni chaqiradi: Windows
-// LowLevelHooksTimeout dan sekin hook'ni jimgina o'chirib tashlaydi.
-const WH_KEYBOARD_LL = 13;
-const WM_KEYDOWN = 0x0100;
-const WM_SYSKEYDOWN = 0x0104;
-const WM_KEYUP = 0x0101;
-const WM_SYSKEYUP = 0x0105;
-
-// koffi'ning kerakli qismi (to'liq tip kerak emas; paket Windows'da yetkaziladi).
-interface Koffi {
-  load(lib: string): { func(signature: string): (...args: unknown[]) => unknown };
-  struct(name: string, fields: Record<string, string>): unknown;
-  proto(signature: string): unknown;
-  pointer(type: unknown): unknown;
-  register(fn: (...args: never[]) => unknown, type: unknown): unknown;
-  unregister(callback: unknown): void;
-  decode(pointer: unknown, type: unknown): { vkCode: number; flags: number };
-}
-
-function loadKoffi(): Koffi {
-  // Tashqi (bundle'ga kirmaydigan) native paket: yetishmasa xato tashlaydi.
-  return require('koffi') as Koffi;
-}
+const WM_QUIT = 0x0012;
+const START_TIMEOUT_MS = 5_000;
+const STOP_TIMEOUT_MS = 2_000;
 
 export function keyboardHookAvailable(): boolean {
   if (process.platform !== 'win32') return false;
@@ -36,64 +18,81 @@ export function keyboardHookAvailable(): boolean {
   }
 }
 
+let postThreadMessage: ((threadId: number, msg: number, w: number, l: number) => unknown) | null = null;
+function postThreadQuit(threadId: number): void {
+  postThreadMessage ??= loadKoffi()
+    .load('user32.dll')
+    .func('bool __stdcall PostThreadMessageW(uint32 idThread, uint32 Msg, uintptr_t wParam, intptr_t lParam)') as (
+    threadId: number,
+    msg: number,
+    w: number,
+    l: number,
+  ) => unknown;
+  postThreadMessage(threadId, WM_QUIT, 0, 0);
+}
+
+// Hook keyboard-hook-thread.cjs oqimida yashaydi (asosiy oqim bandligi hook'ni o'ldirmasin). Bu klass faqat oqimni
+// ishga tushiradi va WM_QUIT bilan to'xtatadi.
 export class WindowsKeyboardHook implements KeyboardHook {
-  #handle: unknown = null;
-  #callback: unknown = null;
-  #koffi: Koffi | null = null;
-  #unhook: ((handle: unknown) => unknown) | null = null;
+  readonly #script: string;
+  readonly #postQuit: (threadId: number) => void;
+  #worker: Worker | null = null;
+  #threadId = 0;
+  #stopping = false;
 
-  install(handler: (event: KeyEvent) => KeyVerdict): void {
-    if (this.#handle) return;
-    const koffi = loadKoffi();
-    const user32 = koffi.load('user32.dll');
-    const kernel32 = koffi.load('kernel32.dll');
-    const KBDLLHOOKSTRUCT = koffi.struct('KBDLLHOOKSTRUCT', {
-      vkCode: 'uint32',
-      scanCode: 'uint32',
-      flags: 'uint32',
-      time: 'uint32',
-      dwExtraInfo: 'uintptr_t',
-    });
-    const HOOKPROC = koffi.proto('intptr_t __stdcall HOOKPROC(int nCode, uintptr_t wParam, void *lParam)');
-    const setHook = user32.func(
-      'void *__stdcall SetWindowsHookExW(int idHook, HOOKPROC *lpfn, void *hMod, uint32 dwThreadId)',
-    );
-    const callNext = user32.func(
-      'intptr_t __stdcall CallNextHookEx(void *hhk, int nCode, uintptr_t wParam, void *lParam)',
-    );
-    const getModule = kernel32.func('void *__stdcall GetModuleHandleW(const wchar_t *name)');
-    this.#unhook = user32.func('bool __stdcall UnhookWindowsHookEx(void *hhk)') as (h: unknown) => unknown;
-
-    const callback = koffi.register((nCode: number, wParam: number, lParam: unknown) => {
-      if (nCode >= 0) {
-        const k = koffi.decode(lParam, KBDLLHOOKSTRUCT);
-        const kind =
-          wParam === WM_KEYDOWN || wParam === WM_SYSKEYDOWN
-            ? 'down'
-            : wParam === WM_KEYUP || wParam === WM_SYSKEYUP
-              ? 'up'
-              : null;
-        if (kind && handler({ vkCode: k.vkCode, flags: k.flags, kind }) === 'block') return 1;
-      }
-      return callNext(null, nCode, wParam, lParam);
-    }, koffi.pointer(HOOKPROC));
-
-    const handle = setHook(WH_KEYBOARD_LL, callback, getModule(null), 0);
-    if (!handle) {
-      koffi.unregister(callback);
-      throw new Error('SetWindowsHookExW returned null');
-    }
-    this.#koffi = koffi;
-    this.#callback = callback;
-    this.#handle = handle;
+  // Testlar soxta oqim skripti va WM_QUIT yuboruvchisini beradi.
+  constructor(opts: { script?: string; postQuit?: (threadId: number) => void } = {}) {
+    this.#script = opts.script ?? join(__dirname, 'keyboard-hook-thread.cjs');
+    this.#postQuit = opts.postQuit ?? postThreadQuit;
   }
 
-  uninstall(): void {
-    const handle = this.#handle;
-    this.#handle = null;
-    if (!handle) return;
-    this.#unhook?.(handle);
-    if (this.#koffi && this.#callback) this.#koffi.unregister(this.#callback);
-    this.#callback = null;
+  install(onLost: (err: unknown) => void): Promise<void> {
+    if (this.#worker) return Promise.resolve();
+    const worker = new Worker(this.#script);
+    this.#worker = worker;
+    this.#stopping = false;
+    return new Promise<void>((resolve, reject) => {
+      // starting → running → ended: har bir oqim uchun xato yoki yo'qotish faqat bir marta xabar qilinadi.
+      let state: 'starting' | 'running' | 'ended' = 'starting';
+      const fail = (err: unknown) => {
+        if (state === 'ended') return;
+        const wasRunning = state === 'running';
+        state = 'ended';
+        clearTimeout(timer);
+        if (this.#worker === worker) this.#worker = null;
+        if (!wasRunning) {
+          void worker.terminate();
+          reject(err);
+        } else if (!this.#stopping) {
+          onLost(err);
+        }
+      };
+      const timer = setTimeout(() => fail(new Error('keyboard hook thread did not start')), START_TIMEOUT_MS);
+      worker.on('message', (m: HookThreadMessage) => {
+        if (state !== 'starting') return;
+        if (m.type === 'installed') {
+          state = 'running';
+          clearTimeout(timer);
+          this.#threadId = m.threadId;
+          resolve();
+        } else {
+          fail(new Error(m.message));
+        }
+      });
+      worker.on('error', fail);
+      worker.on('exit', (code) => fail(new Error(`keyboard hook thread exited (${code})`)));
+    });
+  }
+
+  async uninstall(): Promise<void> {
+    const worker = this.#worker;
+    if (!worker) return;
+    this.#worker = null;
+    this.#stopping = true;
+    const exited = new Promise<void>((resolve) => worker.once('exit', () => resolve()));
+    this.#postQuit(this.#threadId);
+    const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), STOP_TIMEOUT_MS).unref());
+    // Oqim GetMessageW'dan chiqmasa (kutilmagan), jarayon baribir hook'ni ushlab qolmasin.
+    if ((await Promise.race([exited, timeout])) === 'timeout') await worker.terminate();
   }
 }

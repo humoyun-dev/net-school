@@ -2,6 +2,7 @@
 // enroll.cmd/start.cmd. Hech narsa Mac'da ishga tushirilmaydi — faqat zip yig'iladi.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,7 +46,12 @@ function filesUnder(root) {
   return out.sort();
 }
 
-export async function packWin({ arch, appDistDir, outDir, getElectronZip, version = ELECTRON_VERSION }) {
+// node_modules'dan paketga faqat ishga tushishga kerakli fayllar (JS, JSON, native .node) kiradi.
+const RUNTIME_FILE = /\.(c?js|mjs|json|node)$/;
+export const KOFFI_VERSION = '3.3.6';
+const koffiNative = (arch) => `@koromix/koffi-win32-${arch}`;
+
+export async function packWin({ arch, appDistDir, outDir, getElectronZip, nodeModules, version = ELECTRON_VERSION }) {
   if (arch !== 'x64' && arch !== 'arm64') throw new Error('arch must be x64 or arm64');
   const main = readFileSync(join(appDistDir, 'main.cjs'), 'utf8');
   // Yashirin sinov rejimi faqat e2e test build'ida: o'quvchi kompyuteriga hech qachon tushmasin.
@@ -69,6 +75,21 @@ export async function packWin({ arch, appDistDir, outDir, getElectronZip, versio
       data: readFileSync(file),
     });
   }
+  // Kuchli bloklash hook'i (koffi) bundle'dan tashqarida: dist/main.cjs uni resources/app/node_modules'dan oladi.
+  for (const { name, dir } of nodeModules) {
+    for (const file of filesUnder(dir)) {
+      const rel = relative(dir, file).split('\\').join('/');
+      if (RUNTIME_FILE.test(rel))
+        entries.push({ name: `resources/app/node_modules/${name}/${rel}`, data: readFileSync(file) });
+    }
+  }
+  const native = `resources/app/node_modules/${koffiNative(arch)}/win32_${arch}/koffi.node`;
+  if (
+    !entries.some((e) => e.name === 'resources/app/node_modules/koffi/index.cjs') ||
+    !entries.some((e) => e.name === native)
+  ) {
+    throw new Error(`refusing to pack without the keyboard hook: koffi and ${koffiNative(arch)} are required`);
+  }
   entries.push(
     { name: 'enroll.cmd', data: Buffer.from(ENROLL_CMD) },
     { name: 'start.cmd', data: Buffer.from(START_CMD) },
@@ -91,9 +112,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     delete env.NETSCHOOL_COMPANION_TEST_BUILD;
     execFileSync(process.execPath, [join(root, 'scripts/build.mjs')], { env, stdio: 'inherit' });
     const { downloadArtifact } = await import('@electron/get');
+    // pnpm-workspace.yaml `supportedArchitectures` win32 native paketini Mac/Linux'da ham (lockfile integrity bilan) o'rnatadi.
+    const appRequire = createRequire(join(root, 'package.json'));
+    const koffiDir = dirname(appRequire.resolve('koffi'));
+    const koffiVersion = JSON.parse(readFileSync(join(koffiDir, 'package.json'), 'utf8')).version;
+    if (koffiVersion !== KOFFI_VERSION) throw new Error(`koffi ${koffiVersion} != ${KOFFI_VERSION}`);
+    const nativeDir = dirname(createRequire(join(koffiDir, 'index.cjs')).resolve(koffiNative(arch)));
     const out = await packWin({
       arch,
       appDistDir: build,
+      nodeModules: [
+        { name: 'koffi', dir: koffiDir },
+        { name: koffiNative(arch), dir: nativeDir },
+      ],
       outDir: join(root, 'out'),
       // @electron/get SHASUMS256.txt bo'yicha tekshiradi.
       getElectronZip: async ({ version, arch: a }) =>
