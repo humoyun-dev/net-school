@@ -1,0 +1,107 @@
+{
+  "startedAt": "2026-11-09T05:10:30.396Z",
+  "hub": "https://10.10.0.102",
+  "room": "Lab-1",
+  "device": {
+    "id": "f9adc97e-d942-49c5-95bb-8919e17f2312",
+    "hostname": "DESKTOP-NAF58T0"
+  },
+  "steps": [
+    {
+      "id": "device_found",
+      "title": "Qurilma xonada",
+      "status": "passed",
+      "evidence": {
+        "deviceId": "f9adc97e-d942-49c5-95bb-8919e17f2312",
+        "hostname": "DESKTOP-NAF58T0"
+      }
+    },
+    {
+      "id": "device_enrolled",
+      "title": "Companion ro'yxatdan o'tgan va onlayn",
+      "status": "passed",
+      "evidence": {
+        "lastHeartbeatAt": "2026-11-09T05:10:22.840Z"
+      }
+    },
+    {
+      "id": "capabilities",
+      "title": "Capability hisoboti",
+      "status": "passed",
+      "evidence": {
+        "os": "windows",
+        "desktopSession": "windows",
+        "capabilities": {
+          "classroom.help": {
+            "state": "available"
+          },
+          "classroom.message": {
+            "state": "available"
+          },
+          "classroom.overlay": {
+            "state": "available",
+            "enforcement": "hard"
+          },
+          "classroom.thumbnails": {
+            "state": "available"
+          }
+        }
+      }
+    },
+    {
+      "id": "agent_bound",
+      "title": "MeshAgent bog'langan va onlayn",
+      "status": "passed",
+      "evidence": {
+        "agent": "online"
+      }
+    },
+    {
+      "id": "message",
+      "title": "Xabar yetkazildi",
+      "status": "passed",
+      "evidence": {
+        "commandId": "d68600e9-1781-4de1-87ef-3ea8ee46c450",
+        "status": "succeeded"
+      }
+    },
+    {
+      "id": "overlay",
+      "title": "Bloklash va ochish",
+      "status": "passed",
+      "evidence": {
+        "lock": {
+          "commandId": "847af21f-787f-44de-8ece-e50444feee08",
+          "status": "succeeded"
+        },
+        "unlock": {
+          "commandId": "6c699632-e791-4f30-be40-84a81462b61a",
+          "status": "succeeded"
+        }
+      }
+    },
+    {
+      "id": "thumbnail",
+      "title": "Miniatura (oxirgi kadr ≤2 s)",
+      "status": "passed",
+      "evidence": {
+        "bytes": 12197,
+        "contentType": "image/jpeg",
+        "ageMs": -495
+      }
+    },
+    {
+      "id": "remote",
+      "title": "Ko'rish, boshqarish, control_busy va yopish",
+      "status": "passed",
+      "evidence": {
+        "viewSession": "abdded9f-1967-438e-992e-f247e0b74caf",
+        "ticketHost": "10.10.0.102:8444",
+        "controlSession": "45504040-fce7-411d-b370-db185062a919",
+        "secondControl": 409
+      }
+    }
+  ],
+  "finishedAt": "2026-11-09T05:10:34.075Z",
+  "lessonId": "a60dc4d9-df0c-44a3-8cad-4483cf664fe4"
+}
