@@ -150,3 +150,36 @@ func TestJobCloseKillsMembers(t *testing.T) {
 		t.Fatal("Job yopilgach jarayon tugamadi")
 	}
 }
+
+// TestSanitizedEnvOwnToken runner foydalanuvchisining muhit bloki: Known Folders majburan, Electron/Node
+// o'zgaruvchilari yo'q, blok ikki NUL bilan tugaydi.
+func TestSanitizedEnvOwnToken(t *testing.T) {
+	var tok windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &tok); err != nil {
+		t.Fatal(err)
+	}
+	defer tok.Close()
+	b, err := sanitizedEnv(tok)
+	if err != nil {
+		t.Fatalf("sanitizedEnv: %v", err)
+	}
+	if len(b) < 2 || b[len(b)-1] != 0 || b[len(b)-2] != 0 {
+		t.Fatal("blok ikki NUL bilan tugamagan")
+	}
+	vars := ParseEnvBlock(b)
+	pd, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lookupEnv(vars, "ProgramData"); got != pd {
+		t.Fatalf("ProgramData = %q, kutilgan %q", got, pd)
+	}
+	if lookupEnv(vars, "Path") == "" {
+		t.Fatal("Path yo'q")
+	}
+	for _, v := range vars {
+		if n, _ := envName(v); dropped(n) {
+			t.Fatalf("%q tashlanmagan", v)
+		}
+	}
+}

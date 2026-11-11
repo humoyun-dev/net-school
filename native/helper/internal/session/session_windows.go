@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -203,7 +204,7 @@ func checkExe(exe string) error {
 }
 
 // createProcess tok nomidan jarayon yaratadi. Muhit bloki token egasiniki (CreateEnvironmentBlock, meros olinmaydi),
-// joriy katalog — exe katalogi, dastaklar meros qilinmaydi. Ip dastagi darhol yopiladi, jarayon dastagi process'ga
+// lekin sanitizedEnv bilan tozalangan (o'quvchi `HKCU\Environment`ga yoza oladi), joriy katalog — exe katalogi, dastaklar meros qilinmaydi. Ip dastagi darhol yopiladi, jarayon dastagi process'ga
 // o'tadi (uni Wait yopadi).
 //
 // job nol bo'lmasa jarayon CREATE_SUSPENDED bilan yaratiladi, Job'ga qo'shiladi va shundan keyingina ishga
@@ -227,11 +228,10 @@ func createProcess(tok windows.Token, exe string, args []string, flags uint32, j
 		return nil, err
 	}
 
-	var env *uint16
-	if err := windows.CreateEnvironmentBlock(&env, tok, false); err != nil {
-		return nil, fmt.Errorf("muhit bloki yaratilmadi: %w", err)
+	env, err := sanitizedEnv(tok)
+	if err != nil {
+		return nil, err
 	}
-	defer windows.DestroyEnvironmentBlock(env)
 
 	si := windows.StartupInfo{Desktop: desk16}
 	si.Cb = uint32(unsafe.Sizeof(si))
@@ -240,7 +240,7 @@ func createProcess(tok windows.Token, exe string, args []string, flags uint32, j
 	}
 	var pi windows.ProcessInformation
 	err = windows.CreateProcessAsUser(tok, exe16, cmd16, nil, nil, false,
-		flags|windows.CREATE_UNICODE_ENVIRONMENT, env, dir16, &si, &pi)
+		flags|windows.CREATE_UNICODE_ENVIRONMENT, &env[0], dir16, &si, &pi)
 	if err != nil {
 		return nil, fmt.Errorf("%s ishga tushmadi: %w", exe, err)
 	}
@@ -258,6 +258,77 @@ func createProcess(tok windows.Token, exe string, args []string, flags uint32, j
 		}
 	}
 	return newProcess(pi.Process), nil
+}
+
+// sanitizedEnv token egasining muhit blokini (CreateEnvironmentBlock: tizim + foydalanuvchi o'zgaruvchilari,
+// `HKCU\Environment` ham) SanitizeEnv bilan tozalaydi: Electron/Node/NetSchool o'zgaruvchilari tashlanadi, katalog
+// o'zgaruvchilari Known Folders'dan, Path/PATHEXT/ComSpec tizim blokidan (tokensiz CreateEnvironmentBlock: faqat
+// tizim o'zgaruvchilari) olinadi. Biror qiymat aniqlanmasa xato: Companion boshqariladigan muhit bilan ishga
+// tushgandan ko'ra ishga tushmagani ma'qul (panelda `companion_down` ko'rinadi).
+func sanitizedEnv(tok windows.Token) ([]uint16, error) {
+	user, err := envBlock(tok)
+	if err != nil {
+		return nil, err
+	}
+	system, err := envBlock(0)
+	if err != nil {
+		return nil, err
+	}
+	folders := []struct {
+		id    *windows.KNOWNFOLDERID
+		names []string
+	}{
+		{windows.FOLDERID_ProgramData, []string{"ProgramData", "ALLUSERSPROFILE"}},
+		{windows.FOLDERID_Windows, []string{"SystemRoot", "windir"}},
+		{windows.FOLDERID_ProgramFiles, []string{"ProgramFiles"}},
+		{windows.FOLDERID_ProgramFilesX64, []string{"ProgramW6432"}},
+		{windows.FOLDERID_ProgramFilesCommon, []string{"CommonProgramFiles"}},
+		{windows.FOLDERID_ProgramFilesCommonX64, []string{"CommonProgramW6432"}},
+	}
+	var forced []EnvVar
+	for _, f := range folders {
+		v, err := windows.KnownFolderPath(f.id, 0)
+		if err != nil {
+			return nil, fmt.Errorf("%s aniqlanmadi: %w", f.names[0], err)
+		}
+		for _, n := range f.names {
+			forced = append(forced, EnvVar{Name: n, Value: v})
+		}
+	}
+	for _, n := range []string{"Path", "PATHEXT", "ComSpec"} {
+		forced = append(forced, EnvVar{Name: n, Value: lookupEnv(system, n)})
+	}
+	return SerializeEnvBlock(SanitizeEnv(user, forced)), nil
+}
+
+// envBlock CreateEnvironmentBlock natijasini satrlarga aylantiradi. tok 0 — faqat tizim o'zgaruvchilari.
+func envBlock(tok windows.Token) ([]string, error) {
+	var env *uint16
+	if err := windows.CreateEnvironmentBlock(&env, tok, false); err != nil {
+		return nil, fmt.Errorf("muhit bloki yaratilmadi: %w", err)
+	}
+	defer windows.DestroyEnvironmentBlock(env)
+	return ParseEnvBlock(blockSlice(env)), nil
+}
+
+// blockSlice ikki NUL bilan tugaydigan blokni (oxirgi NUL bilan) slice qiladi.
+func blockSlice(p *uint16) []uint16 {
+	at := func(i int) uint16 { return *(*uint16)(unsafe.Add(unsafe.Pointer(p), i*2)) }
+	for i := 0; ; i++ {
+		if at(i) == 0 && (i == 0 || at(i-1) == 0) {
+			return unsafe.Slice(p, i+1)
+		}
+	}
+}
+
+// lookupEnv satrlardan nom bo'yicha (katta-kichik harfsiz) qiymat; yo'q bo'lsa "".
+func lookupEnv(vars []string, name string) string {
+	for _, v := range vars {
+		if n, ok := envName(v); ok && strings.EqualFold(n, name) {
+			return v[len(n)+1:]
+		}
+	}
+	return ""
 }
 
 // Job JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE bilan Job obyekti: xizmat jarayoni tugaganda (to'xtatilganda yoki
