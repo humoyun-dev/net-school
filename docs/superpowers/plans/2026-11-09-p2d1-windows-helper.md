@@ -211,7 +211,7 @@ apps/companion/scripts/pack-win.mjs                 # helper.exe, install.cmd, u
 - Produces (toza): `type Proc struct { PID, ParentPID, Session uint32; Image string; Created time.Time }` (`Image` to'liq yo'l, kichik harf; `Created` — `GetProcessTimes`); `type Allow struct { Dirs []string; Images []string }`; `func Decide(p Proc, session uint32, baseline map[uint32]bool, procs map[uint32]Proc, allow Allow) bool` (true = o'ldirish).
 - Qoida (amalga oshirishda o'zgardi, yakuniy shakli ADR 0014'da): baseline'da bo'lmagan jarayon faqat **bir xil exe avlodi** bo'lsa yashaydi (ota zanjiri tirik baseline ajdodga yetadi va zanjirdagi hamma jarayon aynan shu exe); `System32\taskmgr.exe` baseline'da bo'lsa ham o'ldiriladi; ota PID'i eskirgan jarayon bir skan o'tkazib yuboriladi. Quyidagi dastlabki qoida tarix uchun qoldirildi:
   - boshqa sessiya → yo'q;
-  - `allow.Dirs` (`%ProgramFiles%\NetSchool\`, `%ProgramFiles%\Mesh Agent\`) yoki `allow.Images` (`%SystemRoot%\System32\` ichidagi `conhost.exe`, `dwm.exe`, `csrss.exe`, `fontdrvhost.exe`, `ctfmon.exe`, `LogonUI.exe`, `consent.exe`, `WerFault.exe`, `SystemSettingsBroker.exe`; `TextInputHost.exe` o'z yo'li bilan) → yo'q;
+  - `allow.Dirs` (`%ProgramFiles%\NetSchool\`, `%ProgramFiles%\Mesh Agent\`) yoki `allow.Images` (`%SystemRoot%\System32\` ichidagi `conhost.exe`, `dwm.exe`, `csrss.exe`, `fontdrvhost.exe`, `ctfmon.exe`, `LogonUI.exe`, `consent.exe`, `WerFault.exe`, `SystemSettingsBroker.exe`; `TextInputHost.exe` o'z yo'li bilan) → yo'q; *(Yakuniy tuzatish: NetSchool katalogidagi exe faqat helper xizmati ochgan bo'lsa — zanjir ≤ 2 bo'g'in, faqat NetSchool exe'lari orqali; Mesh Agent exe faqat session 0'dagi Mesh Agent exe'si ochgan bo'lsa yashaydi. ADR 0014, 4-band.)*
   - baseline'dagi jarayonning avlodi → yo'q. Istisno: zanjirda `explorer.exe`, `taskmgr.exe`, `sihost.exe`, `RuntimeBroker.exe` dan keyin kelgan bo'lsa, ota-onasi baseline bo'lsa ham → ha;
   - qolgani → ha.
 - Windows: har 250 ms `CreateToolhelp32Snapshot`, `ProcessIdToSessionId`, `QueryFullProcessImageNameW`, `TerminateProcess`. Baseline — bloklash boshlangan paytdagi sessiya jarayonlari. Faqat bloklash paytida ishlaydi.
@@ -283,7 +283,7 @@ apps/companion/scripts/pack-win.mjs                 # helper.exe, install.cmd, u
 
 **Interfaces:**
 - Hub `classroom.overlay`ni helper holatidan hisoblaydi:
-  - oxirgi helper statusi ≤ 90 s bo'lsa: `hard` faqat `hook=active`, `policy=active`, `processGuard=active` bo'lganda, aks holda `soft` + birinchi yiqilgan komponent nomi (`hook_failed` | `policy_failed` | `process_guard_failed`);
+  - oxirgi helper statusi ≤ 90 s bo'lsa: `hard` faqat `hook=active`, `policy=active`, `processGuard=active` bo'lganda, aks holda `soft` + birinchi yiqilgan komponent nomi (`hook_failed` | `policy_failed` | `process_guard_failed`); *(Yakuniy tuzatish: bloklangan holda `hard` uchun `companion=running` ham shart, aks holda `companion_down`. ADR 0014, 1- va 3-band.)*
   - helper statusi bo'lmasa yoki eski bo'lsa: Companion hisoboti, lekin `hard` hech qachon emas (`reason: helper_missing`).
 - Yangi capability `classroom.sas_block`: `cad=blocked|off` → `available`, `unavailable` → `unsupported` (`reason: edition`), `failed` → `unsupported` (`reason: failed`).
 
