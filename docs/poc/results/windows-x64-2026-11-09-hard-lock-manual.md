@@ -13,7 +13,7 @@ Bloklash `overlay.lock` buyrug'i bilan yuborildi (o'quvchining o'z klaviaturasi 
 | 1 | Daraja | qisman | Capability `soft`, sabab `policy_failed`: hook o'rnatiladi, siyosat yozilmaydi (pastda 3-topilma) |
 | 2 | Win, Ctrl+Esc, Alt+Tab, Alt+F4, Alt+Space, Ctrl+Shift+Esc | ha | Ko'p marta ketma-ket bosilganda ham to'siladi |
 | 3 | Ctrl+Alt+Del, Win+L | yo'q | Ctrl+Alt+Del ekranida barcha bandlar bor (Vazifalar menejeri ham). O'quvchi Vazifalar menejeri orqali Companion'ni yopdi va bloklash paytida dastur ishga tushirdi. Hook SAS'ni ushlay olmaydi, siyosat SYSTEM huquqini talab qiladi |
-| 4 | Bloklash paytida o'qituvchining masofaviy boshqaruvi | ha | Sichqoncha va klaviatura ishladi (injected kiritish to'silmaydi) |
+| 4 | Bloklash paytida o'qituvchining masofaviy boshqaruvi | ha | Sichqoncha va klaviatura ishladi (injected kiritish to'silmaydi). *Izoh (2026-11-11): P2d1'da qoida o'zgardi — injected tugma faqat `LLKHF_LOWER_IL_INJECTED` bitisiz bo'lsa o'tadi (MeshAgent o'tadi, o'quvchining `SendInput`i to'siladi), [ADR 0014](../../adr/0014-windows-helper.md)* |
 | 5 | Ochish | ha | Ochishdan keyin Win, Alt+Tab, Ctrl+Shift+Esc odatdagidek |
 | 6 | Hub API to'xtatildi | qisman | Overlay o'zi tushdi, tugmalar qaytdi; API qaytgach bloklash qaytdi. Tushish vaqti aniq o'lchanmadi (laptop soati farqi; javob API to'xtagandan ~35 s da keldi). Kod bo'yicha lease 120 s, 2026-11-03 da ≈120 s o'lchangan; qayta o'lchash kerak |
 | 7 | Companion bloklash paytida o'ldirildi (Vazifalar menejeri) | ha | Overlay va hook u bilan birga yo'qoldi; `start.cmd` dan keyin bloklash qaytdi |

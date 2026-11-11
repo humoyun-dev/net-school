@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Holat (2026-11-11):** Task 0–11 bajarildi. Task 12: Step 1 (hub darajasi, `classroom.sas_block`) va hujjatlar (ADR 0014, [qabul runbook'i](../../poc/results/windows-x64-2026-11-11-helper-manual.md), matrix, risklar, yo'l xaritasi) bajarildi; **Step 2 (qo'lda qabul sinovi) egasini kutmoqda**. Amalga oshirishdagi chetlanishlar [ADR 0014](../../adr/0014-windows-helper.md)'da va pastda tegishli joylarda belgilangan.
+
 **Goal:** O'quvchi kompyuterida SYSTEM huquqli NetSchool Helper bloklashni o'quvchidan mustaqil ravishda majburlaydi: klaviatura, siyosat, yangi dasturlar, Ctrl+Alt+Del (Keyboard Filter bor joyda). Companion'ni ishga tushiradi va o'ldirilsa qayta ishga tushiradi, MeshAgent'ni kuzatadi. O'quvchi (standart foydalanuvchi) helper'ni to'xtata olmaydi.
 
 **Architecture:** `native/helper` — bitta Go binary (`netschool-helper.exe`), uch rejim:
@@ -11,7 +13,7 @@
 
 Helper bloklash holatini Companion'dan emas, hub'dan **o'z kaliti bilan** oladi. Hub har qurilma uchun qat'iy o'suvchi imzo vaqtini talab qiladi, shuning uchun bir kalit ikki mijozga bo'linmaydi. Helper kaliti faqat SYSTEM/Administrators o'qiy oladigan faylda turadi. Companion UI (overlay) bo'lib qoladi va oddiy foydalanuvchi huquqida ishlaydi. Helper uni foydalanuvchi tokeni bilan ishga tushiradi va kuzatadi.
 
-**Tech Stack:** Go (`go.mod`: `go 1.26`), faqat `golang.org/x/sys` (windows, svc, svc/mgr, registry). CGO yo'q. Hub tomoni: NestJS + Drizzle (migratsiya), zod contracts. Companion: mavjud TypeScript.
+**Tech Stack:** Go (`go.mod`: `go 1.26.0`), faqat `golang.org/x/sys` (windows, svc, svc/mgr, registry). CGO yo'q. Hub tomoni: NestJS + Drizzle (migratsiya), zod contracts. Companion: mavjud TypeScript.
 
 **Spec:** [ADR 0013](../../adr/0013-windows-hard-lock-results.md) (egasining talablari), [T6 natijasi](../../poc/results/windows-x64-2026-11-09-hard-lock-manual.md), arxitektura §6, §7.1, §12; yo'l xaritasi P2d qatori.
 
@@ -36,11 +38,11 @@ Helper bloklash holatini Companion'dan emas, hub'dan **o'z kaliti bilan** oladi.
 
 ## Review Focus
 
-1. **O'quvchi Companion'ni ketma-ket o'ldiradi.** Har safar ≤ 3 s ichida qayta ishga tushishi, lekin crash-loop'da CPU'ni yemasligi kerak (backoff 1 s → 30 s, 60 s barqaror ishlasa nollanadi). Test: Task 6 `TestSupervisorBacksOffOnCrashLoop`.
+1. **O'quvchi Companion'ni ketma-ket o'ldiradi.** Har safar ≤ 3 s ichida qayta ishga tushishi, lekin crash-loop'da CPU'ni yemasligi kerak (backoff 1 s → 30 s faqat jarayon 5 s dan kam yashasa — `StartupCrashWindow`; aks holda 1 s dan keyin qayta. Rejadagi "60 s" 5 s ga o'zgardi, ADR 0014). Test: Task 6 `TestSupervisorBacksOffOnCrashLoop`.
 2. **Bloklash paytida hub yo'qoladi.** Lease (120 s) tugashi bilan helper hook, siyosat va process guard'ni bo'shatishi kerak. O'quvchi abadiy bloklanib qolmasin. Test: Task 3 `TestLeaseExpiresWithoutHub`, Task 10 `TestHubLossReleasesAfterLease`.
 3. **Helper bloklash paytida qulaydi yoki kompyuter o'chadi.** Keyingi ishga tushishda bloklash yo'q bo'lsa siyosat jurnal bo'yicha qaytariladi va Keyboard Filter o'chiriladi. Test: Task 4 `TestStartRestoresLeftoverPolicy`, Task 9 `TestStartDisablesLeftoverFilter`.
 4. **Sessiya almashadi:** logoff, boshqa foydalanuvchi kiradi yoki ekran qulflanadi. Siyosat yangi foydalanuvchiga ko'chishi, eski foydalanuvchi hive'idan qaytarilishi kerak. Test: Task 4 `TestPolicyFollowsSessionUser`.
-5. **Process guard o'quvchining ochiq ishini o'ldirmasligi kerak.** Bloklashdan oldin ochilgan dasturlar va ularning bolalari (masalan brauzer tablari) yashaydi. Explorer, taskmgr va yangi ildizdan boshlangan jarayonlar o'ldiriladi. Test: Task 8 `TestBaselineDescendantsSurvive`.
+5. **Process guard o'quvchining ochiq ishini o'ldirmasligi kerak.** Bloklashdan oldin ochilgan dasturlar va ularning bolalari (masalan brauzer tablari) yashaydi. Baseline'da bo'lmagan jarayon faqat bir xil exe avlodi bo'lsa yashaydi; taskmgr, explorer orqali ochilgan va yangi ildizdan boshlangan jarayonlar o'ldiriladi (ADR 0014). Test: Task 8 `TestBaselineDescendantsSurvive`.
 
 ---
 
@@ -165,7 +167,7 @@ apps/companion/scripts/pack-win.mjs                 # helper.exe, install.cmd, u
 - Modify: `apps/companion/test/key-policy.test.ts` (fixture'ni ham o'tkazadi)
 
 **Interfaces:**
-- Produces: `type Event struct { VK uint32; Flags uint32; Down bool }`; `type Policy struct`; `func (p *Policy) Handle(e Event) (block bool)`; `func (p *Policy) Reset()`. Qoidalar `apps/companion/src/core/key-policy.ts` bilan bir xil (Win, Alt+Tab/Esc/F4/Space, Ctrl+Esc, to'silgan tugmaning "up"i, `LLKHF_INJECTED` o'tadi).
+- Produces: `type Event struct { VK uint32; Flags uint32; Down bool }`; `type Policy struct`; `func (p *Policy) Handle(e Event) (block bool)`; `func (p *Policy) Reset()`. Qoidalar `apps/companion/src/core/key-policy.ts` bilan bir xil (Win, Alt+Tab/Esc/F4/Space, Ctrl+Esc, to'silgan tugmaning "up"i). Amalga oshirishda: injected tugma faqat `LLKHF_LOWER_IL_INJECTED` bitisiz bo'lsa o'tadi (MeshAgent/SYSTEM kiritishi o'tadi, o'quvchining `SendInput`i to'siladi; rejadagi "`LLKHF_INJECTED` o'tadi" o'zgardi, ADR 0014).
 
 - [ ] **Step 1:** Fixture: hodisalar ketma-ketliklari va kutilgan `block[]` (mavjud `key-policy.test.ts` holatlaridan, kamida 8 ta ketma-ketlik). TS testi fixture'ni o'tkazadi.
 - [ ] **Step 2:** `TestFixtureSequences` (Go) → FAIL → port → PASS.
@@ -177,7 +179,7 @@ apps/companion/scripts/pack-win.mjs                 # helper.exe, install.cmd, u
 - Create: `native/helper/internal/supervise/supervisor.go`, `supervisor_test.go`, `native/helper/internal/session/session_windows.go`, `session_windows_test.go`
 
 **Interfaces:**
-- Produces (toza): `type Launcher interface { Start() (Proc, error) }`; `type Proc interface { Wait() error; Kill() error }`; `type Clock interface { Now() time.Time; Sleep(ctx context.Context, d time.Duration) error }` (`lock.Clock`dan alohida); `type Supervisor struct`; `func NewSupervisor(name string, l Launcher, clock Clock) *Supervisor`; `func (s *Supervisor) Run(ctx)` (backoff: 1 s, 2 s, 4 s … 30 s; jarayon ≥ 60 s yashasa 1 s ga qaytadi); `func (s *Supervisor) State() string` (`running` | `restarting` | `stopped`).
+- Produces (toza): `type Launcher interface { Start() (Proc, error) }`; `type Proc interface { Wait() error; Kill() error }`; `type Clock interface { Now() time.Time; Sleep(ctx context.Context, d time.Duration) error }` (`lock.Clock`dan alohida); `type Supervisor struct`; `func NewSupervisor(name string, l Launcher, clock Clock) *Supervisor`; `func (s *Supervisor) Run(ctx)` (backoff: 1 s, 2 s, 4 s … 30 s faqat jarayon `StartupCrashWindow` = 5 s dan kam yashasa; aks holda 1 s dan keyin qayta. Rejadagi "≥ 60 s" 5 s ga o'zgardi, ADR 0014); `func (s *Supervisor) State() string` (`running` | `restarting` | `stopped`).
 - Produces (Windows): `type Session struct { ID uint32; UserSID string }`; `func ActiveConsole() (Session, bool, error)` (`WTSGetActiveConsoleSessionId`, foydalanuvchi yo'q → `false`); `func StartAsUser(s Session, exe string, args []string) (Proc, error)` (`WTSQueryUserToken` + `CreateProcessAsUser`, `winsta0\default`, environment `CreateEnvironmentBlock`); `func StartAsSystemInSession(s Session, exe string, args []string) (Proc, error)` (o'z tokenini `DuplicateTokenEx`, `SetTokenInformation(TokenSessionId)`, `CreateProcessAsUser`).
 
 - [ ] **Step 1:** Toza testlar (soxta Launcher/Clock): `TestSupervisorRestartsAfterExit`, `TestSupervisorBacksOffOnCrashLoop` (5 tez yiqilish → kutish 1,2,4,8,16 s), `TestSupervisorResetsBackoffAfterStableRun`, `TestSupervisorStopsOnCancel` (bola o'ldiriladi).
@@ -207,7 +209,7 @@ apps/companion/scripts/pack-win.mjs                 # helper.exe, install.cmd, u
 
 **Interfaces:**
 - Produces (toza): `type Proc struct { PID, ParentPID, Session uint32; Image string; Created time.Time }` (`Image` to'liq yo'l, kichik harf; `Created` — `GetProcessTimes`); `type Allow struct { Dirs []string; Images []string }`; `func Decide(p Proc, session uint32, baseline map[uint32]bool, procs map[uint32]Proc, allow Allow) bool` (true = o'ldirish).
-- Qoida (bu qaror rejaning o'zida, ADR 0014'ga ham yoziladi):
+- Qoida (amalga oshirishda o'zgardi, yakuniy shakli ADR 0014'da): baseline'da bo'lmagan jarayon faqat **bir xil exe avlodi** bo'lsa yashaydi (ota zanjiri tirik baseline ajdodga yetadi va zanjirdagi hamma jarayon aynan shu exe); `System32\taskmgr.exe` baseline'da bo'lsa ham o'ldiriladi; ota PID'i eskirgan jarayon bir skan o'tkazib yuboriladi. Quyidagi dastlabki qoida tarix uchun qoldirildi:
   - boshqa sessiya → yo'q;
   - `allow.Dirs` (`%ProgramFiles%\NetSchool\`, `%ProgramFiles%\Mesh Agent\`) yoki `allow.Images` (`%SystemRoot%\System32\` ichidagi `conhost.exe`, `dwm.exe`, `csrss.exe`, `fontdrvhost.exe`, `ctfmon.exe`, `LogonUI.exe`, `consent.exe`, `WerFault.exe`, `SystemSettingsBroker.exe`; `TextInputHost.exe` o'z yo'li bilan) → yo'q;
   - baseline'dagi jarayonning avlodi → yo'q. Istisno: zanjirda `explorer.exe`, `taskmgr.exe`, `sihost.exe`, `RuntimeBroker.exe` dan keyin kelgan bo'lsa, ota-onasi baseline bo'lsa ham → ha;
@@ -255,18 +257,18 @@ apps/companion/scripts/pack-win.mjs                 # helper.exe, install.cmd, u
 
 **Files:**
 - Create: `native/helper/internal/install/install_windows.go`, `install_test.go` (toza: SDDL va yo'llar)
-- Modify: `cmd/netschool-helper/main.go` (`install`, `uninstall`), `apps/companion/src/cli/enroll.ts` (helper kalitini yaratish, `helper.key` faylini yozish, claim'ga `helperPublicKey/helperProof`), `apps/companion/test/enroll.test.ts`, `apps/companion/scripts/pack-win.mjs` + `pack-win.test.ts`, `pack-win.d.mts`
+- Modify: `cmd/netschool-helper/main.go` (`install`, `uninstall`), `apps/companion/src/cli/enroll.ts` (amalga oshirishda: helper kalitini `netschool-helper helper-key`dan oladi va o'zi yozmaydi, claim'ga `helperPublicKey/helperProof`, claim'dan keyin `set-hub`; token va CA stdin orqali), `apps/companion/test/enroll.test.ts`, `apps/companion/scripts/pack-win.mjs` + `pack-win.test.ts`, `pack-win.d.mts`
 
 **Interfaces:**
 - `netschool-helper.exe install --companion-dir <yo'yilgan zip>`: admin talab qiladi (aks holda chiqish kodi 5). Bajaradi:
   1. `%ProgramFiles%\NetSchool\{helper,companion}`ga nusxa;
   2. `icacls` bilan `%ProgramFiles%\NetSchool` va `%ProgramData%\NetSchool\helper` ACL'i (Global Constraints);
-  3. `enroll` yozgan `helper.key`ni `%ProgramData%\NetSchool\helper`ga ko'chirish;
+  3. ~~`enroll` yozgan `helper.key`ni `%ProgramData%\NetSchool\helper`ga ko'chirish~~ — amalga oshirishda: `enroll` helper kalitini o'zi yozmaydi; `netschool-helper helper-key` uni helper katalogida yaratadi (token stdin orqali), claim'dan keyin `netschool-helper set-hub` hub manzili va CA'ni oladi (CA stdin orqali), so'ng `install` (ADR 0014);
   4. xizmat yaratish, SDDL, recovery;
   5. eski HKLM Run `NetSchool Companion` qiymatini o'chirish;
   6. xizmatni ishga tushirish.
 - `uninstall`: admin; xizmatni to'xtatib o'chiradi, siyosat va CAD qaytariladi (xizmat `stop`da `Restore` qiladi), fayllar o'chiriladi.
-- `pack-win`: zip'ga `netschool-helper.exe` (arch'ga mos, `native/helper/dist`dan; yo'q bo'lsa yig'ilmaydi). `enroll.cmd` endi: enroll → `netschool-helper.exe install --companion-dir "%~dp0"`. `remove-autostart.cmd` o'rniga `uninstall.cmd`.
+- `pack-win`: zip'ga `netschool-helper.exe` (arch'ga mos, `native/helper/dist`dan; yo'q bo'lsa yig'ilmaydi). `enroll.cmd` endi: enroll (ichida `helper-key` va `set-hub`) → `netschool-helper.exe install --companion-dir "%~dp0."`. `remove-autostart.cmd` o'rniga `uninstall.cmd`.
 
 - [ ] **Step 1:** Testlar: `TestServiceSDDLDeniesStopToUsers` (SDDL satrida `IU`/`SU` uchun `RP`, `WP`, `DT`, `SD` yo'q), `TestInstallPathsAreUnderProgramFiles`; `enroll.test.ts`: `enroll writes a helper key and sends its proof`; `pack-win.test.ts`: `the package carries the helper and refuses to build without it`, `enroll.cmd installs the helper after a successful enroll`.
 - [ ] **Step 2:** FAIL → implementatsiya → PASS (`pnpm test`, `pnpm test:helper`).
@@ -285,8 +287,8 @@ apps/companion/scripts/pack-win.mjs                 # helper.exe, install.cmd, u
   - helper statusi bo'lmasa yoki eski bo'lsa: Companion hisoboti, lekin `hard` hech qachon emas (`reason: helper_missing`).
 - Yangi capability `classroom.sas_block`: `cad=blocked|off` → `available`, `unavailable` → `unsupported` (`reason: edition`), `failed` → `unsupported` (`reason: failed`).
 
-- [ ] **Step 1:** API testlari: `overlay is hard only when the helper reports every component active`, `a stale helper status falls back to soft`, `sas_block reports the edition limit`. FAIL → implementatsiya → PASS.
-- [ ] **Step 2:** Windows x64'da qo'lda sinov, **standart (admin emas) o'quvchi hisobida**:
+- [x] **Step 1:** API testlari: `overlay is hard only when the helper reports every component active`, `a stale helper status falls back to soft`, `sas_block reports the edition limit`. FAIL → implementatsiya → PASS.
+- [ ] **Step 2 (egasini kutmoqda; batafsil ro'yxat [runbook](../../poc/results/windows-x64-2026-11-11-helper-manual.md)da):** Windows x64'da qo'lda sinov, **standart (admin emas) o'quvchi hisobida**:
   1. o'rnatish (`enroll.cmd`);
   2. o'quvchi `sc stop NetSchoolHelper` → «Отказано в доступе»;
   3. Vazifalar menejeri helper/guard'ni yopa olmaydi;
@@ -300,7 +302,7 @@ apps/companion/scripts/pack-win.mjs                 # helper.exe, install.cmd, u
   11. reboot;
   12. MeshAgent `sc stop` (admin) → ≤ 15 s da qaytadi;
   13. `uninstall.cmd` → hamma narsa toza.
-- [ ] **Step 3:** Natija, ADR 0014, matrix, risks, yo'l xaritasi yangilanadi. Commit: `docs(poc): Windows helper acceptance results and ADR 0014`.
+- [ ] **Step 3:** (ADR 0014, runbook, matrix, risks va yo'l xaritasi Step 2'dan oldin yozildi, commit `docs(poc): Windows helper ADR 0014 and acceptance runbook`; sinovdan keyin natija bilan qayta yangilanadi.) Natija, ADR 0014, matrix, risks, yo'l xaritasi yangilanadi. Commit: `docs(poc): Windows helper acceptance results and ADR 0014`.
 
 ---
 
