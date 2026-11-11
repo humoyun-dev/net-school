@@ -91,7 +91,7 @@ func TestChildOfExplorerIsKilled(t *testing.T) {
 	if !decide(child, procs, baseline) {
 		t.Fatal("explorer avlodi o'ldirilishi kerak")
 	}
-	// sihost va RuntimeBroker ham ishga tushiruvchi hisoblanadi, baseline'da bo'lsa ham.
+	// sihost va RuntimeBroker (baseline'da bo'lsa ham) ochgan boshqa exe ham o'ldiriladi.
 	procs[650] = Proc{PID: 650, ParentPID: 600, Session: student, Image: sysroot + `\system32\sihost.exe`, Created: at(15)}
 	procs[660] = Proc{PID: 660, ParentPID: 600, Session: student, Image: sysroot + `\system32\runtimebroker.exe`, Created: at(16)}
 	baseline[650], baseline[660] = true, true
@@ -176,17 +176,17 @@ func TestPidReuseNotTrusted(t *testing.T) {
 	procs, baseline := world()
 	// Bolaning haqiqiy otasi (PID 800) tugagan va PID baseline chrome'ga qayta berilgan: baseline PID 800 jarayoni
 	// bolanikidan keyin yaratilgan, demak u bolaning otasi emas.
-	p := Proc{PID: 970, ParentPID: 800, Session: student, Image: pf + `\app\app.exe`, Created: at(25)}
+	p := Proc{PID: 970, ParentPID: 800, Session: student, Image: procs[800].Image, Created: at(25)}
 	if !decide(p, procs, baseline) {
 		t.Fatal("ota bolanikidan keyin yaratilgan: ota hisoblanmaydi, jarayon o'ldirilishi kerak")
 	}
 	// Vaqt noma'lum (nol) bo'lsa ham ishonilmaydi.
-	q := Proc{PID: 971, ParentPID: 800, Session: student, Image: pf + `\app\app.exe`}
+	q := Proc{PID: 971, ParentPID: 800, Session: student, Image: procs[800].Image}
 	if !decide(q, procs, baseline) {
 		t.Fatal("yaratilish vaqti noma'lum: ota-onaga ishonilmaydi")
 	}
 	procs[800] = Proc{PID: 800, ParentPID: 700, Session: student, Image: procs[800].Image}
-	r := Proc{PID: 972, ParentPID: 800, Session: student, Image: pf + `\app\app.exe`, Created: at(100)}
+	r := Proc{PID: 972, ParentPID: 800, Session: student, Image: procs[800].Image, Created: at(100)}
 	if !decide(r, procs, baseline) {
 		t.Fatal("otaning yaratilish vaqti noma'lum: unga ishonilmaydi")
 	}
@@ -244,13 +244,16 @@ func TestDefaultAllow(t *testing.T) {
 	if len(a.Images) != 10 {
 		t.Fatalf("Images = %q", a.Images)
 	}
+	if len(a.Kill) != 1 || a.Kill[0] != `c:\windows\system32\taskmgr.exe` {
+		t.Fatalf("Kill = %q", a.Kill)
+	}
 	for _, img := range a.Images {
 		if img != Normalize(img) {
 			t.Fatalf("%q normallashtirilmagan", img)
 		}
 	}
 	// Bo'sh ildiz: ruxsat ro'yxati bo'sh, nisbiy yo'l hech narsaga mos kelmaydi.
-	if e := DefaultAllow("", ""); len(e.Dirs) != 0 || len(e.Images) != 0 {
+	if e := DefaultAllow("", ""); len(e.Dirs) != 0 || len(e.Images) != 0 || len(e.Kill) != 0 {
 		t.Fatalf("bo'sh ildiz bilan ruxsat ro'yxati bo'sh bo'lishi kerak: %+v", e)
 	}
 }
@@ -276,7 +279,7 @@ func TestLongChainKilled(t *testing.T) {
 	parent := uint32(800)
 	for i := range maxDepth + 5 {
 		pid := uint32(3000 + i)
-		procs[pid] = Proc{PID: pid, ParentPID: parent, Session: student, Image: pf + `\app\app.exe`, Created: at(100 + i)}
+		procs[pid] = Proc{PID: pid, ParentPID: parent, Session: student, Image: pf + `\google\chrome\application\chrome.exe`, Created: at(100 + i)}
 		parent = pid
 	}
 	if !Decide(procs[parent], student, baseline, procs, allow()) {
@@ -311,5 +314,100 @@ func TestBaselineSurvivesOnlySameProcess(t *testing.T) {
 	evil := procs[800]
 	if !Decide(evil, student, live, procs, allow()) {
 		t.Fatal("baseline PID'ini qayta olgan yangi jarayon o'ldirilishi kerak")
+	}
+}
+
+const (
+	chrome = pf + `\google\chrome\application\chrome.exe`
+	cmd    = sysroot + `\system32\cmd.exe`
+)
+
+func TestBaselineShellChildIsKilled(t *testing.T) {
+	procs, baseline := world()
+	// Bloklashdan oldin ochilgan cmd.exe dan bloklash paytida notepad ochildi.
+	procs[1100] = Proc{PID: 1100, ParentPID: 700, Session: student, Image: cmd, Created: at(40)}
+	baseline[1100] = true
+	np := Proc{PID: 1101, ParentPID: 1100, Session: student, Image: sysroot + `\system32\notepad.exe`, Created: at(100)}
+	if !decide(np, procs, baseline) {
+		t.Fatal("baseline cmd'dan ochilgan notepad o'ldirilishi kerak")
+	}
+}
+
+func TestSpoofedBaselineParentIsKilled(t *testing.T) {
+	procs, baseline := world()
+	// PROC_THREAD_ATTRIBUTE_PARENT_PROCESS bilan ota-ona sifatida baseline chrome ko'rsatilgan.
+	evil := Proc{PID: 1110, ParentPID: 800, Session: student, Image: `c:\users\student\downloads\evil.exe`, Created: at(100)}
+	if !decide(evil, procs, baseline) {
+		t.Fatal("baseline chrome bolasi bo'lgan evil.exe o'ldirilishi kerak")
+	}
+}
+
+func TestSameImageChain(t *testing.T) {
+	procs, baseline := world()
+	// chrome → chrome → chrome yashaydi.
+	procs[1120] = Proc{PID: 1120, ParentPID: 800, Session: student, Image: chrome, Created: at(100)}
+	c := Proc{PID: 1121, ParentPID: 1120, Session: student, Image: `C:\Program Files\Google\Chrome\Application\chrome.exe`, Created: at(101)}
+	if decide(c, procs, baseline) {
+		t.Fatal("chrome → chrome → chrome yashashi kerak")
+	}
+	// chrome → cmd → chrome o'ldiriladi.
+	procs[1130] = Proc{PID: 1130, ParentPID: 800, Session: student, Image: cmd, Created: at(100)}
+	d := Proc{PID: 1131, ParentPID: 1130, Session: student, Image: chrome, Created: at(101)}
+	if !decide(d, procs, baseline) {
+		t.Fatal("chrome → cmd → chrome o'ldirilishi kerak")
+	}
+	// explorer → WerFault (ruxsat etilgan, lekin ishonchli ajdod emas) → cmd o'ldiriladi.
+	procs[1140] = Proc{PID: 1140, ParentPID: 700, Session: student, Image: sysroot + `\system32\werfault.exe`, Created: at(100)}
+	if Decide(procs[1140], student, baseline, procs, allow()) {
+		t.Fatal("WerFault o'zi ruxsat etilgan")
+	}
+	e := Proc{PID: 1141, ParentPID: 1140, Session: student, Image: cmd, Created: at(101)}
+	if !decide(e, procs, baseline) {
+		t.Fatal("explorer → WerFault → cmd o'ldirilishi kerak")
+	}
+	// Ruxsat etilgan jarayon (Companion) ham ishonchli ajdod emas.
+	procs[1150] = Proc{PID: 1150, ParentPID: 700, Session: student, Image: pf + `\netschool\companion\companion.exe`, Created: at(100)}
+	f := Proc{PID: 1151, ParentPID: 1150, Session: student, Image: pf + `\netschool\companion\companion.exe`, Created: at(101)}
+	g := Proc{PID: 1152, ParentPID: 1151, Session: student, Image: pf + `\other\x.exe`, Created: at(102)}
+	if decide(f, procs, baseline) || !decide(g, procs, baseline) {
+		t.Fatal("Companion avlodi faqat ruxsat ro'yxati orqali yashaydi")
+	}
+}
+
+func TestBaselineTaskManagerIsKilled(t *testing.T) {
+	procs, baseline := world()
+	tm := Proc{PID: 1200, ParentPID: 600, Session: student, Image: `C:\Windows\System32\Taskmgr.exe`, Created: at(40)}
+	procs[1200] = tm
+	baseline[1200] = true
+	if !Decide(tm, student, baseline, procs, allow()) {
+		t.Fatal("bloklashdan oldin ochilgan taskmgr ham o'ldirilishi kerak")
+	}
+	// Baseline explorer, sihost, RuntimeBroker o'zi yashaydi.
+	procs[650] = Proc{PID: 650, ParentPID: 600, Session: student, Image: sysroot + `\system32\sihost.exe`, Created: at(15)}
+	procs[660] = Proc{PID: 660, ParentPID: 600, Session: student, Image: sysroot + `\system32\runtimebroker.exe`, Created: at(16)}
+	baseline[650], baseline[660] = true, true
+	for _, pid := range []uint32{650, 660, 700} {
+		if Decide(procs[pid], student, baseline, procs, allow()) {
+			t.Fatalf("baseline %s yashashi kerak", procs[pid].Image)
+		}
+	}
+}
+
+func TestStaleParentRound(t *testing.T) {
+	procs, baseline := world()
+	// Toolhelp'dagi ota PID eskirgan (jarayon snapshot'dan keyin yaratilgan): bu safar tegilmaydi.
+	p := Proc{PID: 1300, ParentPID: 700, Session: student, Image: `c:\users\student\evil.exe`, Created: at(100), Stale: true}
+	if decide(p, procs, baseline) {
+		t.Fatal("eskirgan jarayon bu safar o'ldirilmaydi")
+	}
+	// Ota sifatida ham ishonilmaydi.
+	procs[1310] = Proc{PID: 1310, ParentPID: 800, Session: student, Image: chrome, Created: at(100), Stale: true}
+	c := Proc{PID: 1311, ParentPID: 1310, Session: student, Image: chrome, Created: at(101)}
+	if !decide(c, procs, baseline) {
+		t.Fatal("eskirgan ota ishonchli emas")
+	}
+	// Baseline'ga kirmaydi.
+	if _, ok := NewBaseline(procs, student)[1310]; ok {
+		t.Fatal("eskirgan jarayon baseline'ga kirmasligi kerak")
 	}
 }

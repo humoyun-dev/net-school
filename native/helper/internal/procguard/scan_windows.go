@@ -48,6 +48,8 @@ type procKey struct {
 // ham shu dastakka beriladi: dastak ochiq turganda PID boshqa jarayonga berilmaydi, ya'ni qaror va o'ldirish bitta
 // jarayonga tegishli.
 //
+// Start va Stop bitta goroutine'dan (xizmat Step tsikli) chaqirilishi kerak; State va Stats istalgan goroutine'dan.
+//
 // Dastak ochilmagan (ruxsat yo'q) yoki yo'li o'qilmagan jarayon: sessiyasi o'quvchiniki va baseline'da bo'lmasa
 // o'ldirishga urinadi; urinish muvaffaqiyatsiz bo'lsa Stats'da hisoblanadi va LastError'ga yoziladi, guard to'xtamaydi.
 type Scanner struct {
@@ -206,6 +208,8 @@ func exited(h windows.Handle) bool {
 // snapshot hamma jarayonlarni o'qiydi. withKill bo'lsa session'dagi jarayonlar uchun PROCESS_TERMINATE dastaklari
 // qaytariladi (chaqiruvchi closeAll bilan yopadi); boshqa dastaklar darhol yopiladi.
 func snapshot(session uint32, withKill bool) (map[uint32]Proc, map[uint32]windows.Handle, error) {
+	// before'dan keyin yaratilgan jarayonning Toolhelp'dagi ParentPID'i eskirgan bo'lishi mumkin (inspect).
+	before := time.Now()
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jarayonlar snapshot'i olinmadi: %w", err)
@@ -218,7 +222,7 @@ func snapshot(session uint32, withKill bool) (map[uint32]Proc, map[uint32]window
 	e.Size = uint32(unsafe.Sizeof(e))
 	err = windows.Process32First(snap, &e)
 	for err == nil {
-		p, h := inspect(e.ProcessID, e.ParentProcessID, session, withKill)
+		p, h := inspect(e.ProcessID, e.ParentProcessID, session, withKill, before)
 		procs[p.PID] = p
 		if h != 0 {
 			handles[p.PID] = h
@@ -235,7 +239,12 @@ func snapshot(session uint32, withKill bool) (map[uint32]Proc, map[uint32]window
 // inspect bitta jarayonni o'qiydi. Dastak ochilsa sessiya qayta shu paytda o'qiladi: Toolhelp va OpenProcess orasida
 // PID boshqa jarayonga berilgan bo'lsa ham natija dastakdagi jarayonniki. Qaytgan dastak (0 bo'lmasa) faqat
 // withKill va session'dagi jarayon uchun.
-func inspect(pid, ppid, session uint32, withKill bool) (Proc, windows.Handle) {
+//
+// TOCTOU: ParentPID Toolhelp snapshot'idan, vaqt va yo'l esa keyin ochilgan dastakdan. Shu orada PID qayta berilgan
+// bo'lsa, dastakdagi jarayon snapshot boshlanganidan (before) keyin yaratilgan bo'ladi va ParentPID unga tegishli
+// emas: bunday jarayon Stale deb belgilanadi (Decide bu safar o'ldirmaydi va unga ota sifatida ishonmaydi, keyingi
+// snapshot'da to'g'ri ParentPID bilan qayta ko'riladi).
+func inspect(pid, ppid, session uint32, withKill bool, before time.Time) (Proc, windows.Handle) {
 	p := Proc{PID: pid, ParentPID: ppid, Session: noSession}
 	if pid == 0 || pid == 4 {
 		p.Session = 0
@@ -266,6 +275,7 @@ func inspect(pid, ppid, session uint32, withKill bool) (Proc, windows.Handle) {
 	var created, exit, kernel, user windows.Filetime
 	if windows.GetProcessTimes(h, &created, &exit, &kernel, &user) == nil {
 		p.Created = time.Unix(0, created.Nanoseconds())
+		p.Stale = p.Created.After(before)
 	}
 	p.Image = imagePath(h)
 	if access&windows.PROCESS_TERMINATE != 0 && p.Session == session {

@@ -3,17 +3,23 @@
 // Qaror toza mantiq (Decide), har OS'da test qilinadi; snapshot va TerminateProcess scan_windows.go'da.
 //
 // Qoida (ADR 0014):
-//   - boshqa sessiyadagi jarayon, PID 0 va 4 → tegilmaydi;
+//   - boshqa sessiyadagi jarayon, PID 0 va 4 → tegilmaydi; Toolhelp'dagi ota PID'i eskirgan (Stale) jarayon → bu
+//     safar tegilmaydi, keyingi snapshot'da qayta ko'riladi;
 //   - Allow.Dirs (%ProgramFiles%\NetSchool\, %ProgramFiles%\Mesh Agent\) ichidagi yoki Allow.Images'dagi (to'liq yo'l
-//     bilan) jarayon → tegilmaydi;
-//   - baseline'dagi (bloklash boshlanganda sessiyada bo'lgan) jarayon va uning avlodi → tegilmaydi (o'quvchining ochiq
-//     ishi va, masalan, brauzerning yangi tablari). Istisno: yangi jarayonning o'zi yoki zanjirdagi baseline'gacha
-//     bo'lgan biror ajdodi explorer.exe, taskmgr.exe, sihost.exe yoki RuntimeBroker.exe bo'lsa (ular baseline'da
-//     bo'lsa ham) → o'ldiriladi: bu dasturlar o'quvchiga yangi dastur ochish yo'li;
+//     bilan) jarayon → tegilmaydi. Ruxsat etilgan jarayon boshqalar uchun ishonchli ajdod emas;
+//   - Allow.Kill'dagi jarayon (%SystemRoot%\System32\taskmgr.exe) → baseline'da bo'lsa ham o'ldiriladi: bloklashdan
+//     oldin ochilgan Task Manager bilan Companion'ni yoki boshqa jarayonni to'xtatish mumkin edi;
+//   - baseline'dagi (bloklash boshlanganda sessiyada bo'lgan) jarayon → tegilmaydi (o'quvchining ochiq ishi);
+//   - baseline'da bo'lmagan jarayon faqat bir xil dastur avlodi bo'lsa yashaydi: ParentPID zanjiri tirik baseline
+//     ajdodga yetadi va jarayonning o'zi, oradagi har bir jarayon va o'sha ajdod aynan bir xil yo'lli exe (masalan,
+//     chrome.exe → chrome.exe renderer, brauzerning yangi tablari). Zanjirda boshqa exe bo'lsa → o'ldiriladi. Shunday
+//     qilib baseline cmd/powershell, eski dasturning fayl dialogi, explorer, sihost, RuntimeBroker yoki
+//     PROC_THREAD_ATTRIBUTE_PARENT_PROCESS bilan baseline otani ko'rsatgan jarayon orqali yangi dastur ochib bo'lmaydi
+//     (ParentPID'ga ishonch faqat "o'sha dasturning o'zi" doirasida);
 //   - qolgani (yangi ildizdan boshlangan, ota-onasi topilmagan yoki ishonchsiz) → o'ldiriladi.
 //
-// Yo'li o'qilmagan jarayon (Image == "", masalan himoyalangan jarayon): baseline'da bo'lsa yashaydi, aks holda avlod
-// qoidasi qo'llanmaydi va o'ldiriladi (ruxsat ro'yxatini yo'l bo'yicha tekshirib bo'lmaydi; fail-closed).
+// Yo'li o'qilmagan jarayon (Image == "", masalan himoyalangan jarayon): baseline'da bo'lsa yashaydi, aks holda
+// o'ldiriladi (yo'lni tekshirib bo'lmaydi; fail-closed).
 package procguard
 
 import (
@@ -31,23 +37,18 @@ type Proc struct {
 	Image string
 	// Created yaratilish vaqti (GetProcessTimes). Nol — o'qilmadi.
 	Created time.Time
+	// Stale Toolhelp'dagi ParentPID ishonchsiz (jarayon snapshot boshlanganidan keyin yaratilgan, ya'ni PID shu
+	// orada qayta berilgan bo'lishi mumkin). Bu safar qaror qilinmaydi, keyingi snapshot'da qayta ko'riladi.
+	Stale bool
 }
 
 // Allow ruxsat ro'yxati. Dirs — normallashtirilgan, oxiri `\` bilan tugaydigan kataloglar (prefiks bo'yicha);
-// Images — normallashtirilgan to'liq yo'llar (aniq moslik).
+// Images — normallashtirilgan to'liq yo'llar (aniq moslik). Kill — baseline'da bo'lsa ham o'ldiriladigan to'liq
+// yo'llar (aniq moslik).
 type Allow struct {
 	Dirs   []string
 	Images []string
-}
-
-// launchers bu nomli jarayonlar o'quvchiga yangi dastur ochish imkonini beradi: ulardan keyin kelgan jarayon baseline
-// avlodi bo'lsa ham o'ldiriladi. Nom bo'yicha (yo'l emas): boshqa joydagi shu nomli exe ham ishga tushiruvchi
-// hisoblanadi, bu faqat o'ldirish tomoniga xato qiladi.
-var launchers = map[string]bool{
-	"explorer.exe":      true,
-	"taskmgr.exe":       true,
-	"sihost.exe":        true,
-	"runtimebroker.exe": true,
+	Kill   []string
 }
 
 // system32Images %SystemRoot%\System32\ ichidagi ruxsat etilgan tizim jarayonlari (bloklash/kirish ekrani, matn
@@ -72,6 +73,7 @@ func DefaultAllow(programFiles, systemRoot string) Allow {
 			a.Images = append(a.Images, Normalize(root+`\System32\`+name))
 		}
 		a.Images = append(a.Images, Normalize(root+`\`+textInputHost))
+		a.Kill = append(a.Kill, Normalize(root+`\System32\taskmgr.exe`))
 	}
 	return a
 }
@@ -95,14 +97,6 @@ func hasPrefixFold(s, prefix string) bool {
 
 func trimSep(p string) string { return strings.TrimRight(p, `\`) }
 
-// baseName yo'lning oxirgi qismi.
-func baseName(p string) string {
-	if i := strings.LastIndexByte(p, '\\'); i >= 0 {
-		return p[i+1:]
-	}
-	return p
-}
-
 func (a Allow) allows(image string) bool {
 	if image == "" {
 		return false
@@ -112,51 +106,52 @@ func (a Allow) allows(image string) bool {
 			return true
 		}
 	}
-	for _, img := range a.Images {
-		if img != "" && image == img {
+	return contains(a.Images, image)
+}
+
+func contains(list []string, image string) bool {
+	for _, v := range list {
+		if v != "" && v == image {
 			return true
 		}
 	}
 	return false
 }
 
-// isLauncher jarayon ishga tushiruvchi (explorer, taskmgr, sihost, RuntimeBroker).
-func isLauncher(image string) bool { return launchers[baseName(image)] }
-
 // Decide p o'ldirilishi kerakmi (true = o'ldirish). session — o'quvchi sessiyasi, baseline — bloklash boshlanganda
-// sessiyada bo'lgan (va hali o'sha jarayon bo'lgan) PID'lar, procs — joriy snapshot (hamma sessiyalar).
+// sessiyada bo'lgan (va hali o'sha jarayon bo'lgan, Baseline.Live) PID'lar, procs — joriy snapshot (hamma sessiyalar).
 //
-// Ajdod zanjiri ParentPID bo'yicha yuriladi. PID qayta ishlatilishi mumkin, shuning uchun ota faqat u boladan oldin
-// yaratilgan bo'lsa ota hisoblanadi; vaqti noma'lum (nol) bo'lsa ishonilmaydi va zanjir uziladi. Tsikl visited
-// bilan to'xtatiladi.
+// Ajdod zanjiri ParentPID bo'yicha yuriladi, faqat p bilan bir xil yo'lli jarayonlar orqali. PID qayta ishlatilishi
+// mumkin, shuning uchun ota faqat u boladan oldin yaratilgan bo'lsa ota hisoblanadi; vaqti noma'lum (nol) yoki
+// Stale bo'lsa ishonilmaydi. Tsikl visited va maxDepth bilan to'xtatiladi.
 func Decide(p Proc, session uint32, baseline map[uint32]bool, procs map[uint32]Proc, allow Allow) bool {
-	if p.Session != session || p.PID == 0 || p.PID == 4 {
+	if p.Session != session || p.PID == 0 || p.PID == 4 || p.Stale {
 		return false
 	}
 	image := Normalize(p.Image)
 	if allow.allows(image) {
 		return false
 	}
+	if contains(allow.Kill, image) {
+		return true
+	}
 	if baseline[p.PID] {
 		return false
 	}
-	if image == "" || isLauncher(image) {
+	if image == "" {
 		return true
 	}
 	visited := map[uint32]bool{p.PID: true}
 	cur := p
 	for range maxDepth {
 		parent, ok := procs[cur.ParentPID]
-		if !ok || visited[parent.PID] || !trustedParent(parent, cur) {
-			return true
-		}
-		visited[parent.PID] = true
-		if isLauncher(Normalize(parent.Image)) {
+		if !ok || visited[parent.PID] || !trustedParent(parent, cur) || Normalize(parent.Image) != image {
 			return true
 		}
 		if baseline[parent.PID] {
 			return false
 		}
+		visited[parent.PID] = true
 		cur = parent
 	}
 	return true
@@ -165,11 +160,12 @@ func Decide(p Proc, session uint32, baseline map[uint32]bool, procs map[uint32]P
 // Baseline bloklash boshlanganda o'quvchi sessiyasida bo'lgan jarayonlar: PID → o'sha paytdagi jarayon.
 type Baseline map[uint32]Proc
 
-// NewBaseline snapshot'dan session'dagi jarayonlarni oladi.
+// NewBaseline snapshot'dan session'dagi jarayonlarni oladi (Stale'lar kirmaydi: keyingi snapshot'da oddiy yangi
+// jarayon sifatida ko'riladi).
 func NewBaseline(procs map[uint32]Proc, session uint32) Baseline {
 	b := Baseline{}
 	for pid, p := range procs {
-		if p.Session == session {
+		if p.Session == session && !p.Stale {
 			b[pid] = p
 		}
 	}
@@ -192,7 +188,7 @@ func (b Baseline) Live(procs map[uint32]Proc) map[uint32]bool {
 // trustedParent parent haqiqatan child'ning otasi bo'lishi mumkinmi: ikkala vaqt ma'lum va ota boladan keyin
 // yaratilmagan.
 func trustedParent(parent, child Proc) bool {
-	if parent.Created.IsZero() || child.Created.IsZero() {
+	if parent.Stale || parent.Created.IsZero() || child.Created.IsZero() {
 		return false
 	}
 	return !parent.Created.After(child.Created)
