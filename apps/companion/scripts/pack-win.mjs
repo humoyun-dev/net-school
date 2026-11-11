@@ -16,8 +16,10 @@ const HELPER = 'netschool-helper.exe';
 // `%~dp0` teskari chiziq bilan tugaydi: `"C:\pkg\"` Windows argv qoidasida yopuvchi qo'shtirnoqni ekranlaydi.
 const INSTALL_LINE = `"%~dp0${HELPER}" install --companion-dir "%~dp0."`;
 
-// Ro'yxatdan o'tkazadi, keyin helper'ni SYSTEM xizmati sifatida o'rnatadi: u Companion'ni har kirishda ishga
-// tushiradi va kuzatadi. install eski HKLM Run autostart'ini (P0c) o'chiradi.
+// Ro'yxatdan o'tkazadi (enroll helper kalitini `netschool-helper helper-key` bilan helper katalogida yaratadi va
+// claim'dan keyin `set-hub` bilan hub sozlamalarini beradi), keyin helper'ni SYSTEM xizmati sifatida o'rnatadi:
+// u Companion'ni har kirishda ishga tushiradi va kuzatadi. install eski HKLM Run autostart'ini (P0c) o'chiradi.
+// .cmd fayllar Program Files'ga nusxalanmaydi: ular faqat shu paket katalogidan ishga tushiriladi.
 const ENROLL_CMD = crlf([
   '@echo off',
   "rem Ro'yxatdan o'tkazish va helper'ni o'rnatish (administrator sifatida): enroll.cmd --hub https://<hub> --ca <hub-ca.pem>",
@@ -36,6 +38,7 @@ const INSTALL_CMD = crlf(['@echo off', "rem Helper va Companion'ni yangilash (ad
 const UNINSTALL_CMD = crlf([
   '@echo off',
   "rem Helper xizmatini, Companion'ni va siyosatlarni olib tashlash (administrator sifatida).",
+  "rem Shu paket katalogidan ishga tushiring: o'rnatilgan nusxa (Program Files) o'zini o'chira olmaydi.",
   `"%~dp0${HELPER}" uninstall`,
 ]);
 const START_CMD = crlf(['@echo off', `start "" "%~dp0${EXE}"`]);

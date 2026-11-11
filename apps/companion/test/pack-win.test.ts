@@ -139,6 +139,8 @@ describe('Windows portable package', () => {
     }
     expect(names.has('remove-autostart.cmd')).toBe(false);
     expect(names.get('uninstall.cmd')).toContain('"%~dp0netschool-helper.exe" uninstall');
+    // uninstall o'rnatilgan nusxadan ishlamaydi (o'zini o'chira olmaydi): paket katalogidan.
+    expect(names.get('uninstall.cmd')).toMatch(/paket katalogidan/);
     // Yangi versiyani qayta ro'yxatdan o'tkazmasdan o'rnatish (yangilash).
     expect(names.get('install.cmd')).toContain('"%~dp0netschool-helper.exe" install --companion-dir "%~dp0."');
   });

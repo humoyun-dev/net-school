@@ -1,6 +1,7 @@
 import { createPrivateKey } from 'node:crypto';
 import { claimResponseSchema } from '@netschool/contracts';
 import { capabilityReport, type PlatformFacts } from './capabilities.ts';
+import type { HelperPort } from './helper.ts';
 import { HubClient } from './hub-client.ts';
 import { claimProof, generateDeviceKey } from './identity.ts';
 import { type DeviceConfig, enrollmentExists, ensureWritable, saveEnrollment } from './machine-store.ts';
@@ -29,6 +30,8 @@ export interface EnrollInput {
   facts: PlatformFacts;
   dir: string;
   force?: boolean;
+  // Windows'da paket yonidagi netschool-helper.exe (helper.ts `helperCli`); boshqa OS'da yo'q.
+  helper?: HelperPort | null;
 }
 
 // Qurilmada kalit yaratadi, bir martalik token bilan claim qiladi va natijani mashina katalogiga yozadi.
@@ -41,15 +44,9 @@ export async function enroll(input: EnrollInput): Promise<DeviceConfig> {
   ensureWritable(input.dir);
   const key = generateDeviceKey();
   const proof = claimProof(createPrivateKey(key.privateKeyPem), input.token, key.publicKey);
-  // Windows OS helper (P2d1) hub'ga o'z kaliti bilan murojaat qiladi: kalit shu yerda yaratiladi va claim'da
-  // isbotlanadi, `netschool-helper install` uni faqat SYSTEM/Administrators o'qiy oladigan katalogga ko'chiradi.
-  const helper = input.facts.platform === 'win32' ? generateDeviceKey() : null;
-  const helperClaim = helper
-    ? {
-        helperPublicKey: helper.publicKey,
-        helperProof: claimProof(createPrivateKey(helper.privateKeyPem), input.token, helper.publicKey),
-      }
-    : {};
+  // Windows OS helper (P2d1) hub'ga o'z kaliti bilan murojaat qiladi. Kalitni helper o'z katalogida yaratadi;
+  // bu yerga faqat ochiq kalit va proof keladi. Token sarflanishidan oldin: helper yiqilsa claim bo'lmaydi.
+  const helperClaim = input.helper ? await input.helper.helperKey(input.token) : {};
   const hub = new HubClient({ origin: input.hubOrigin, ca: input.ca, signer: null });
   try {
     const claimed = await hub.json(
@@ -72,12 +69,9 @@ export async function enroll(input: EnrollInput): Promise<DeviceConfig> {
       publicKey: key.publicKey,
       enrolledAt: new Date().toISOString(),
     };
-    saveEnrollment(input.dir, {
-      config,
-      privateKeyPem: key.privateKeyPem,
-      ca: input.ca,
-      helperKeyPem: helper?.privateKeyPem ?? null,
-    });
+    saveEnrollment(input.dir, { config, privateKeyPem: key.privateKeyPem, ca: input.ca });
+    // Claim'dan keyin: helper hub manzili, deviceId va CA'ni o'z katalogiga yozadi va kutayotgan kalitni yoqadi.
+    await input.helper?.setHub(input.hubOrigin, config.deviceId);
     return config;
   } finally {
     hub.close();

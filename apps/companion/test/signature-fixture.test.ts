@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { deviceSigningInput, verifySignature } from '../../api/src/modules/devices/device-keys.ts';
-import { RequestSigner } from '../src/core/identity.ts';
+import { claimProof, RequestSigner } from '../src/core/identity.ts';
 
 // TS ↔ Go imzo vektorlari. Fixture'ni Go helper (native/helper/internal/hub/signer_test.go) ham o'qiydi:
 // Companion imzosi o'zgarsa bu test yiqiladi va Go tomoni jim buzilib qolmaydi.
@@ -61,4 +61,30 @@ describe('device signature fixture', () => {
       ).toBe(true);
     },
   );
+});
+
+// Claim proof (`NSCLAIM1\n<token>\n<publicKey>`): Go helper `helper-key` (native/helper/internal/hub/claim_test.go)
+// xuddi shu baytlarni chiqarishi kerak, aks holda hub helper kalitini rad etadi.
+interface ClaimVector {
+  name: string;
+  privateKeyPem: string;
+  token: string;
+  expectedPublicKey: string;
+  expectedProof: string;
+}
+
+const claimFixture = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, '..', '..', '..', 'packages', 'contracts', 'fixtures', 'claim-proof.json'),
+    'utf8',
+  ),
+) as { vectors: ClaimVector[] };
+
+describe('claim proof fixture', () => {
+  test.each(claimFixture.vectors.map((v) => [v.name, v] as const))('%s: claimProof reproduces it', (_name, v) => {
+    const privateKey = createPrivateKey(v.privateKeyPem);
+    const publicKey = createPublicKey(privateKey).export({ type: 'spki', format: 'der' }).toString('base64url');
+    expect(publicKey).toBe(v.expectedPublicKey);
+    expect(claimProof(privateKey, v.token, publicKey)).toBe(v.expectedProof);
+  });
 });

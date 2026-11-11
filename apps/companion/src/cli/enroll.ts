@@ -1,18 +1,38 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { PlatformFacts } from '../core/capabilities.ts';
 import { EnrollError, enroll } from '../core/enroll.ts';
+import { HelperError, type HelperPort, helperCli } from '../core/helper.ts';
 import { HubError } from '../core/hub-client.ts';
 import { machineDir } from '../core/machine-store.ts';
 
-// Chiqish kodlari: 0 muvaffaqiyat, 2 noto'g'ri foydalanish, 3 hub/TLS/tarmoq xatosi, 4 rad etildi yoki allaqachon ro'yxatdan o'tgan.
+// Chiqish kodlari: 0 muvaffaqiyat, 2 noto'g'ri foydalanish yoki helper kalitini tayyorlab bo'lmadi, 3 hub/TLS/tarmoq
+// xatosi yoki claim'dan keyin helper konfiguratsiyasi yozilmadi, 4 rad etildi yoki allaqachon ro'yxatdan o'tgan.
 const USAGE =
   'usage: enroll --hub <https-origin> [--ca <pem-file>] [--token <token>] [--force]\n  token may also come from NETSCHOOL_ENROLL_TOKEN';
 
 interface Io {
   out(line: string): void;
   err(line: string): void;
+}
+
+// Paketdagi joylashuv: <paket>/resources/app/dist/enroll.mjs → <paket>/netschool-helper.exe.
+export function packagedHelperExe(moduleUrl: string): string {
+  return join(dirname(fileURLToPath(moduleUrl)), '..', '..', '..', 'netschool-helper.exe');
+}
+
+export interface EnrollCliOptions {
+  // Windows'da helper (testlar soxta port beradi). null — helper yo'q (boshqa OS).
+  helper?: (opts: { caFile: string | null; rotate: boolean }) => HelperPort | null;
+}
+
+function defaultHelper(opts: { caFile: string | null; rotate: boolean }): HelperPort | null {
+  if (process.platform !== 'win32') return null;
+  const exe = packagedHelperExe(import.meta.url);
+  if (!existsSync(exe)) throw new Error(`netschool-helper.exe was not found next to the package: ${exe}`);
+  return helperCli({ exe, ...opts });
 }
 
 interface Args {
@@ -48,7 +68,12 @@ function platformFacts(env: NodeJS.ProcessEnv): PlatformFacts {
 }
 
 // Token hech qachon chiqarilmaydi (na muvaffaqiyatda, na xatoda).
-export async function runEnrollCli(argv: string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
+export async function runEnrollCli(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  io: Io,
+  options: EnrollCliOptions = {},
+): Promise<number> {
   const parsed = parseArgs(argv);
   if (typeof parsed === 'string') {
     io.err(`${parsed}\n${USAGE}`);
@@ -72,8 +97,17 @@ export async function runEnrollCli(argv: string[], env: NodeJS.ProcessEnv, io: I
       return 2;
     }
   }
+  let helper: HelperPort | null;
+  try {
+    // --force: yangi qurilma yozuvi; eski yozuvdagi helper kaliti hub'da band (unique), shuning uchun yangisi.
+    helper = (options.helper ?? defaultHelper)({ caFile: parsed.ca ? resolve(parsed.ca) : null, rotate: parsed.force });
+  } catch (err) {
+    io.err(err instanceof Error ? err.message : 'the helper is not available');
+    return 2;
+  }
   try {
     const config = await enroll({
+      helper,
       hubOrigin: parsed.hub,
       token,
       ca,
@@ -85,6 +119,14 @@ export async function runEnrollCli(argv: string[], env: NodeJS.ProcessEnv, io: I
     io.out(`enrolled: device ${config.deviceId}`);
     return 0;
   } catch (err) {
+    if (err instanceof HelperError) {
+      if (err.step === 'helper-key') {
+        io.err(`${err.message}${err.exitCode === 5 ? '; run enroll as an administrator' : ''}`);
+        return 2;
+      }
+      io.err(`enrolled, but the helper hub settings were not written: ${err.message}`);
+      return 3;
+    }
     if (err instanceof EnrollError) {
       io.err(err.message);
       return 4;

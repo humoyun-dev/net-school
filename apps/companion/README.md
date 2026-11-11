@@ -27,6 +27,11 @@ Zip tarkibi:
   `netschool-helper.exe install` — helper SYSTEM xizmati sifatida `%ProgramFiles%\NetSchool\` ga o'rnatiladi va
   Companion'ni har kirishda o'zi ishga tushiradi (HKLM Run autostart endi yo'q, install eskisini o'chiradi);
 - `install.cmd` (yangilash, qayta ro'yxatdan o'tkazmasdan), `uninstall.cmd` (xizmat, fayllar, siyosatlar) va `start.cmd`.
+  `.cmd` fayllar faqat yoyilgan paket katalogidan ishga tushiriladi (Program Files'ga nusxalanmaydi).
+
+Helper kaliti va hub sozlamalari faqat `%ProgramData%\NetSchool\helper\` da (faqat SYSTEM/Administrators):
+Windows'da `enroll` ularni paket yonidagi `netschool-helper.exe helper-key` (claim'dan oldin) va `set-hub`
+(claim'dan keyin) orqali yozdiradi, o'zi kalitni ko'rmaydi.
 
 Test build'ni paketlash rad etiladi. P2d1'dan oldin ro'yxatdan o'tgan kompyuterda helper kaliti yo'q: yangi token
 bilan `enroll.cmd ... --force` ishga tushiriladi.

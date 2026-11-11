@@ -1,4 +1,4 @@
-import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
+import { createPrivateKey, sign } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,8 +12,9 @@ import { seedOrg, seedUser } from '../../api/test/support/seed.ts';
 import { runEnrollCli } from '../src/cli/enroll.ts';
 import type { PlatformFacts } from '../src/core/capabilities.ts';
 import { EnrollError, enroll, sanitizeHostname } from '../src/core/enroll.ts';
+import { HelperError, type HelperPort, helperCli, type RunFile } from '../src/core/helper.ts';
 import { HubClient } from '../src/core/hub-client.ts';
-import { RequestSigner } from '../src/core/identity.ts';
+import { claimProof, generateDeviceKey, RequestSigner } from '../src/core/identity.ts';
 import { loadEnrollment } from '../src/core/machine-store.ts';
 
 let app: TestApp;
@@ -36,6 +37,23 @@ beforeAll(async () => {
 afterAll(async () => {
   await app?.close();
 });
+
+// Helper'ning xotiradagi o'rinbosari: kalitni o'zi yaratadi va proof beradi (haqiqiysi Go'da, claim-proof fixture).
+function fakeHelper() {
+  const pair = generateDeviceKey();
+  const key = { publicKey: pair.publicKey, privateKey: createPrivateKey(pair.privateKeyPem) };
+  const calls: string[][] = [];
+  const port: HelperPort = {
+    async helperKey(token) {
+      calls.push(['helper-key', token]);
+      return { helperPublicKey: key.publicKey, helperProof: claimProof(key.privateKey, token, key.publicKey) };
+    },
+    async setHub(origin, deviceId) {
+      calls.push(['set-hub', origin, deviceId]);
+    },
+  };
+  return { port, calls, key };
+}
 
 async function newToken(): Promise<string> {
   const res = await app.request('POST', '/api/v1/enrollments', { body: { siteId }, cookie: admin });
@@ -79,31 +97,105 @@ describe('enroll', () => {
     expect(JSON.stringify(devices.json)).toContain(config.deviceId);
   });
 
-  // OS helper (P2d1) o'z kaliti bilan imzolaydi: enroll uni yaratadi, claim'da isbotlaydi va `install` uni helper
-  // katalogiga ko'chirishi uchun mashina katalogiga yozadi.
+  // OS helper (P2d1) o'z kaliti bilan imzolaydi. Kalitni helper o'z katalogida yaratadi (`helper-key`), enroll faqat
+  // ochiq kalit va proof'ni claim'ga qo'shadi va claim'dan keyin hub sozlamalarini beradi (`set-hub`).
   test('enroll writes a helper key and sends its proof', async () => {
     const dir = tempDir();
-    const config = await enroll(input(await newToken(), dir));
-    const pem = readFileSync(join(dir, 'helper.key'), 'utf8');
-    expect(pem).toMatch(/^-----BEGIN PRIVATE KEY-----/);
-    const privateKey = createPrivateKey(pem);
-    expect(privateKey.asymmetricKeyType).toBe('ed25519');
-    const publicKey = createPublicKey(privateKey).export({ type: 'spki', format: 'der' }).toString('base64url');
-    // Companion kaliti emas: alohida juftlik.
-    expect(publicKey).not.toBe(config.publicKey);
-    expect(readFileSync(join(dir, 'device.key'), 'utf8')).not.toBe(pem);
+    const { port, calls, key } = fakeHelper();
+    const token = await newToken();
+    const config = await enroll(input(token, dir, { helper: port }));
+    expect(calls).toEqual([
+      ['helper-key', token],
+      ['set-hub', app.origin, config.deviceId],
+    ]);
+    // enroll helper kalitini hech qachon o'zi yozmaydi.
+    expect(readdirSync(dir).sort()).toEqual(['device.json', 'device.key', 'hub-ca.pem']);
 
     // Hub helper kalitini qabul qilgan: helper imzosi bilan helper yo'li ishlaydi.
-    const key = {
-      publicKey,
-      sign: (m: Buffer | string) => sign(null, Buffer.from(m), privateKey).toString('base64url'),
+    const signer = {
+      publicKey: key.publicKey,
+      sign: (m: Buffer | string) => sign(null, Buffer.from(m), key.privateKey).toString('base64url'),
     };
-    const res = await helperRequest(app, key, config.deviceId, 'GET', '/api/v1/device/helper/lock-state');
+    const res = await helperRequest(app, signer, config.deviceId, 'GET', '/api/v1/device/helper/lock-state');
     expect(res.status).toBe(200);
+  });
 
-    // Helper faqat Windows'da: boshqa OS'da kalit yaratilmaydi va qayta enroll eskisini o'chiradi.
-    await enroll(input(await newToken(), dir, { force: true, facts: { ...facts, platform: 'linux' } }));
-    expect(existsSync(join(dir, 'helper.key'))).toBe(false);
+  test('a helper-key failure spends no token and writes nothing', async () => {
+    const dir = tempDir();
+    const token = await newToken();
+    const failing: HelperPort = {
+      helperKey: async () => {
+        throw new HelperError('helper-key', 5, 'netschool-helper helper-key failed (exit 5)');
+      },
+      setHub: async () => {},
+    };
+    await expect(enroll(input(token, dir, { helper: failing }))).rejects.toBeInstanceOf(HelperError);
+    expect(readdirSync(dir)).toEqual([]);
+    // Token sarflanmagan.
+    await enroll(input(token, tempDir()));
+  });
+
+  test('the helper is called with an absolute path, fixed arguments and no shell', async () => {
+    const runs: [string, string[]][] = [];
+    const run: RunFile = async (file, args) => {
+      runs.push([file, args]);
+      return args[0] === 'helper-key'
+        ? { code: 0, stdout: '{"helperPublicKey":"AAA","helperProof":"BBB"}\n', stderr: '' }
+        : { code: 0, stdout: 'ok\n', stderr: '' };
+    };
+    const exe = 'C:\\pkg\\netschool-helper.exe';
+    const port = helperCli({ exe, caFile: 'C:\\certs\\hub-ca.pem', rotate: true, run });
+    expect(await port.helperKey('nse_tok')).toEqual({ helperPublicKey: 'AAA', helperProof: 'BBB' });
+    await port.setHub('https://hub.school.lan', '0b6f3c1e-8d2a-4c7e-9f10-2a3b4c5d6e7f');
+    expect(runs).toEqual([
+      [exe, ['helper-key', '--token', 'nse_tok', '--rotate']],
+      [
+        exe,
+        [
+          'set-hub',
+          '--origin',
+          'https://hub.school.lan',
+          '--device-id',
+          '0b6f3c1e-8d2a-4c7e-9f10-2a3b4c5d6e7f',
+          '--ca-file',
+          'C:\\certs\\hub-ca.pem',
+        ],
+      ],
+    ]);
+    // CA'siz va --force'siz.
+    runs.length = 0;
+    const plain = helperCli({ exe, caFile: null, rotate: false, run });
+    await plain.helperKey('nse_tok');
+    await plain.setHub('https://hub', 'id');
+    expect(runs.map(([, a]) => a)).toEqual([
+      ['helper-key', '--token', 'nse_tok'],
+      ['set-hub', '--origin', 'https://hub', '--device-id', 'id'],
+    ]);
+    expect(() => helperCli({ exe: 'netschool-helper.exe', caFile: null, rotate: false, run })).toThrow(/absolute/);
+    expect(() => helperCli({ exe, caFile: 'hub-ca.pem', rotate: false, run })).toThrow(/absolute/);
+
+    // Xato: chiqish kodi va stderr, token xabarda yo'q; kutilmagan stdout rad etiladi.
+    const failing = helperCli({
+      exe,
+      caFile: null,
+      rotate: false,
+      run: async () => ({
+        code: 5,
+        stdout: '',
+        stderr: 'helper-key administrator sifatida ishga tushirilishi kerak\n',
+      }),
+    });
+    const err = await failing.helperKey('nse_secret').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HelperError);
+    expect(err).toMatchObject({ step: 'helper-key', exitCode: 5 });
+    expect(String((err as Error).message)).not.toContain('nse_secret');
+    const garbage = helperCli({
+      exe,
+      caFile: null,
+      rotate: false,
+      run: async () => ({ code: 0, stdout: 'nope', stderr: '' }),
+    });
+    await expect(garbage.helperKey('t')).rejects.toBeInstanceOf(HelperError);
   });
 
   test('a used or unknown token is rejected and nothing is written', async () => {
@@ -194,6 +286,55 @@ describe('enroll CLI', () => {
     const again = await run(['--hub', app.origin, '--ca', caFile, '--token', token], { NETSCHOOL_COMPANION_DIR: dir });
     expect(again.code).toBe(4);
     expect(again.text).not.toContain(token);
+  });
+
+  test('the CLI hands the helper the absolute CA path and maps helper failures to exit codes', async () => {
+    const seen: { caFile: string | null; rotate: boolean }[] = [];
+    const runWith = async (argv: string[], port: HelperPort) => {
+      const out: string[] = [];
+      const code = await runEnrollCli(
+        argv,
+        { NETSCHOOL_COMPANION_DIR: tempDir() },
+        { out: (s) => out.push(s), err: (s) => out.push(s) },
+        {
+          helper: (opts) => {
+            seen.push(opts);
+            return port;
+          },
+        },
+      );
+      return { code, text: out.join('\n') };
+    };
+    const ok = fakeHelper();
+    const token = await newToken();
+    const done = await runWith(['--hub', app.origin, '--ca', caFile, '--token', token, '--force'], ok.port);
+    expect(done.code).toBe(0);
+    expect(seen.at(-1)).toEqual({ caFile, rotate: true });
+    expect(ok.calls.map((c) => c[0])).toEqual(['helper-key', 'set-hub']);
+
+    const keyFails: HelperPort = {
+      helperKey: async () => {
+        throw new HelperError('helper-key', 5, 'netschool-helper helper-key failed (exit 5)');
+      },
+      setHub: async () => {},
+    };
+    const second = await newToken();
+    const denied = await runWith(['--hub', app.origin, '--ca', caFile, '--token', second], keyFails);
+    expect(denied.code).toBe(2);
+    expect(denied.text).toMatch(/administrator/);
+    expect(seen.at(-1)).toEqual({ caFile, rotate: false });
+
+    // Bir helper kaliti hub'da faqat bitta qurilmada (unique): yangi kalit bilan.
+    const hubFails: HelperPort = {
+      helperKey: fakeHelper().port.helperKey,
+      setHub: async () => {
+        throw new HelperError('set-hub', 1, 'netschool-helper set-hub failed (exit 1)');
+      },
+    };
+    const late = await runWith(['--hub', app.origin, '--ca', caFile, '--token', second], hubFails);
+    expect(late.code).toBe(3);
+    expect(late.text).toMatch(/enrolled, but the helper/);
+    expect(late.text).not.toContain(second);
   });
 
   test('exit codes: usage 2, hub or TLS failure 3, rejection 4', async () => {
