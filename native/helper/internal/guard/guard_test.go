@@ -493,3 +493,26 @@ func TestLinkClearsLastErrorOnAccept(t *testing.T) {
 		t.Fatalf("ulanishdan keyin LastError = %v", k.LastError())
 	}
 }
+
+// Guard ulangan, lekin hali birinchi hisobotini yubormagan: bloklash paytida hook hali o'rnatilmagan, shuning uchun
+// `off` emas, `failed` (Task 10 qarori #7). Ochiq holatda `off`.
+func TestLinkReportsFailedWhileLockedBeforeFirstReport(t *testing.T) {
+	k, l := startLink(t)
+	k.Set(true)
+	c, r := connectGuard(t, l)
+	readCommand(t, r)
+	if got := k.Hook(); got != HookFailed {
+		t.Fatalf("ulangan, hisobot yo'q, bloklangan: Hook() = %q, kutilgan %q", got, HookFailed)
+	}
+	report(t, c, HookActive)
+	eventually(t, "Hook() = active", func() bool { return k.Hook() == HookActive })
+}
+
+func TestLinkReportsOffWhenUnlockedBeforeFirstReport(t *testing.T) {
+	k, l := startLink(t)
+	_, r := connectGuard(t, l)
+	readCommand(t, r)
+	if got := k.Hook(); got != HookOff {
+		t.Fatalf("ulangan, hisobot yo'q, ochiq: Hook() = %q, kutilgan %q", got, HookOff)
+	}
+}

@@ -25,6 +25,7 @@ type Link struct {
 	mu        sync.Mutex
 	locked    bool
 	connected bool
+	reported  bool   // ulangan guard kamida bitta hisobot yuborgan
 	hook      string // ulangan guard'ning oxirgi hisoboti
 	lastErr   error  // oxirgi Accept xatosi; muvaffaqiyatli Accept tozalaydi
 	wake      chan struct{}
@@ -48,12 +49,12 @@ func (k *Link) Set(locked bool) {
 	}
 }
 
-// Hook guard'ning hook holati. Guard ulanmagan bo'lsa: bloklash paytida `failed` (hook yo'q), aks holda `off`.
-// Ulangan guard hali javob bermagan bo'lsa oxirgi ma'lum holat (ulanishda `off`).
+// Hook guard'ning hook holati. Guard ulanmagan yoki ulangan, lekin hali birinchi hisobotini yubormagan bo'lsa:
+// bloklash paytida `failed` (hook hali o'rnatilmagan), aks holda `off`. Hisobot kelgach — guard'ning oxirgi hisoboti.
 func (k *Link) Hook() string {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if !k.connected {
+	if !k.connected || !k.reported {
 		if k.locked {
 			return HookFailed
 		}
@@ -76,9 +77,10 @@ func (k *Link) current() bool {
 	return k.locked
 }
 
-func (k *Link) setConn(connected bool, hook string) {
+// setConn ulanish holatini yangilaydi. reported: hook guard'ning hisobotidan olinganmi (ulanish/uzilishda false).
+func (k *Link) setConn(connected, reported bool, hook string) {
 	k.mu.Lock()
-	k.connected, k.hook = connected, hook
+	k.connected, k.reported, k.hook = connected, reported, hook
 	k.mu.Unlock()
 }
 
@@ -107,8 +109,8 @@ func (k *Link) serve(ctx context.Context, conn io.ReadWriteCloser) {
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	defer conn.Close()
-	k.setConn(true, HookOff)
-	defer k.setConn(false, HookOff)
+	k.setConn(true, false, HookOff)
+	defer k.setConn(false, false, HookOff)
 
 	done := make(chan struct{})
 	defer close(done)
@@ -139,7 +141,7 @@ func (k *Link) serve(ctx context.Context, conn io.ReadWriteCloser) {
 			return
 		case r := <-reports:
 			stale.Reset(staleAfter)
-			k.setConn(true, r.Hook)
+			k.setConn(true, true, r.Hook)
 		case <-k.wake:
 			if !send() {
 				return

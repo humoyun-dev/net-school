@@ -123,6 +123,22 @@ func (g *Guard) Pending() bool { return g.journalPending() }
 // bloklash yo'q bo'lsa, chaqiruvchi tozalanmaguncha Retry'ni RetryInterval oralig'ida chaqiradi (Pending'ga qarang).
 func (g *Guard) Start(ctx context.Context) { g.Retry(ctx) }
 
+// Probe xizmat ishga tushganda (Start'dan keyin, bloklash yo'q paytida) bir marta chaqiriladi: Keyboard Filter yo'q
+// nashrda (Pro, Home) holat birinchi bloklashni kutmasdan darhol `unavailable` bo'ladi. Aniq javob keshlanadi
+// (keyingi Set backend'dan qayta so'ramaydi). Probe xatosi (masalan, boot'da WMI hali tayyor emas) bloklash yo'q
+// paytida `failed` demaydi, chunki hech narsa to'silmagan: holat o'zgarmaydi, keyingi Set(true) qayta so'raydi.
+// Joriy bloklash yoki qoldiq jurnal bo'lsa hech narsa qilmaydi (bu Set/Retry ishi).
+func (g *Guard) Probe() {
+	g.opMu.Lock()
+	defer g.opMu.Unlock()
+	if g.blocked || g.journalPending() {
+		return
+	}
+	if state, reason := g.probe(); state == StateUnavailable {
+		g.set(state, reason)
+	}
+}
+
 // Retry bloklash YO'Q paytida qoldiq jurnalni tozalashga urinadi: filtrni o'chiradi va jurnalni o'chiradi. Jurnal
 // yo'q bo'lsa hech narsa qilmaydi (PowerShell ishga tushmaydi). Bu jarayonda allaqachon bloklangan bo'lsa
 // (Set(true) muvaffaqiyatli bo'lgan) tegilmaydi. Bloklash BOR paytida chaqirilmaydi: u Set(true) ishi (u `failed`ni

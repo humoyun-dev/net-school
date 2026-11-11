@@ -602,3 +602,45 @@ func TestStateDoesNotWaitForSlowBackend(t *testing.T) {
 	close(s.release)
 	wantState(t, <-done, StateBlocked)
 }
+
+// Probe ishga tushishda Pro/Home'da darhol `unavailable` beradi (birinchi bloklashni kutmasdan).
+func TestProbeReportsEditionAtBoot(t *testing.T) {
+	f := &fakeBackend{available: false, reason: ReasonEdition}
+	g := NewGuard(f, journalPath(t))
+	g.Probe()
+	wantState(t, g.State(), StateUnavailable)
+	if g.Reason() != ReasonEdition {
+		t.Fatalf("sabab = %q", g.Reason())
+	}
+	// Natija keshlanadi: keyingi Set backend'dan qayta so'ramaydi.
+	wantState(t, g.Set(context.Background(), true), StateUnavailable)
+	wantCalls(t, f, "available")
+}
+
+func TestProbeKeepsOffWhenAvailable(t *testing.T) {
+	f := ready()
+	g := NewGuard(f, journalPath(t))
+	g.Probe()
+	wantState(t, g.State(), StateOff)
+	wantCalls(t, f, "available")
+}
+
+// Probe xatosi bloklash yo'q paytida `failed` demaydi (hech narsa to'silmagan): holat `off` qoladi.
+func TestProbeErrorKeepsOff(t *testing.T) {
+	f := &fakeBackend{available: false, reason: "WMI tayyor emas"}
+	g := NewGuard(f, journalPath(t))
+	g.Probe()
+	wantState(t, g.State(), StateOff)
+}
+
+// Qoldiq jurnal yoki joriy bloklash bor paytida Probe hech narsa qilmaydi (bu Start/Retry/Set ishi).
+func TestProbeSkipsWhilePending(t *testing.T) {
+	path := journalPath(t)
+	if err := os.WriteFile(path, []byte(`{"state":"blocked"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := ready()
+	g := NewGuard(f, path)
+	g.Probe()
+	wantCalls(t, f)
+}
