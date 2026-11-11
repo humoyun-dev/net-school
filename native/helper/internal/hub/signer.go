@@ -1,4 +1,4 @@
-// Package hub helper'ning hub bilan aloqasi: so'rov imzosi va (keyingi tasklarda) HTTP mijoz.
+// Package hub helper'ning hub bilan aloqasi: so'rov imzosi (signer.go) va imzolangan HTTPS mijoz (client.go).
 package hub
 
 import (
