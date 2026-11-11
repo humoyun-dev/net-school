@@ -54,6 +54,8 @@ type fakeProc struct {
 	lifetime time.Duration
 	forever  bool
 
+	killErr error // nil bo'lmasa Kill shu xatoni qaytaradi va jarayonni to'xtatmaydi
+
 	once   sync.Once
 	killed chan struct{}
 	mu     sync.Mutex
@@ -73,6 +75,9 @@ func (p *fakeProc) Kill() error {
 	p.mu.Lock()
 	p.kills++
 	p.mu.Unlock()
+	if p.killErr != nil {
+		return p.killErr
+	}
 	p.once.Do(func() { close(p.killed) })
 	return nil
 }
@@ -187,12 +192,41 @@ func TestSupervisorResetsBackoffAfterStableRun(t *testing.T) {
 	clock := newFakeClock()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// 3 tez yiqilish, 60 s barqaror ish (nollanadi), tez yiqilish, 59 s (nollanmaydi), tez yiqilish.
-	l, _ := scripted(clock, cancel, 0, 0, 0, 60*time.Second, 0, 59*time.Second, 0)
+	// 3 tez yiqilish, 10 s ish (ishga tushib olgan: nollanadi), yana 2 tez yiqilish.
+	l, _ := scripted(clock, cancel, 0, 0, 0, 10*time.Second, 0, 0)
 
 	runWithTimeout(t, ctx, NewSupervisor("companion", l, clock))
 
-	if got := clock.recorded(); !slices.Equal(got, secs(1, 2, 4, 1, 2, 4, 8)) {
+	if got := clock.recorded(); !slices.Equal(got, secs(1, 2, 4, 1, 2, 4)) {
+		t.Fatalf("kutishlar = %v", got)
+	}
+}
+
+// O'quvchi Companion'ni har 10 s da o'ldiradi: har qayta ishga tushish 1 s dan keyin (≤ 3 s talabi), kutish oshmaydi.
+func TestRepeatedKillsRestartWithinOneSecond(t *testing.T) {
+	clock := newFakeClock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	l, _ := scripted(clock, cancel, 10*time.Second, 10*time.Second, 10*time.Second, 10*time.Second, 10*time.Second,
+		10*time.Second, 10*time.Second, 10*time.Second)
+
+	runWithTimeout(t, ctx, NewSupervisor("companion", l, clock))
+
+	if got := clock.recorded(); !slices.Equal(got, secs(1, 1, 1, 1, 1, 1, 1, 1)) {
+		t.Fatalf("kutishlar = %v, har biri 1 s bo'lishi kerak", got)
+	}
+}
+
+// Chegara: 4.9 s ish hali yiqilish (kutish oshadi), aynan 5 s ish ishga tushib olgan (nollanadi).
+func TestSupervisorStartupCrashWindowBoundary(t *testing.T) {
+	clock := newFakeClock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	l, _ := scripted(clock, cancel, 0, 0, 4900*time.Millisecond, StartupCrashWindow, 0)
+
+	runWithTimeout(t, ctx, NewSupervisor("companion", l, clock))
+
+	if got := clock.recorded(); !slices.Equal(got, secs(1, 2, 4, 1, 2)) {
 		t.Fatalf("kutishlar = %v", got)
 	}
 }
@@ -213,6 +247,81 @@ func TestSupervisorBacksOffWhenStartFails(t *testing.T) {
 
 	if got := clock.recorded(); !slices.Equal(got, secs(1, 2, 4)) {
 		t.Fatalf("kutishlar = %v", got)
+	}
+	if got := s.State(); got != StateStopped {
+		t.Fatalf("State = %q", got)
+	}
+}
+
+func TestSupervisorKeepsLastStartError(t *testing.T) {
+	clock := newFakeClock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errNoUser := errors.New("sessiyada foydalanuvchi yo'q")
+	l := &fakeLauncher{step: func(n int) (Proc, error) {
+		if n == 1 {
+			cancel()
+		}
+		return nil, errNoUser
+	}}
+	s := NewSupervisor("companion", l, clock)
+	if err := s.LastError(); err != nil {
+		t.Fatalf("Run'dan oldin LastError = %v", err)
+	}
+
+	runWithTimeout(t, ctx, s)
+
+	if err := s.LastError(); !errors.Is(err, errNoUser) {
+		t.Fatalf("LastError = %v", err)
+	}
+}
+
+func TestSupervisorKeepsLastWaitErrorAndNilProc(t *testing.T) {
+	clock := newFakeClock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var s *Supervisor
+	var seenWaitErr error
+	l := &fakeLauncher{step: func(n int) (Proc, error) {
+		if n == 0 {
+			return &fakeProc{clock: clock, killed: make(chan struct{})}, nil // Wait "exit status 1" qaytaradi
+		}
+		seenWaitErr = s.LastError()
+		cancel()
+		return nil, nil
+	}}
+	s = NewSupervisor("companion", l, clock)
+
+	runWithTimeout(t, ctx, s)
+
+	if seenWaitErr == nil || seenWaitErr.Error() != "exit status 1" {
+		t.Fatalf("Wait xatosi saqlanmadi: %v", seenWaitErr)
+	}
+	if err := s.LastError(); !errors.Is(err, errNilProc) {
+		t.Fatalf("LastError = %v", err)
+	}
+}
+
+func TestSupervisorReturnsWhenKillFails(t *testing.T) {
+	clock := newFakeClock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errDenied := errors.New("access denied")
+	// Kill xato beradi, Wait hech qachon qaytmaydi.
+	proc := &fakeProc{clock: clock, forever: true, killErr: errDenied, killed: make(chan struct{})}
+	l := &fakeLauncher{step: func(int) (Proc, error) {
+		cancel()
+		return proc, nil
+	}}
+	s := NewSupervisor("guard", l, clock)
+
+	runWithTimeout(t, ctx, s)
+
+	if got := proc.killCount(); got != 1 {
+		t.Fatalf("Kill soni = %d", got)
+	}
+	if err := s.LastError(); !errors.Is(err, errDenied) {
+		t.Fatalf("LastError = %v", err)
 	}
 	if got := s.State(); got != StateStopped {
 		t.Fatalf("State = %q", got)

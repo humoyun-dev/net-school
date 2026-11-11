@@ -5,6 +5,7 @@ package supervise
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -18,13 +19,20 @@ const (
 
 const (
 	// MinBackoff birinchi qayta ishga tushirishdan oldingi kutish. O'quvchi Companion'ni o'ldirsa u ≤ 3 s ichida
-	// qaytishi kerak: barqaror ishlagan jarayondan keyin har doim shu kutiladi.
+	// qaytishi kerak: ishga tushib olgan jarayondan keyin har doim shu kutiladi.
 	MinBackoff = time.Second
 	// MaxBackoff kutishning yuqori chegarasi (crash-loop'da har 30 s da bitta urinish).
 	MaxBackoff = 30 * time.Second
-	// StableRun jarayon kamida shuncha yashasa u "barqaror" hisoblanadi va kutish MinBackoff'ga qaytadi.
-	StableRun = 60 * time.Second
+	// StartupCrashWindow jarayon shundan kam yashasa bu "ishga tushishda yiqilish" (buzilgan o'rnatish, sessiya yo'q)
+	// va kutish ikki baravar oshadi. Shuncha yoki ko'proq yashagan jarayon ishga tushib olgan: uni o'quvchi o'ldirgan
+	// bo'lishi mumkin, shuning uchun kutish MinBackoff'ga qaytadi. Chegara katta (masalan, 60 s) bo'lsa, Companion'ni
+	// har 10 s da o'ldirib kutishni 30 s gacha cho'zish va shu oraliqda bloklashdan qochish mumkin bo'lardi; har
+	// qayta ishga tushish ≤ 3 s talabi buni taqiqlaydi. 5 s da tez yiqiladigan jarayon CPU'ni yemaydi.
+	StartupCrashWindow = 5 * time.Second
 )
+
+// errNilProc Launcher xatosiz, lekin nil Proc qaytardi.
+var errNilProc = errors.New("launcher nil Proc qaytardi")
 
 // Launcher bola jarayonni ishga tushiradi. Har Start yangi jarayon (sessiya o'zgargan bo'lsa yangi sessiyada).
 type Launcher interface {
@@ -61,18 +69,20 @@ func (SystemClock) Sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// Supervisor bitta bola jarayonni kuzatadi. Run bitta goroutine'da ishlaydi; State istalgan goroutine'dan xavfsiz.
+// Supervisor bitta bola jarayonni kuzatadi. Run bitta goroutine'da ishlaydi; State va LastError istalgan
+// goroutine'dan xavfsiz.
 //
-// Kutish: 1 s, 2 s, 4 s … 30 s gacha ikki baravar oshadi; jarayon ≥ 60 s yashagan bo'lsa yana 1 s dan boshlanadi.
-// Ishga tushmay qolish (masalan, sessiyada foydalanuvchi yo'q; Start xato yoki nil Proc qaytarsa) ham tez yiqilish
-// hisoblanadi.
+// Kutish: jarayon StartupCrashWindow (5 s) dan kam yashagan bo'lsa 1 s, 2 s, 4 s … 30 s gacha ikki baravar oshadi;
+// 5 s yoki ko'proq yashagan bo'lsa yana 1 s. Ishga tushmay qolish (Start xato yoki nil Proc qaytarsa, masalan
+// sessiyada foydalanuvchi yo'q) ham tez yiqilish hisoblanadi.
 type Supervisor struct {
 	name     string
 	launcher Launcher
 	clock    Clock
 
-	mu    sync.Mutex
-	state string
+	mu      sync.Mutex
+	state   string
+	lastErr error
 }
 
 func NewSupervisor(name string, l Launcher, clock Clock) *Supervisor {
@@ -89,9 +99,27 @@ func (s *Supervisor) State() string {
 	return s.state
 }
 
+// LastError oxirgi nil bo'lmagan xato: Start xatosi, Wait xatosi (jarayon nol bo'lmagan kod bilan tugagan yoki
+// o'ldirilgan) yoki bekor qilishdagi Kill xatosi. Tozalanmaydi: jarayon hozir ishlayotgan bo'lsa ham u oldingi
+// tugash sababini ko'rsatadi (diagnostika uchun); hozirgi holatni State beradi. Hali xato bo'lmagan bo'lsa nil.
+func (s *Supervisor) LastError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastErr
+}
+
 func (s *Supervisor) setState(v string) {
 	s.mu.Lock()
 	s.state = v
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) recordErr(err error) {
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	s.lastErr = err
 	s.mu.Unlock()
 }
 
@@ -102,13 +130,18 @@ func (s *Supervisor) Run(ctx context.Context) {
 	delay := MinBackoff
 	for ctx.Err() == nil {
 		started := s.clock.Now()
-		if p, err := s.launcher.Start(); err == nil && p != nil {
+		p, err := s.launcher.Start()
+		if err == nil && p == nil {
+			err = errNilProc
+		}
+		s.recordErr(err)
+		if err == nil {
 			s.setState(StateRunning)
 			if !s.wait(ctx, p) {
 				return
 			}
 		}
-		if s.clock.Now().Sub(started) >= StableRun {
+		if s.clock.Now().Sub(started) >= StartupCrashWindow {
 			delay = MinBackoff
 		}
 		s.setState(StateRestarting)
@@ -121,20 +154,20 @@ func (s *Supervisor) Run(ctx context.Context) {
 
 // wait jarayon tugashini yoki ctx bekor qilinishini kutadi. Jarayon o'zi tugasa true; ctx bekor qilinsa jarayonni
 // o'ldiradi va false. Kill xato bersa (jarayon to'xtamagan bo'lishi mumkin) Wait kutilmaydi: Run osilib qolmasin,
-// Wait goroutine'i jarayon tugaganda o'zi chiqadi.
+// Wait goroutine'i jarayon tugaganda o'zi chiqadi (kanal buferli, goroutine bloklanib qolmaydi).
 func (s *Supervisor) wait(ctx context.Context, p Proc) bool {
-	exited := make(chan struct{})
-	go func() {
-		_ = p.Wait()
-		close(exited)
-	}()
+	exited := make(chan error, 1)
+	go func() { exited <- p.Wait() }()
 	select {
-	case <-exited:
+	case err := <-exited:
+		s.recordErr(err)
 		return true
 	case <-ctx.Done():
-		if p.Kill() == nil {
-			<-exited
+		if err := p.Kill(); err != nil {
+			s.recordErr(err)
+			return false
 		}
+		s.recordErr(<-exited)
 		return false
 	}
 }
