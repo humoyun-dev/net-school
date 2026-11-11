@@ -15,12 +15,15 @@ import (
 // turi, reparse belgisi va hard link soni ochilgan handle'dan o'qiladi, ega va DACL SetSecurityInfo bilan shu
 // handle'ga qo'yiladi (SetNamedSecurityInfo emas: u yo'lni qayta ochadi va merosni bolalarga o'zi yoyadi).
 //
-// Ishlov berilayotgan katalog handle'i FILE_SHARE_DELETE'siz ochiq turadi: u ochiq ekan katalogni qayta nomlab
-// yoki o'chirib, o'rniga junction qo'yib bo'lmaydi, shuning uchun bolalar uning yo'li orqali ochiladi.
+// Tekshiruv va ACL handle'lari DELETE'siz va hamma share bayroqlari bilan ochiladi (begona ochiq handle hardening'ni
+// to'smaydi). Ishonchli katalogni oddiy foydalanuvchi qayta nomlay olmaydi (ota katalog va o'zining DACL'i), shuning
+// uchun uning bolalari yo'l orqali ochiladi. Ishonchsiz katalog o'chirilayotganda DELETE bilan FILE_SHARE_DELETE'siz
+// ochiq turadi (almashtirib bo'lmaydi) va file ID bilan tekshirilgan obyektning o'zi ekani solishtiriladi.
 
 const (
 	secureAccess  = windows.READ_CONTROL | windows.WRITE_DAC | windows.WRITE_OWNER
 	shareNoDelete = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE
+	shareAll      = shareNoDelete | windows.FILE_SHARE_DELETE
 	openFlags     = windows.FILE_FLAG_OPEN_REPARSE_POINT | windows.FILE_FLAG_BACKUP_SEMANTICS
 )
 
@@ -38,6 +41,13 @@ func (e entry) isReparse() bool {
 func (e entry) unsafeToTouch() bool { return e.isReparse() || (!e.isDir() && e.info.NumberOfLinks > 1) }
 
 func (e entry) close() { _ = windows.CloseHandle(e.h) }
+
+// fileID obyektning tom ichidagi o'zgarmas identifikatori (yo'l o'zgarsa ham, almashtirilsa farq qiladi).
+type fileID struct{ volume, high, low uint32 }
+
+func (e entry) id() fileID {
+	return fileID{e.info.VolumeSerialNumber, e.info.FileIndexHigh, e.info.FileIndexLow}
+}
 
 // open path'ni o'zini (havolani kuzatmasdan) ochadi. SeBackup/SeRestore yoqilgan bo'lsa begona DACL ham
 // to'smaydi (FILE_FLAG_BACKUP_SEMANTICS).
@@ -85,10 +95,10 @@ func HardenDir(dir string, rule Rule) (trusted bool, err error) {
 // katalogini almashtira olmaydi. trusted — helperData'niki (Harden).
 func HardenHelperData(dataRoot, helperData string) (trusted bool, err error) {
 	defer enablePrivileges()()
-	if _, err := secure(dataRoot, Readable, false); err != nil {
-		return false, err
-	}
-	return secure(helperData, Private, true)
+	// Mustaqil: ota katalog yiqilsa ham helper katalogi himoyalanadi (xatolar birlashtiriladi).
+	_, rootErr := secure(dataRoot, Readable, false)
+	trusted, dataErr := secure(helperData, Private, true)
+	return trusted, errors.Join(rootErr, dataErr)
 }
 
 // RemoveTree path'ni havolalarni kuzatmasdan o'chiradi (reparse point'ning o'zi o'chadi, nishoni emas). Yo'q bo'lsa
@@ -108,31 +118,19 @@ func FreshDir(path string, rule Rule) error {
 }
 
 func secure(dir string, rule Rule, recurse bool) (trusted bool, err error) {
-	e, err := open(dir, secureAccess|windows.DELETE, shareNoDelete)
+	// Tekshiruv va ACL uchun DELETE'siz va hamma share bayroqlari bilan: o'quvchi o'z katalogiga ochiq handle tutib
+	// turib hardening'ni to'sa olmasin. DELETE faqat ishonchsiz/reparse yo'lida, egalik tekshiruvidan keyin.
+	e, err := open(dir, secureAccess, shareAll)
 	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
 		return false, create(dir, rule.Dir)
 	}
 	if err != nil {
 		return false, err
 	}
-	if e.isReparse() || !e.isDir() {
-		err := deleteHandle(e.h, dir)
+	if e.isReparse() || !e.isDir() || !isTrusted(e.h) {
+		id := e.id()
 		e.close()
-		if err != nil {
-			return false, err
-		}
-		return false, create(dir, rule.Dir)
-	}
-	if !isTrusted(e.h) {
-		err := removeChildren(dir)
-		if err == nil {
-			err = deleteHandle(e.h, dir)
-		}
-		e.close()
-		if err != nil {
-			return false, fmt.Errorf("ishonchsiz %s tozalanmadi: %w", dir, err)
-		}
-		return false, create(dir, rule.Dir)
+		return false, replace(dir, rule, id)
 	}
 	defer e.close()
 	if err := apply(e.h, dir, rule.Dir); err != nil {
@@ -142,6 +140,43 @@ func secure(dir string, rule Rule, recurse bool) (trusted bool, err error) {
 		return true, nil
 	}
 	return true, secureChildren(dir, rule)
+}
+
+// replace ishonchsiz katalogni (yoki uning o'rnidagi havola/faylni) o'chiradi va yangidan yaratadi. DELETE bilan
+// FILE_SHARE_DELETE'siz qayta ochiladi (ichidagilar o'chirilguncha katalogni almashtirib bo'lmaydi) va bu tekshirilgan
+// obyektning o'zi ekani file ID bilan solishtiriladi. Ichidagilar joyida ACL qilinmaydi, havolalar kuzatilmaydi.
+func replace(dir string, rule Rule, want fileID) error {
+	e, err := open(dir, windows.DELETE|windows.READ_CONTROL, shareNoDelete)
+	if err != nil {
+		return fmt.Errorf("ishonchsiz %s o'chirish uchun ochilmadi: %w", dir, err)
+	}
+	if e.id() != want {
+		e.close()
+		return fmt.Errorf("%s tekshiruv paytida almashtirildi", dir)
+	}
+	if e.isDir() && !e.isReparse() {
+		err = removeChildren(dir)
+	}
+	if err == nil {
+		err = deleteHandle(e.h, dir)
+	}
+	e.close()
+	if err != nil {
+		return fmt.Errorf("ishonchsiz %s tozalanmadi: %w", dir, err)
+	}
+	return create(dir, rule.Dir)
+}
+
+// IsTrustedDir dir hozir ishonchli katalogmi: reparse point emas, egasi Administrators yoki SYSTEM, DACL
+// himoyalangan. Xizmat konfiguratsiyani faqat shunday katalogdan o'qiydi.
+func IsTrustedDir(dir string) (bool, error) {
+	defer enablePrivileges()()
+	e, err := open(dir, windows.READ_CONTROL, shareAll)
+	if err != nil {
+		return false, err
+	}
+	defer e.close()
+	return e.isDir() && !e.isReparse() && isTrusted(e.h), nil
 }
 
 // secureChildren ishonchli katalog bolalarini handle orqali qayta o'rnatadi. Har bola mustaqil: xatolar
@@ -154,7 +189,7 @@ func secureChildren(dir string, rule Rule) error {
 	var errs []error
 	for _, name := range names {
 		path := dir + `\` + name
-		e, err := open(path, secureAccess, shareNoDelete)
+		e, err := open(path, secureAccess, shareAll)
 		if err != nil {
 			errs = append(errs, err)
 			continue

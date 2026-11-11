@@ -101,3 +101,16 @@ func (l *lazyHub) ReportStatus(ctx context.Context, s hub.Status) error {
 	}
 	return h.ReportStatus(ctx, s)
 }
+
+// ErrUntrustedConfigDir helper katalogi xizmat ishga tushganda himoyalanmadi yoki tekshiruvdan o'tmadi (egasi
+// Administrators/SYSTEM va himoyalangan DACL emas). Bunday katalogdagi device.json, hub-ca.pem va helper.key'ga
+// ishonilmaydi: xizmat hub'siz (ochiq) ishlaydi va keyingi ishga tushishda qayta uriniladi.
+var ErrUntrustedConfigDir = errors.New("helper katalogi tekshiruvdan o'tmadi: hub konfiguratsiyasi o'qilmaydi")
+
+// GuardedLoad verified false bo'lsa load'ni hech qachon chaqirmaydi (xizmat umri davomida).
+func GuardedLoad(verified bool, load func() (Hub, error)) func() (Hub, error) {
+	if !verified {
+		return func() (Hub, error) { return nil, ErrUntrustedConfigDir }
+	}
+	return load
+}

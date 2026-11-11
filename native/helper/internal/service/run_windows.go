@@ -121,13 +121,10 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 		return true, 1
 	}
 	// O'z-o'zini tiklash: ma'lumot katalogining egasi va himoyalangan DACL'i har ishga tushishda, hech narsa
-	// o'qilishidan oldin qayta o'rnatiladi. Yiqilsa jurnalga yoziladi va davom etiladi (fayl yo'q bo'lsa xizmat
-	// baribir ochiq holatda ishlaydi).
-	if trusted, err := fsacl.HardenHelperData(p.dataRoot, p.helperData); err != nil {
-		log.Warn("helper katalogi himoyalanmadi: %v", err)
-	} else if !trusted {
-		log.Warn("helper katalogining egasi yoki DACL'i o'zgartirilgan edi, qayta o'rnatildi: %s", p.helperData)
-	}
+	// o'qilishidan oldin qayta o'rnatiladi. Hardening yiqilsa yoki katalog undan keyin ham ishonchli bo'lmasa,
+	// hub konfiguratsiyasi (device.json, hub-ca.pem, helper.key) bu ishga tushishda umuman o'qilmaydi
+	// (GuardedLoad): xizmat ochiq holatda ishlaydi, bu bir marta jurnalga yoziladi.
+	verified := verifyDataDir(p, log)
 	clock := newSystemClock()
 
 	// Job: Companion va guard xizmat jarayoni bilan birga o'ladi (oldingi nusxaning yetim jarayonlari qolmaydi).
@@ -152,7 +149,7 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 	listener := &lazyListener{}
 	link := guard.NewLink(listener)
 	s := New(Deps{
-		Hub:       NewLazyHub(func() (Hub, error) { return loadHub(p) }, clock),
+		Hub:       NewLazyHub(GuardedLoad(verified, func() (Hub, error) { return loadHub(p) }), clock),
 		Lock:      lock.New(clock, lock.NewFileStore(p.lock)),
 		Policy:    policy.NewPolicy(policy.NewRegistry(), p.policyJournal),
 		Guard:     link,
@@ -224,6 +221,25 @@ loop:
 	s.Stop()
 	log.Info("NetSchool Helper to'xtadi")
 	return false, 0
+}
+
+// verifyDataDir helper katalogini himoyalaydi va natijani tekshiradi: true faqat xatosiz va katalog ishonchli
+// (egasi Administrators/SYSTEM, himoyalangan DACL, reparse point emas) bo'lsa.
+func verifyDataDir(p paths, log *eventLogger) bool {
+	trusted, err := fsacl.HardenHelperData(p.dataRoot, p.helperData)
+	if err != nil {
+		log.Warn("helper katalogi himoyalanmadi, hub konfiguratsiyasi o'qilmaydi: %v", err)
+		return false
+	}
+	if !trusted {
+		log.Warn("helper katalogining egasi yoki DACL'i begona edi: katalog yangidan yaratildi (%s)", p.helperData)
+	}
+	ok, err := fsacl.IsTrustedDir(p.helperData)
+	if err != nil || !ok {
+		log.Warn("helper katalogi tekshiruvdan o'tmadi (%v), hub konfiguratsiyasi o'qilmaydi", err)
+		return false
+	}
+	return true
 }
 
 func toSession(s Session) session.Session { return session.Session{ID: s.ID, UserSID: s.UserSID} }
