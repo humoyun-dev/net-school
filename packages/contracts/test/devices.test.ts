@@ -26,6 +26,14 @@ describe('device contracts', () => {
     expect(claimRequestSchema.safeParse({ ...claim, hostname: 'bad\nhost' }).success).toBe(false);
   });
 
+  test('claim helper key and proof come together or not at all', () => {
+    const helper = { helperPublicKey: claim.publicKey, helperProof: claim.proof };
+    expect(claimRequestSchema.safeParse({ ...claim, ...helper }).success).toBe(true);
+    expect(claimRequestSchema.safeParse({ ...claim, helperPublicKey: helper.helperPublicKey }).success).toBe(false);
+    expect(claimRequestSchema.safeParse({ ...claim, helperProof: helper.helperProof }).success).toBe(false);
+    expect(claimRequestSchema.safeParse({ ...claim, ...helper, helperProof: 'not base64url!' }).success).toBe(false);
+  });
+
   test('capability report with 65 keys is rejected', () => {
     const many = (n: number) =>
       Object.fromEntries(

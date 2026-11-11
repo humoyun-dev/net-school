@@ -30,6 +30,8 @@ export function deviceRequest(
   path: string,
   body?: unknown,
   timestamp: number = Date.now(),
+  // `x-ns-signer` sarlavhasi: berilmasa yuborilmaydi (Companion), 'helper' — OS helper.
+  signer?: string,
 ): Promise<TestResponse> {
   const raw = body === undefined ? '' : JSON.stringify(body);
   return app.request(method, path, {
@@ -39,8 +41,22 @@ export function deviceRequest(
       'x-ns-device-id': deviceId,
       'x-ns-timestamp': String(timestamp),
       'x-ns-signature': key.sign(signingInput(method, path, timestamp, raw)),
+      ...(signer === undefined ? {} : { 'x-ns-signer': signer }),
     },
   });
+}
+
+// OS helper so'rovi: helper kaliti bilan imzolanadi va `x-ns-signer: helper` yuboriladi.
+export function helperRequest(
+  app: TestApp,
+  key: DeviceKey,
+  deviceId: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  timestamp: number = Date.now(),
+): Promise<TestResponse> {
+  return deviceRequest(app, key, deviceId, method, path, body, timestamp, 'helper');
 }
 
 // Claim Task 6'da; bu yerda qurilma to'g'ridan-to'g'ri yoziladi.
@@ -49,7 +65,7 @@ export async function seedDevice(
   orgId: string,
   siteId: string,
   publicKey: string,
-  opts: { roomId?: string; hostname?: string } = {},
+  opts: { roomId?: string; hostname?: string; helperKey?: DeviceKey } = {},
 ): Promise<string> {
   const der = Buffer.from(publicKey, 'base64url');
   const [row] = await db
@@ -61,6 +77,7 @@ export async function seedDevice(
       hostname: opts.hostname ?? 'pc-01',
       publicKey: der,
       keyFingerprint: createHash('sha256').update(der).digest('hex'),
+      helperPublicKey: opts.helperKey?.publicKey ?? null,
     })
     .returning();
   if (!row) throw new Error('seed device');

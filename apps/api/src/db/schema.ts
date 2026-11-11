@@ -231,6 +231,14 @@ export const devices = pgTable(
     lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
     // Oxirgi qabul qilingan imzolangan so'rov vaqti (ms); replay himoyasi.
     lastSignedTs: bigint('last_signed_ts', { mode: 'number' }),
+    // OS helper'ning alohida Ed25519 kaliti (SPKI DER, base64url); null — helper ro'yxatdan o'tmagan.
+    // Unique: imzo kiritmasida qurilma ID'si yo'q, shu sabab bir kalit ikki qurilmada bo'lmasligi kerak.
+    helperPublicKey: text('helper_public_key').unique('devices_helper_public_key'),
+    // Helper imzolari uchun alohida replay hisoblagichi: Companion'nikidan mustaqil.
+    helperLastSignedTs: bigint('helper_last_signed_ts', { mode: 'number' }),
+    // Helper'ning eng oxirgi holat hisoboti (helperStatusSchema) va qabul qilingan vaqti.
+    helperStatus: jsonb('helper_status'),
+    helperStatusAt: timestamp('helper_status_at', { withTimezone: true }),
     retiredAt: timestamp('retired_at', { withTimezone: true }),
   },
   (t) => [
