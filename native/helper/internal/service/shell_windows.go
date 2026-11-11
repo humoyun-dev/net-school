@@ -36,6 +36,9 @@ func (e explorerShell) Ensure(s Session) error {
 	return nil
 }
 
+// Running sessiyada `%SystemRoot%\explorer.exe` (aynan shu yo'l) ishlayaptimi.
+func (e explorerShell) Running(s Session) (bool, error) { return processInSession(s.ID, e.exe) }
+
 // processInSession sessiyada to'liq yo'li exe bo'lgan jarayon bormi.
 func processInSession(id uint32, exe string) (bool, error) {
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)

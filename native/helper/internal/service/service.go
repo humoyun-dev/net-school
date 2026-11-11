@@ -39,6 +39,10 @@ const (
 	// tozalanadi; bloklash paytida esa yiqilgan Ctrl+Alt+Del va process guard shu oraliqda qayta yoqiladi
 	// (cad.RetryInterval bilan bir xil: har urinish sekin PowerShell bo'lishi mumkin).
 	CleanupInterval = cad.RetryInterval
+	// LogonGrace yangi sessiyada process guard baseline'i explorer paydo bo'lguncha, lekin sessiya ko'ringanidan
+	// ko'pi bilan shuncha kutadi: bloklash kirishdan oldin boshlangan bo'lsa userinit, explorer, sihost hali
+	// ishga tushmagan va baseline'ga kirmagan bo'lardi (ular har 250 ms o'ldirilib, ish stoli yuklanmasdi).
+	LogonGrace = 60 * time.Second
 	// StopTimeout to'xtatishda Ctrl+Alt+Del'ni qaytarish uchun yangi ctx muddati.
 	StopTimeout = 30 * time.Second
 )
@@ -117,9 +121,10 @@ type Sessions interface {
 }
 
 // Shell bloklashdan keyin sessiyada explorer.exe borligini ta'minlaydi (process guard bloklash paytida qayta
-// ishga tushgan explorer'ni to'xtatadi).
+// ishga tushgan explorer'ni to'xtatadi) va kirish paytida explorer paydo bo'lganini aytadi (LogonGrace).
 type Shell interface {
 	Ensure(s Session) error
+	Running(s Session) (bool, error)
 }
 
 // Clock monoton vaqt (lock.Clock'ning Uptime qismi).
@@ -167,10 +172,14 @@ type Service struct {
 	// emas: ishlayotgan Scanner snapshot yiqilganda ham `failed` deydi, uni qayta Start qilish esa bloklash o'rtasida
 	// yangi baseline olardi (bloklash paytida ochilgan dasturlar dars oxirigacha ruxsat etilgan bo'lib qolardi).
 	pgStartErr error
+	// pgDeferred process guard baseline'i explorer (yoki LogonGrace) kutilmoqda.
+	pgDeferred bool
 
 	sessionKnown bool
 	hasSession   bool
 	session      Session
+	// sessionSince joriy sessiya birinchi ko'ringan payt (uptime).
+	sessionSince time.Duration
 
 	mesh string
 
@@ -257,10 +266,13 @@ func (s *Service) Step(ctx context.Context) {
 	s.note("lock.json", s.d.Lock.StoreErr())
 
 	if s.notify.Swap(false) || due(&s.nextSession, now, SessionPollInterval) {
-		s.checkSession()
+		s.checkSession(now)
 	}
 
 	locked := s.d.Lock.Locked()
+	if locked && s.locked && s.hasSession && s.pgDeferred {
+		s.startProcGuardWhenReady(now)
+	}
 	switch {
 	case locked && !s.locked:
 		s.engage(ctx, now)
@@ -316,7 +328,7 @@ func (s *Service) Stop() {
 }
 
 // checkSession faol sessiyani so'raydi va o'zgargan bo'lsa (yoki birinchi marta) hamma narsani ko'chiradi.
-func (s *Service) checkSession() {
+func (s *Service) checkSession(now time.Duration) {
 	sess, ok, err := s.d.Sessions.ActiveConsole()
 	s.note("faol sessiya", err)
 	if err != nil {
@@ -328,7 +340,7 @@ func (s *Service) checkSession() {
 	if s.sessionKnown && ok == s.hasSession && sess == s.session {
 		return
 	}
-	s.sessionKnown, s.hasSession, s.session = true, ok, sess
+	s.sessionKnown, s.hasSession, s.session, s.sessionSince = true, ok, sess, now
 	s.d.Companion.Move(sess, ok)
 	s.d.GuardProc.Move(sess, ok)
 	if s.locked {
@@ -337,7 +349,7 @@ func (s *Service) checkSession() {
 		s.stopProcGuard()
 		if ok {
 			s.applyPolicy()
-			s.startProcGuard(sess.ID)
+			s.startProcGuardWhenReady(now)
 		} else {
 			s.policyState = hub.ComponentOff
 		}
@@ -355,7 +367,7 @@ func (s *Service) engage(ctx context.Context, now time.Duration) {
 	s.d.Guard.Set(true)
 	if s.hasSession {
 		s.applyPolicy()
-		s.startProcGuard(s.session.ID)
+		s.startProcGuardWhenReady(now)
 	}
 	s.nextDrift = now + DriftInterval
 	s.nextCleanup = now + CleanupInterval
@@ -400,6 +412,23 @@ func (s *Service) startProcGuard(id uint32) {
 func (s *Service) stopProcGuard() {
 	s.d.ProcGuard.Stop()
 	s.pgStartErr = nil
+	s.pgDeferred = false
+}
+
+// startProcGuardWhenReady baseline'ni sessiyada explorer bo'lsa yoki sessiya LogonGrace'dan beri ko'rinib tursa
+// oladi; aks holda kechiktiradi (Step har soniyada qayta tekshiradi). Klaviatura guard'i, siyosat va Ctrl+Alt+Del
+// kutmaydi. Kutish paytida process guard `off` (panelda `soft`).
+func (s *Service) startProcGuardWhenReady(now time.Duration) {
+	if now-s.sessionSince < LogonGrace {
+		running, err := s.d.Shell.Running(s.session)
+		s.note("explorer tekshiruvi", err)
+		if err != nil || !running {
+			s.pgDeferred = true
+			return
+		}
+	}
+	s.pgDeferred = false
+	s.startProcGuard(s.session.ID)
 }
 
 func (s *Service) restorePolicy() {

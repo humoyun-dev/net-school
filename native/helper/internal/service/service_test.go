@@ -227,9 +227,18 @@ type fakeSessions struct {
 
 func (f *fakeSessions) ActiveConsole() (Session, bool, error) { return f.s, f.ok, f.err }
 
-type fakeShell struct{ ensured []string }
+// fakeShell: explorer sessiyada bor (noExplorer false bo'lsa).
+type fakeShell struct {
+	ensured    []string
+	noExplorer bool
+	checks     int
+}
 
 func (f *fakeShell) Ensure(s Session) error { f.ensured = append(f.ensured, s.UserSID); return nil }
+func (f *fakeShell) Running(Session) (bool, error) {
+	f.checks++
+	return !f.noExplorer, nil
+}
 
 type logRecorder struct {
 	mu    sync.Mutex
@@ -714,5 +723,76 @@ func TestTransientScanFailureDoesNotRebaseline(t *testing.T) {
 	h.steps(int(2*CleanupInterval/time.Second) + 1)
 	if !slices.Equal(h.procGuard.starts, []uint32{2}) || h.procGuard.stops != 0 {
 		t.Fatalf("ishlayotgan Scanner qayta baseline oldi: starts=%v stops=%d", h.procGuard.starts, h.procGuard.stops)
+	}
+}
+
+// Bloklash kirishdan oldin boshlangan: kirish paytida process guard baseline'i explorer paydo bo'lguncha kutadi
+// (userinit/explorer/sihost o'ldirilmasin), klaviatura guard'i va siyosat esa darhol.
+func TestLogonDuringLockDefersProcGuardUntilExplorer(t *testing.T) {
+	h := newHarnessWith(t, func(h *harness) { h.sessions.ok = false })
+	h.hub.lock(120)
+	h.steps(2)
+	if !h.guard.locked || len(h.procGuard.starts) != 0 {
+		t.Fatalf("sessiyasiz: guard=%v ProcGuard.Start=%v", h.guard.locked, h.procGuard.starts)
+	}
+	// O'quvchi kirdi, explorer hali yo'q.
+	h.sessions.ok = true
+	h.shell.noExplorer = true
+	h.svc.NotifySessionChange()
+	h.steps(10)
+	if len(h.policy.applied) == 0 || h.policy.applied[0] != sidA || !h.guard.locked {
+		t.Fatalf("siyosat yoki guard darhol yoqilmadi: Apply=%v guard=%v", h.policy.applied, h.guard.locked)
+	}
+	if len(h.procGuard.starts) != 0 {
+		t.Fatalf("explorer yo'q, baseline olinmasligi kerak: %v", h.procGuard.starts)
+	}
+	if st := h.lastReport(); st.ProcessGuard != hub.ComponentOff {
+		t.Fatalf("kutish paytida processGuard = %q", st.ProcessGuard)
+	}
+	// Explorer paydo bo'ldi: keyingi Step'da baseline.
+	h.shell.noExplorer = false
+	h.steps(1)
+	if !slices.Equal(h.procGuard.starts, []uint32{2}) {
+		t.Fatalf("explorer'dan keyin ProcGuard.Start = %v", h.procGuard.starts)
+	}
+	h.steps(3)
+	if len(h.procGuard.starts) != 1 {
+		t.Fatalf("baseline qayta olinmasligi kerak: %v", h.procGuard.starts)
+	}
+}
+
+// Explorer umuman chiqmasa (boshqa shell, yiqilgan) baseline sessiya paydo bo'lganidan 60 s keyin olinadi.
+func TestLogonDuringLockStartsProcGuardAfterGrace(t *testing.T) {
+	h := newHarnessWith(t, func(h *harness) { h.sessions.ok = false })
+	h.hub.lock(600)
+	h.steps(1)
+	h.sessions.ok = true
+	h.shell.noExplorer = true
+	h.svc.NotifySessionChange()
+	h.steps(int(LogonGrace/time.Second) - 1)
+	if len(h.procGuard.starts) != 0 {
+		t.Fatalf("muddatdan oldin ProcGuard.Start = %v", h.procGuard.starts)
+	}
+	h.steps(2)
+	if !slices.Equal(h.procGuard.starts, []uint32{2}) {
+		t.Fatalf("60 s dan keyin ProcGuard.Start = %v", h.procGuard.starts)
+	}
+}
+
+// Kutish paytida bloklash tugasa yoki foydalanuvchi chiqsa baseline olinmaydi.
+func TestDeferredProcGuardCancelledOnUnlock(t *testing.T) {
+	h := newHarnessWith(t, func(h *harness) { h.sessions.ok = false })
+	h.hub.lock(120)
+	h.steps(1)
+	h.sessions.ok = true
+	h.shell.noExplorer = true
+	h.svc.NotifySessionChange()
+	h.steps(2)
+	h.hub.unlock()
+	h.steps(6)
+	h.shell.noExplorer = false
+	h.steps(70)
+	if len(h.procGuard.starts) != 0 {
+		t.Fatalf("ochilgandan keyin ProcGuard.Start = %v", h.procGuard.starts)
 	}
 }
