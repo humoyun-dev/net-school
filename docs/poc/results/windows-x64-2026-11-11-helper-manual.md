@@ -9,7 +9,13 @@ Sana: — · Kompyuter: — · Windows nashri va versiyasi (`winver`, Education/
 - Sinov **standart (admin emas) o'quvchi hisobida** o'tkaziladi (risk #17). Admin amallari (o'rnatish, majburan o'ldirish, `uninstall`) alohida admin hisobidan yoki "Запуск от имени администратора" bilan; har qatorda kim bajargani yoziladi.
 - Paket katalogi o'quvchi yoza olmaydigan joyda bo'lsin (masalan, admin yaratgan `C:\Users\<admin>\Downloads\netschool`); `uninstall.cmd` shu katalogdan ishga tushiriladi.
 - Vaqt o'lchovlari telefon soati bilan (laptop soati hub'dan farq qilishi mumkin, 2026-11-09 natijasi).
-- Bloklash panelda `overlay.lock` bilan yuboriladi. Har bandda panel ko'rsatgan `classroom.overlay` darajasi va sababi, `classroom.sas_block` holati yoziladi.
+- Bloklash panelda `overlay.lock` bilan yuboriladi. Panel daraja va `sas_block`ni ko'rsatmaydi, ularni API javobidan o'qing (quyidagi «Daraja so'rovi»). Kerakli bandlarda `classroom.overlay` (`enforcement`, `reason`) va `classroom.sas_block` (`state`, `reason`) yoziladi.
+- **Daraja so'rovi.** Hub `GET /api/v1/rooms/<roomId>/devices` javobida, qurilmaning `capabilities.capabilities["classroom.overlay"]` va `["classroom.sas_block"]` maydonlari. Eng oson yo'l: panelga kirilgan brauzerda DevTools → Console:
+  ```js
+  const r = await fetch('/api/v1/rooms/<roomId>/devices').then((x) => x.json());
+  r.devices.filter((d) => d.hostname === '<hostname>').map((d) => ({ overlay: d.capabilities?.capabilities['classroom.overlay'], sas: d.capabilities?.capabilities['classroom.sas_block'] }));
+  ```
+  `<roomId>` panel manzilidan yoki DevTools → Network'dagi `.../rooms/<id>/devices` so'rovidan olinadi. curl bilan: DevTools → Application → Cookies'dan `__Host-ns_sid` qiymatini olib, `curl --cacert hub-ca.pem -H "Cookie: __Host-ns_sid=<qiymat>" https://<hub>/api/v1/rooms/<roomId>/devices` (javobdagi o'sha maydonlar). Helper hisoboti 90 s dan eski bo'lsa daraja `soft` + `helper_missing` bo'ladi; o'zgarishdan keyin ~10 s kutib so'rang.
 - Holat tekshiruvlari (admin cmd): `sc query NetSchoolHelper`, `sc qc NetSchoolHelper`, `sc sdshow NetSchoolHelper`, `sc qfailure NetSchoolHelper`, `icacls`, `reg query`, Event Viewer → Application → manba `NetSchoolHelper`.
 
 ## Tayyorgarlik (bajarilsa ✓)
@@ -24,14 +30,14 @@ Holat ustuni: `pending` | `ha` | `yo'q` | `qisman`. Hozir hammasi `pending`.
 
 | # | Band | Kutilgan natija | Holat | Izoh / dalil |
 |---|---|---|---|---|
-| 1 | O'rnatish: admin `enroll.cmd --hub https://<hub> --ca <hub-ca.pem>` (token `NETSCHOOL_ENROLL_TOKEN` orqali) | enroll helper kalitini `netschool-helper helper-key` bilan yaratadi (token stdin orqali), claim'dan keyin `set-hub` (CA stdin orqali), so'ng `install`; chiqish kodi 0; panelda qurilma va `classroom.overlay`, `classroom.sas_block` ko'rinadi | pending | |
+| 1 | O'rnatish: admin `enroll.cmd --hub https://<hub> --ca <hub-ca.pem>` (token `NETSCHOOL_ENROLL_TOKEN` orqali) | enroll helper kalitini `netschool-helper helper-key` bilan yaratadi (token stdin orqali), claim'dan keyin `set-hub` (CA stdin orqali), so'ng `install`; chiqish kodi 0; panelda qurilma ko'rinadi; daraja so'rovida `classroom.overlay` (bloklashsiz: `hard`) va `classroom.sas_block` bor | pending | |
 | 2 | Xizmat parametrlari: `sc qc`, `sc qfailure`, `sc sdshow NetSchoolHelper` | `NetSchoolHelper`, `NetSchool Helper`, `AUTO_START`, `LocalSystem`; recovery 1 s / 1 s / 5 s, reset 86400; SDDL ADR 0014'dagi bilan aynan | pending | |
 | 3 | Katalog ACL'i: `icacls "%ProgramData%\NetSchool\helper"` va `icacls "%ProgramFiles%\NetSchool"` | helper katalogi: faqat `NT AUTHORITY\SYSTEM` va `BUILTIN\Administrators` (meros yo'q, Users o'qiy olmaydi); `%ProgramFiles%\NetSchool`: Users faqat o'qish/bajarish (`RX`), yozish faqat SYSTEM/Administrators | pending | |
 | 4 | O'quvchi `sc stop NetSchoolHelper` | «Отказано в доступе» (5); xizmat ishlayveradi | pending | |
 | 5 | O'quvchi Vazifalar menejerida `netschool-helper.exe` (xizmat va guard) ni yopishga urinadi | «Отказано в доступе»; ikkalasi ham yashaydi | pending | |
 | 6 | O'quvchi Companion'ni Vazifalar menejeridan yopadi (bloklashsiz) | ≤ 3 s da qaytadi (telefon soati) | pending | |
 | 7 | O'quvchi `HKCU\Software\Microsoft\Windows\CurrentVersion\Policies` ga yozishga urinadi (`reg add ...\Policies\System /v DisableTaskMgr /t REG_SZ /d x`) | rad etiladi. Agar yozilsa — topilma: REG_SZ qiymat siyosat `Apply`ni yiqitadi (`policy_failed`) | pending | |
-| 8 | Bloklash: panel darajasi | `classroom.overlay`: `hard`; Education/Enterprise'da `classroom.sas_block`: `available`, Pro/Home'da `unsupported` (`edition`) | pending | |
+| 8 | Bloklash: daraja so'rovi (API) | `classroom.overlay`: `hard`; Education/Enterprise'da `classroom.sas_block`: `available`, Pro/Home'da `unsupported` (`edition`) | pending | |
 | 9 | Bloklashda o'quvchi klaviaturasi: Win, Alt+Tab, Ctrl+Esc, Ctrl+Shift+Esc, Alt+F4, Alt+Space (ko'p marta ketma-ket) | hammasi to'siladi | pending | |
 | 10 | Bloklashda Ctrl+Alt+Del ekrani (Pro/Home) | ekran ochiladi, lekin Vazifalar menejeri, Qulflash, Chiqish, Parolni o'zgartirish, foydalanuvchini almashtirish, quvvat tugmasi yo'q; faqat «Отмена» | pending | |
 | 11 | Ishonchsiz katalog (tayyorgarlik 2) | install o'quvchi yaratgan `%ProgramData%\NetSchool` ni o'chirib qayta yaratdi; helper katalogi tekshiruvdan o'tdi (jurnalda xato yo'q, panelda helper holati keladi) | pending | |
@@ -42,11 +48,11 @@ Holat ustuni: `pending` | `ha` | `yo'q` | `qisman`. Hozir hammasi `pending`.
 | 16 | Process guard: oldin ochilgan Vazifalar menejeri | bloklash boshlanishi bilan yopiladi | pending | |
 | 17 | Process guard: yangi dastur (Win+R yo'q, shuning uchun brauzerdan yuklangan `.exe` yoki ish stolidagi yorliq) | ochilmaydi (o'ldiriladi) | pending | |
 | 18 | Process guard: qaysi shell/UWP jarayonlari o'ldirildi (RuntimeBroker, SearchHost, TextInputHost, StartMenuExperienceHost, dllhost, boshqalar) | ro'yxat yoziladi (Event Viewer / Process Explorer); kerak bo'lsa ruxsat ro'yxati keyin kengaytiriladi | pending | |
-| 19 | Ochish | hammasi qaytadi: tugmalar, Ctrl+Alt+Del bandlari, siyosatlar (`reg query HKU\<SID>\...\Policies`), explorer (o'ldirilgan bo'lsa qayta ishga tushirilgan), yangi dasturlar ochiladi; panel `soft` + `lock_inactive` | pending | |
+| 19 | Ochish | hammasi qaytadi: tugmalar, Ctrl+Alt+Del bandlari, siyosatlar (`reg query HKU\<SID>\...\Policies`), explorer (o'ldirilgan bo'lsa qayta ishga tushirilgan), yangi dasturlar ochiladi; daraja so'rovida `classroom.overlay`: `hard` (bloklash yo'q va hech bir komponent yiqilmagan) | pending | |
 | 20 | Bloklangan holda hub to'xtatiladi (`docker compose stop api`) | ~120 s da hammasi qaytadi (telefon soati bilan vaqt, lease); hub qaytgach bloklash qayta qo'llanadi | pending | |
 | 21 | Bloklangan holda admin helper xizmatini majburan o'ldiradi (`taskkill /f /pid <xizmat PID>`) | xizmat 1 s da qaytadi; bloklash shu boot ichida tiklanadi (`lock.json`), siyosat to'g'ri (ortiqcha yoki yo'qolgan qiymat yo'q) | pending | |
 | 22 | Bloklangan holda reboot | boot'dan keyin saqlangan bloklash **tiklanmaydi** (boot ID boshqa); hub hali bloklangan bo'lsa, hub so'rovidan keyin qayta qo'llanadi; Companion va guard o'quvchi kirgach ishga tushadi | pending | |
-| 23 | Admin `sc stop "Mesh Agent"` | ≤ 15 s da qayta ishga tushadi; panel helper holatida `meshAgent: restarted` | pending | |
+| 23 | Admin `sc stop "Mesh Agent"` | ≤ 15 s da qayta ishga tushadi: `sc query "Mesh Agent"` → `RUNNING` (telefon soati bilan vaqt); Event Viewer → System'da Service Control Manager to'xtash/ishga tushish yozuvlari, Application'da manba `NetSchoolHelper` dan `MeshAgent:` xatosi yo'q | pending | |
 | 24 | `CreateProcessAsUser` xatosi | Companion yoki guard 1314 (`ERROR_PRIVILEGE_NOT_HELD`) bilan ishga tushmasa — yoziladi (`SeAssignPrimaryTokenPrivilege`/`SeIncreaseQuotaPrivilege` yoqish kerak) | pending | |
 | 25 | Keyboard Filter (faqat Education/Enterprise): bloklashda Ctrl+Alt+Del va Win+L | ikkalasi umuman ishlamaydi; ochishda qaytadi | pending | |
 | 26 | Keyboard Filter: bloklangan holda kompyuterni tok/tugma bilan majburan o'chirish, keyin yoqish | boot'dan keyin filtr tozalangan (Ctrl+Alt+Del ishlaydi), `cad-journal.json` bo'yicha | pending | |

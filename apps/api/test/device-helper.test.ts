@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { deviceSchema } from '@netschool/contracts';
+import { deviceSchema, MAX_CAPABILITIES } from '@netschool/contracts';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { z } from 'zod';
@@ -340,16 +340,25 @@ describe('helper enforcement level', () => {
   };
   const reportHelper = async (body: unknown) => expect((await asHelper('PUT', STATUS, body)).status).toBe(204);
 
+  // Faol dars va overlay.lock: hub bo'yicha qurilma bloklangan.
+  const lockDevice = async () => {
+    expect((await asCompanion('POST', HEARTBEAT, {})).status).toBe(200);
+    const lessonId = (await startLesson(app, teacher, roomId)).json.id;
+    expect((await issueCommand(app, teacher, lessonId, { type: 'overlay.lock', payload: {} })).status).toBe(202);
+    expect((await asHelper('GET', LOCK_STATE)).json.locked).toBe(true);
+    return lessonId as string;
+  };
+
   test('overlay is hard only when the helper reports every component active', async () => {
-    // Companion o'zi soft desa ham, yangi helper hisobotida hammasi active bo'lsa — hard.
     expect(
       (await asCompanion('PUT', CAPABILITIES, windowsReport({ state: 'available', enforcement: 'soft' }))).status,
     ).toBe(204);
+    const lessonId = await lockDevice();
+    // Bloklangan: uchalasi active — hard (Companion o'zi soft desa ham).
     await reportHelper(active);
     expect((await capabilities())['classroom.overlay']).toEqual({ state: 'available', enforcement: 'hard' });
-
-    // Birinchi yiqilgan komponent sabab bo'ladi (hook → policy → processGuard).
-    await reportHelper({ ...active, processGuard: 'failed' });
+    // Bloklangan: active bo'lmagan birinchi komponent sabab (hook → policy → processGuard); `off` ham yiqilgan.
+    await reportHelper({ ...active, processGuard: 'off' });
     expect((await capabilities())['classroom.overlay']).toEqual({
       state: 'available',
       enforcement: 'soft',
@@ -357,15 +366,13 @@ describe('helper enforcement level', () => {
     });
     await reportHelper({ ...active, policy: 'failed', processGuard: 'failed' });
     expect((await capabilities())['classroom.overlay']).toMatchObject({ enforcement: 'soft', reason: 'policy_failed' });
-    await reportHelper({ ...active, hook: 'failed', policy: 'failed' });
+    await reportHelper({ ...active, hook: 'off', policy: 'failed' });
     expect((await capabilities())['classroom.overlay']).toMatchObject({ enforcement: 'soft', reason: 'hook_failed' });
-    // Bloklash yo'q (komponentlar off): hard isbotlanmagan, lekin yiqilgan komponent ham yo'q.
+    // Daraja komponentlardan emas, hub bloklash holatidan: ochilgach o'sha `off`lar hard.
     await reportHelper({ ...active, hook: 'off', policy: 'off', processGuard: 'off' });
-    expect((await capabilities())['classroom.overlay']).toEqual({
-      state: 'available',
-      enforcement: 'soft',
-      reason: 'lock_inactive',
-    });
+    expect((await capabilities())['classroom.overlay']).toMatchObject({ enforcement: 'soft', reason: 'hook_failed' });
+    expect((await issueCommand(app, teacher, lessonId, { type: 'overlay.unlock', payload: {} })).status).toBe(202);
+    expect((await capabilities())['classroom.overlay']).toEqual({ state: 'available', enforcement: 'hard' });
     // Saqlangan Companion hisoboti o'zgarmaydi: daraja faqat o'qishda hisoblanadi.
     const [stored] = await app.db.db.select().from(deviceCapabilities).where(eq(deviceCapabilities.deviceId, deviceId));
     expect(
@@ -374,6 +381,65 @@ describe('helper enforcement level', () => {
       state: 'available',
       enforcement: 'soft',
     });
+  });
+
+  test('unlocked overlay is hard unless a component failed', async () => {
+    expect(
+      (await asCompanion('PUT', CAPABILITIES, windowsReport({ state: 'available', enforcement: 'soft' }))).status,
+    ).toBe(204);
+    // Bloklash yo'q, hammasi off — hard.
+    await reportHelper({ ...active, hook: 'off', policy: 'off', processGuard: 'off' });
+    expect((await capabilities())['classroom.overlay']).toEqual({ state: 'available', enforcement: 'hard' });
+    // Bloklash yo'q, bittasi failed — soft + o'sha komponent.
+    await reportHelper({ ...active, hook: 'off', policy: 'failed', processGuard: 'off' });
+    expect((await capabilities())['classroom.overlay']).toEqual({
+      state: 'available',
+      enforcement: 'soft',
+      reason: 'policy_failed',
+    });
+  });
+
+  test('an invalid stored helper status counts as missing', async () => {
+    expect(
+      (await asCompanion('PUT', CAPABILITIES, windowsReport({ state: 'available', enforcement: 'hard' }))).status,
+    ).toBe(204);
+    await app.db.db
+      .update(devices)
+      .set({ helperStatus: { ...active, hook: 'maybe' }, helperStatusAt: new Date(now) })
+      .where(eq(devices.id, deviceId));
+    const caps = await capabilities();
+    expect(caps['classroom.overlay']).toEqual({ state: 'available', enforcement: 'soft', reason: 'helper_missing' });
+    expect(caps['classroom.sas_block']).toEqual({ state: 'unsupported', reason: 'helper_missing' });
+  });
+
+  test('hub-owned keys keep a full report within the capability limit', async () => {
+    // Faqat harflar: a..z x a..z.
+    const letters = 'abcdefghijklmnopqrstuvwxyz';
+    const names = Array.from({ length: 62 }, (_, i) => `extra.${letters[Math.floor(i / 26)]}${letters[i % 26]}`);
+    const full = windowsReport({ state: 'available', enforcement: 'soft' });
+    for (const name of names) (full.capabilities as Record<string, unknown>)[name] = { state: 'available' };
+    expect(Object.keys(full.capabilities)).toHaveLength(MAX_CAPABILITIES);
+    expect((await asCompanion('PUT', CAPABILITIES, full)).status).toBe(204);
+    await reportHelper(active);
+    // capabilities() javobni deviceSchema bilan tekshiradi.
+    const caps = await capabilities();
+    expect(Object.keys(caps)).toHaveLength(MAX_CAPABILITIES);
+    expect(caps['classroom.sas_block']).toEqual({ state: 'available' });
+    expect(caps['classroom.overlay']).toBeDefined();
+    expect(caps['classroom.message']).toBeDefined();
+    // Tartiblangan ro'yxatning oxirgi classroom.* bo'lmagan kaliti tashlanadi.
+    expect(caps[names.at(-1) as string]).toBeUndefined();
+    expect(caps[names.at(-2) as string]).toBeDefined();
+
+    // Faqat classroom.* kalitlari bilan to'la hisobot: joy yo'q, sas_block qo'shilmaydi, chegara buzilmaydi.
+    const own = windowsReport({ state: 'available', enforcement: 'soft' });
+    for (const name of names.map((n) => n.replace('extra.', 'classroom.'))) {
+      (own.capabilities as Record<string, unknown>)[name] = { state: 'available' };
+    }
+    expect((await asCompanion('PUT', CAPABILITIES, own)).status).toBe(204);
+    const ownCaps = await capabilities();
+    expect(Object.keys(ownCaps)).toHaveLength(MAX_CAPABILITIES);
+    expect(ownCaps['classroom.sas_block']).toBeUndefined();
   });
 
   test('a stale helper status falls back to soft', async () => {

@@ -16,9 +16,11 @@ ADR 0013 ko'rsatdiki, o'quvchi huquqidagi Companion kuchli bloklashni ta'minlay 
 - **Claim.** Enrollment claim'ida ixtiyoriy `helperPublicKey` + `helperProof` (helper kaliti bilan imzolangan `NSCLAIM1\n<token>\n<helperPublicKey>`). Ikkalasi birga keladi yoki umuman kelmaydi.
 - **Helper holati.** Helper komponentlar holatini `PUT /api/v1/device/helper/status` bilan yuboradi. Hub faqat oxirgisini va qabul vaqtini saqlaydi (`devices.helper_status`, `helper_status_at`), har hisobotga audit yozmaydi.
 - **Panel darajasi.** Hub `classroom.overlay` darajasini helper holatidan hisoblaydi (saqlangan Companion hisoboti o'zgarmaydi):
-  - helper hisoboti ≤ 90 s eski bo'lsa: `hard` faqat `hook`, `policy`, `processGuard` uchalasi `active` bo'lganda. Aks holda `soft` + birinchi yiqilgan komponent (`hook_failed` | `policy_failed` | `process_guard_failed`). Yiqilgan komponent yo'q, lekin hammasi `active` ham emas (bloklash yo'q, komponentlar `off`) bo'lsa `soft` + `lock_inactive`: kuchli bloklash hali isbotlanmagan;
-  - helper hisoboti yo'q yoki eski bo'lsa: Companion hisoboti, lekin hech qachon `hard` emas (`hard` → `soft` + `helper_missing`). Companion yolg'iz o'zi `soft` (2-band).
-- **`classroom.sas_block`.** Yangi capability, faqat hub hisoblaydi (Companion yuborgani e'tiborsiz qoldiriladi), faqat Windows qurilmalarida: `cad=blocked|off` → `available`; `unavailable` → `unsupported` (`reason: edition`); `failed` → `unsupported` (`reason: failed`); helper hisoboti yo'q/eski → `unsupported` (`reason: helper_missing`). Shu uchun capability nomlarida segment ichidagi `_` ruxsat etildi (`packages/contracts`).
+  - helper hisoboti ≤ 90 s eski bo'lsa, daraja hub'ning o'z bloklash holatiga bog'liq (faol dars overlay'i yopiqmi — helper `lock-state` bilan bir xil manba; komponent holatlaridan taxmin qilinmaydi):
+    - bloklash yo'q: hech bir komponent `failed` bo'lmasa `hard` (bloklashsiz komponentlar `off` bo'ladi); biri `failed` bo'lsa `soft` + o'sha komponentning sababi (`hook_failed` | `policy_failed` | `process_guard_failed`);
+    - bloklangan: `hook`, `policy`, `processGuard` uchalasi `active` bo'lsa `hard`; aks holda `soft` + `active` bo'lmagan birinchi komponentning (hook → policy → processGuard tartibida) `*_failed` sababi;
+  - helper hisoboti yo'q, eski yoki yaroqsiz (saqlangan holat `helperStatusSchema`dan o'tmasa) bo'lsa: Companion hisoboti, lekin hech qachon `hard` emas (`hard` → `soft` + `helper_missing`). Companion yolg'iz o'zi `soft` (2-band).
+- **`classroom.sas_block`.** Yangi capability, faqat hub hisoblaydi (Companion yuborgani e'tiborsiz qoldiriladi), faqat Windows qurilmalarida. Hub qo'shadigan kalit hisobotni `MAX_CAPABILITIES` (64) dan oshirmasligi uchun Companion'ning `classroom.*` bo'lmagan kalitlari tartiblangan ro'yxat oxiridan tashlanadi (joy bo'lmasa `sas_block` qo'shilmaydi): aks holda panelning `deviceSchema`si butun xona ro'yxatini rad etardi. Qiymatlar: `cad=blocked|off` → `available`; `unavailable` → `unsupported` (`reason: edition`); `failed` → `unsupported` (`reason: failed`); helper hisoboti yo'q/eski → `unsupported` (`reason: helper_missing`). Shu uchun capability nomlarida segment ichidagi `_` ruxsat etildi (`packages/contracts`).
 
 ### 2. Injected tugmalar (avvalgi qoidadan chetlanish)
 
@@ -33,7 +35,7 @@ Helper Companion'ni o'quvchi tokeni bilan, guard'ni SYSTEM tokeni bilan ishga tu
 Bloklash boshlanganda o'quvchi sessiyasidagi jarayonlar baseline sifatida olinadi. Har 250 ms:
 
 - boshqa sessiya, PID 0/4 → tegilmaydi;
-- `%ProgramFiles%\NetSchool\`, `%ProgramFiles%\Mesh Agent\` ichidagi yoki ruxsat ro'yxatidagi tizim jarayonlari (`System32` dagi `conhost`, `dwm`, `csrss`, `fontdrvhost`, `ctfmon`, `LogonUI`, `consent`, `WerFault`, `SystemSettingsBroker`; `TextInputHost`) → tegilmaydi;
+- `%ProgramFiles%\NetSchool\`, `%ProgramFiles%\Mesh Agent\` ichidagi yoki ruxsat ro'yxatidagi tizim jarayonlari (`System32` dagi `conhost`, `dwm`, `csrss`, `fontdrvhost`, `ctfmon`, `LogonUI`, `consent`, `WerFault`, `SystemSettingsBroker`; `%SystemRoot%\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\TextInputHost.exe`) → tegilmaydi;
 - `System32\taskmgr.exe` → baseline'da bo'lsa ham o'ldiriladi;
 - baseline'dagi jarayon → yashaydi (o'quvchining ochiq ishi);
 - baseline'da bo'lmagan jarayon faqat **bir xil dastur avlodi** bo'lsa yashaydi: ota zanjiri tirik baseline ajdodga yetadi va zanjirdagi hamma jarayon aynan shu exe (masalan, brauzerning yangi tablari). Rejadagi "baseline avlodi, explorer/taskmgr/sihost/RuntimeBroker'dan keyin emas" qoidasi shu bilan almashtirildi;

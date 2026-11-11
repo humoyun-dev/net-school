@@ -91,11 +91,16 @@ export class DevicesService {
       siteId,
       rows.some((r) => r.meshNodeId !== null),
     );
+    const locked = await this.lockedDevices(
+      this.db,
+      rows.map((r) => r.device.id),
+    );
     return rows.map((r) =>
       this.present(
         r.device,
         (r.report as CapabilityReport | null) ?? null,
         r.meshNodeId === null ? 'unbound' : agents ? (agents.get(r.meshNodeId) ? 'online' : 'offline') : 'unknown',
+        locked.has(r.device.id),
       ),
     );
   }
@@ -132,7 +137,13 @@ export class DevicesService {
       await this.ok(tx, ctx, 'device.assign_room', row, { roomId, previousRoomId: device.roomId });
       const [caps] = await tx.select().from(deviceCapabilities).where(eq(deviceCapabilities.deviceId, row.id));
       const [binding] = await tx.select().from(meshBindings).where(eq(meshBindings.deviceId, row.id));
-      return this.present(row, (caps?.report as CapabilityReport | undefined) ?? null, binding ? 'unknown' : 'unbound');
+      const locked = await this.lockedDevices(tx, [row.id]);
+      return this.present(
+        row,
+        (caps?.report as CapabilityReport | undefined) ?? null,
+        binding ? 'unknown' : 'unbound',
+        locked.has(row.id),
+      );
     });
     this.outbox.kick();
     return assigned;
@@ -226,7 +237,26 @@ export class DevicesService {
     }
   }
 
-  present(row: DeviceRow, report: CapabilityReport | null, agent: Device['agent']): Device {
+  // Hub bo'yicha hozir bloklangan qurilmalar: faol darsdagi overlay'i yopiq a'zolar (PresenceService.#activeLock bilan
+  // bir xil manba). Bitta so'rov bilan butun ro'yxat uchun.
+  async lockedDevices(db: Db, deviceIds: string[]): Promise<Set<string>> {
+    if (deviceIds.length === 0) return new Set();
+    const rows = await db
+      .select({ deviceId: lessonDevices.deviceId })
+      .from(lessonDevices)
+      .innerJoin(lessons, eq(lessons.id, lessonDevices.lessonId))
+      .where(
+        and(
+          inArray(lessonDevices.deviceId, deviceIds),
+          isNull(lessonDevices.releasedAt),
+          eq(lessons.status, 'active'),
+          eq(lessonDevices.overlayLocked, true),
+        ),
+      );
+    return new Set(rows.map((r) => r.deviceId));
+  }
+
+  present(row: DeviceRow, report: CapabilityReport | null, agent: Device['agent'], locked: boolean): Device {
     const last = row.lastHeartbeatAt?.getTime() ?? null;
     return {
       id: row.id,
@@ -239,7 +269,7 @@ export class DevicesService {
         lastHeartbeatAt: row.lastHeartbeatAt?.toISOString() ?? null,
       },
       agent,
-      capabilities: effectiveCapabilities(report, row.helperStatus, row.helperStatusAt, this.now()),
+      capabilities: effectiveCapabilities(report, row.helperStatus, row.helperStatusAt, locked, this.now()),
     };
   }
 
