@@ -1,15 +1,15 @@
 import { createPrivateKey } from 'node:crypto';
 import { claimResponseSchema } from '@netschool/contracts';
 import { capabilityReport, type PlatformFacts } from './capabilities.ts';
-import type { HelperPort } from './helper.ts';
+import { checkCaPem, type HelperPort } from './helper.ts';
 import { HubClient } from './hub-client.ts';
 import { claimProof, generateDeviceKey } from './identity.ts';
 import { type DeviceConfig, enrollmentExists, ensureWritable, saveEnrollment } from './machine-store.ts';
 
 export class EnrollError extends Error {
-  readonly code: 'already_enrolled';
+  readonly code: 'already_enrolled' | 'invalid_ca';
 
-  constructor(code: 'already_enrolled', message: string) {
+  constructor(code: 'already_enrolled' | 'invalid_ca', message: string) {
     super(message);
     this.name = 'EnrollError';
     this.code = code;
@@ -39,6 +39,14 @@ export interface EnrollInput {
 export async function enroll(input: EnrollInput): Promise<DeviceConfig> {
   if (!input.force && enrollmentExists(input.dir)) {
     throw new EnrollError('already_enrolled', 'this computer is already enrolled; use --force to enroll it again');
+  }
+  // CA helper `set-hub` bilan bir xil qoida bo'yicha claim'dan OLDIN tekshiriladi: claim'dan keyin rad etilmasin.
+  if (input.ca !== null) {
+    try {
+      checkCaPem(input.ca);
+    } catch (err) {
+      throw new EnrollError('invalid_ca', err instanceof Error ? err.message : 'invalid CA');
+    }
   }
   // Hub'ga murojaatdan oldin: yozib bo'lmasa token sarflanmaydi va hub'da yetim qurilma qolmaydi.
   ensureWritable(input.dir);

@@ -12,7 +12,7 @@ import { seedOrg, seedUser } from '../../api/test/support/seed.ts';
 import { runEnrollCli } from '../src/cli/enroll.ts';
 import type { PlatformFacts } from '../src/core/capabilities.ts';
 import { EnrollError, enroll, sanitizeHostname } from '../src/core/enroll.ts';
-import { HelperError, type HelperPort, helperCli, type RunFile } from '../src/core/helper.ts';
+import { checkCaPem, HelperError, type HelperPort, helperCli, MAX_CA_BYTES, type RunFile } from '../src/core/helper.ts';
 import { HubClient } from '../src/core/hub-client.ts';
 import { claimProof, generateDeviceKey, RequestSigner } from '../src/core/identity.ts';
 import { loadEnrollment } from '../src/core/machine-store.ts';
@@ -135,20 +135,21 @@ describe('enroll', () => {
     await enroll(input(token, tempDir()));
   });
 
-  test('the helper is called with an absolute path, fixed arguments and no shell', async () => {
-    const runs: [string, string[]][] = [];
-    const run: RunFile = async (file, args) => {
-      runs.push([file, args]);
+  // Maxfiy qiymatlar (token, CA) faqat stdin orqali: argv jarayonlar ro'yxatida ko'rinadi.
+  test('the helper is called with an absolute path, fixed arguments, secrets on stdin and no shell', async () => {
+    const runs: [string, string[], string][] = [];
+    const run: RunFile = async (file, args, stdin) => {
+      runs.push([file, args, stdin]);
       return args[0] === 'helper-key'
         ? { code: 0, stdout: '{"helperPublicKey":"AAA","helperProof":"BBB"}\n', stderr: '' }
         : { code: 0, stdout: 'ok\n', stderr: '' };
     };
     const exe = 'C:\\pkg\\netschool-helper.exe';
-    const port = helperCli({ exe, caFile: 'C:\\certs\\hub-ca.pem', rotate: true, run });
+    const port = helperCli({ exe, ca: app.ca, rotate: true, run });
     expect(await port.helperKey('nse_tok')).toEqual({ helperPublicKey: 'AAA', helperProof: 'BBB' });
     await port.setHub('https://hub.school.lan', '0b6f3c1e-8d2a-4c7e-9f10-2a3b4c5d6e7f');
     expect(runs).toEqual([
-      [exe, ['helper-key', '--token', 'nse_tok', '--rotate']],
+      [exe, ['helper-key', '--token-stdin', '--rotate'], 'nse_tok\n'],
       [
         exe,
         [
@@ -157,27 +158,28 @@ describe('enroll', () => {
           'https://hub.school.lan',
           '--device-id',
           '0b6f3c1e-8d2a-4c7e-9f10-2a3b4c5d6e7f',
-          '--ca-file',
-          'C:\\certs\\hub-ca.pem',
+          '--ca-stdin',
         ],
+        app.ca,
       ],
     ]);
+    for (const [, args] of runs) expect(args.join(' ')).not.toContain('nse_tok');
     // CA'siz va --force'siz.
     runs.length = 0;
-    const plain = helperCli({ exe, caFile: null, rotate: false, run });
+    const plain = helperCli({ exe, ca: null, rotate: false, run });
     await plain.helperKey('nse_tok');
     await plain.setHub('https://hub', 'id');
-    expect(runs.map(([, a]) => a)).toEqual([
-      ['helper-key', '--token', 'nse_tok'],
-      ['set-hub', '--origin', 'https://hub', '--device-id', 'id'],
+    expect(runs.map(([, a, i]) => [a, i])).toEqual([
+      [['helper-key', '--token-stdin'], 'nse_tok\n'],
+      [['set-hub', '--origin', 'https://hub', '--device-id', 'id'], ''],
     ]);
-    expect(() => helperCli({ exe: 'netschool-helper.exe', caFile: null, rotate: false, run })).toThrow(/absolute/);
-    expect(() => helperCli({ exe, caFile: 'hub-ca.pem', rotate: false, run })).toThrow(/absolute/);
+    expect(() => helperCli({ exe: 'netschool-helper.exe', ca: null, rotate: false, run })).toThrow(/absolute/);
+    expect(() => helperCli({ exe, ca: 'not a pem', rotate: false, run })).toThrow(/CERTIFICATE/);
 
     // Xato: chiqish kodi va stderr, token xabarda yo'q; kutilmagan stdout rad etiladi.
     const failing = helperCli({
       exe,
-      caFile: null,
+      ca: null,
       rotate: false,
       run: async () => ({
         code: 5,
@@ -191,11 +193,47 @@ describe('enroll', () => {
     expect(String((err as Error).message)).not.toContain('nse_secret');
     const garbage = helperCli({
       exe,
-      caFile: null,
+      ca: null,
       rotate: false,
       run: async () => ({ code: 0, stdout: 'nope', stderr: '' }),
     });
     await expect(garbage.helperKey('t')).rejects.toBeInstanceOf(HelperError);
+  });
+
+  // Go helper `set-hub` bilan bir xil qoida, claim'dan OLDIN: keyin rad etilib, token behuda sarflanmasin.
+  test('the CA is checked with the helper rules before the claim', async () => {
+    expect(() => checkCaPem(app.ca)).not.toThrow();
+    expect(() => checkCaPem(`${app.ca}\n${app.ca}`)).not.toThrow();
+    expect(() => checkCaPem(app.ca.replace(/\n/g, '\r\n'))).not.toThrow();
+    const bad = {
+      empty: '',
+      junkBefore: `junk\n${app.ca}`,
+      junkAfter: `${app.ca}junk`,
+      header: app.ca.replace('-----\n', '-----\nProc-Type: 4,ENCRYPTED\n\n'),
+      key: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIA==\n-----END PRIVATE KEY-----\n',
+      notX509: '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n',
+      tooLarge: 'x'.repeat(MAX_CA_BYTES + 1),
+      bom: `\uFEFF${app.ca}`,
+      nbsp: `${app.ca}\u00a0`,
+    };
+    for (const pem of Object.values(bad)) expect(() => checkCaPem(pem)).toThrow();
+
+    const token = await newToken();
+    const dir = tempDir();
+    await expect(enroll(input(token, dir, { ca: bad.junkBefore }))).rejects.toMatchObject({ code: 'invalid_ca' });
+    expect(readdirSync(dir)).toEqual([]);
+    const badFile = join(tempDir(), 'bad.pem');
+    writeFileSync(badFile, bad.junkAfter);
+    const cli = await runEnrollCli(
+      ['--hub', app.origin, '--ca', badFile, '--token', token],
+      {
+        NETSCHOOL_COMPANION_DIR: tempDir(),
+      },
+      { out: () => {}, err: () => {} },
+    );
+    expect(cli).toBe(2);
+    // Token sarflanmagan.
+    await enroll(input(token, tempDir()));
   });
 
   test('a used or unknown token is rejected and nothing is written', async () => {
@@ -288,8 +326,8 @@ describe('enroll CLI', () => {
     expect(again.text).not.toContain(token);
   });
 
-  test('the CLI hands the helper the absolute CA path and maps helper failures to exit codes', async () => {
-    const seen: { caFile: string | null; rotate: boolean }[] = [];
+  test('the CLI hands the helper the checked CA text and maps helper failures to exit codes', async () => {
+    const seen: { ca: string | null; rotate: boolean }[] = [];
     const runWith = async (argv: string[], port: HelperPort) => {
       const out: string[] = [];
       const code = await runEnrollCli(
@@ -309,7 +347,7 @@ describe('enroll CLI', () => {
     const token = await newToken();
     const done = await runWith(['--hub', app.origin, '--ca', caFile, '--token', token, '--force'], ok.port);
     expect(done.code).toBe(0);
-    expect(seen.at(-1)).toEqual({ caFile, rotate: true });
+    expect(seen.at(-1)).toEqual({ ca: app.ca, rotate: true });
     expect(ok.calls.map((c) => c[0])).toEqual(['helper-key', 'set-hub']);
 
     const keyFails: HelperPort = {
@@ -322,7 +360,7 @@ describe('enroll CLI', () => {
     const denied = await runWith(['--hub', app.origin, '--ca', caFile, '--token', second], keyFails);
     expect(denied.code).toBe(2);
     expect(denied.text).toMatch(/administrator/);
-    expect(seen.at(-1)).toEqual({ caFile, rotate: false });
+    expect(seen.at(-1)).toEqual({ ca: app.ca, rotate: false });
 
     // Bir helper kaliti hub'da faqat bitta qurilmada (unique): yangi kalit bilan.
     const hubFails: HelperPort = {

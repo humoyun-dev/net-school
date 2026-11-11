@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { X509Certificate } from 'node:crypto';
 import { isAbsolute, win32 } from 'node:path';
 import { z } from 'zod';
 
@@ -37,15 +38,17 @@ const base64url = z
   .max(128);
 const helperClaimSchema = z.strictObject({ helperPublicKey: base64url, helperProof: base64url });
 
-// Bajarilgan jarayon natijasi. Xato matnida buyruq satri (token) bo'lmasligi kerak: faqat chiqish kodi va stderr.
+// Bajarilgan jarayon natijasi. Maxfiy qiymatlar (token, CA) faqat stdin orqali: argv jarayonlar ro'yxatida ko'rinadi.
+// Xato matnida buyruq satri bo'lmasligi kerak: faqat chiqish kodi va stderr.
 export type RunFile = (
   file: string,
   args: string[],
+  stdin: string,
 ) => Promise<{ code: number | null; stdout: string; stderr: string }>;
 
-const runFile: RunFile = (file, args) =>
+const runFile: RunFile = (file, args, stdin) =>
   new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       file,
       args,
       { windowsHide: true, shell: false, timeout: 120_000, maxBuffer: 1 << 16, encoding: 'utf8' },
@@ -54,11 +57,38 @@ const runFile: RunFile = (file, args) =>
         resolve({ code, stdout, stderr });
       },
     );
+    child.stdin?.on('error', () => {}); // jarayon stdin'ni o'qimay chiqsa: natija callback'da
+    child.stdin?.end(stdin);
   });
+
+// Hub CA PEM qoidasi Go helper'dagi bilan bir xil (native/helper/internal/install `checkCA`): 1 MiB gacha, faqat
+// sarlavhasiz CERTIFICATE bloklari, har biri X.509 sifatida o'qiladi, bloklar orasida va atrofida faqat bo'sh joy.
+export const MAX_CA_BYTES = 1 << 20;
+const CERT_BLOCK = /^-----BEGIN CERTIFICATE-----\r?\n([A-Za-z0-9+/=\r\n]+?)\r?\n?-----END CERTIFICATE-----/;
+
+export function checkCaPem(pem: string): void {
+  if (Buffer.byteLength(pem) > MAX_CA_BYTES) throw new Error('the CA file is too large');
+  // Faqat ko'rinadigan ASCII va \t\r\n: JS trim() Unicode bo'shliqlarini (BOM, NBSP) ham kesadi, Go'niki esa yo'q — qoidalar farqlanmasin.
+  if (/[^\t\n\r -~]/.test(pem)) throw new Error('the CA file must be plain ASCII PEM');
+  let rest = pem.trim();
+  let count = 0;
+  while (rest.length > 0) {
+    const m = CERT_BLOCK.exec(rest);
+    if (!m?.[1]) throw new Error('the CA file must contain only PEM CERTIFICATE blocks');
+    try {
+      new X509Certificate(Buffer.from(m[1].replace(/\s+/g, ''), 'base64'));
+    } catch {
+      throw new Error('the CA file contains a certificate that cannot be parsed');
+    }
+    count++;
+    rest = rest.slice(m[0].length).trim();
+  }
+  if (count === 0) throw new Error('the CA file has no certificate');
+}
 
 export interface HelperCliOptions {
   exe: string; // paket yonidagi netschool-helper.exe, absolyut yo'l
-  caFile: string | null; // admin enroll'ga bergan --ca, absolyut yo'l
+  ca: string | null; // admin bergan CA'ning claim'dan oldin tekshirilgan aynan o'sha matni (set-hub stdin'iga)
   rotate: boolean; // --force: hub'da eski qurilmada turgan kalit qayta ishlatilmasin
   run?: RunFile;
 }
@@ -66,10 +96,10 @@ export interface HelperCliOptions {
 export function helperCli(opts: HelperCliOptions): HelperPort {
   const absolute = (p: string) => isAbsolute(p) || win32.isAbsolute(p);
   if (!absolute(opts.exe)) throw new Error('the helper path must be absolute');
-  if (opts.caFile !== null && !absolute(opts.caFile)) throw new Error('the CA path must be absolute');
+  if (opts.ca !== null) checkCaPem(opts.ca);
   const run = opts.run ?? runFile;
-  const call = async (step: 'helper-key' | 'set-hub', args: string[]) => {
-    const res = await run(opts.exe, args);
+  const call = async (step: 'helper-key' | 'set-hub', args: string[], stdin: string) => {
+    const res = await run(opts.exe, args, stdin);
     if (res.code !== 0) {
       const reason = res.stderr.trim().split(/\r?\n/).slice(-1)[0] ?? '';
       throw new HelperError(
@@ -82,7 +112,12 @@ export function helperCli(opts: HelperCliOptions): HelperPort {
   };
   return {
     async helperKey(token) {
-      const stdout = await call('helper-key', ['helper-key', '--token', token, ...(opts.rotate ? ['--rotate'] : [])]);
+      // Token argv'da emas: bitta qator stdin'ga.
+      const stdout = await call(
+        'helper-key',
+        ['helper-key', '--token-stdin', ...(opts.rotate ? ['--rotate'] : [])],
+        `${token}\n`,
+      );
       try {
         return helperClaimSchema.parse(JSON.parse(stdout));
       } catch {
@@ -90,14 +125,11 @@ export function helperCli(opts: HelperCliOptions): HelperPort {
       }
     },
     async setHub(hubOrigin, deviceId) {
-      await call('set-hub', [
+      await call(
         'set-hub',
-        '--origin',
-        hubOrigin,
-        '--device-id',
-        deviceId,
-        ...(opts.caFile === null ? [] : ['--ca-file', opts.caFile]),
-      ]);
+        ['set-hub', '--origin', hubOrigin, '--device-id', deviceId, ...(opts.ca === null ? [] : ['--ca-stdin'])],
+        opts.ca ?? '',
+      );
     },
   };
 }

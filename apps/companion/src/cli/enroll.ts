@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { PlatformFacts } from '../core/capabilities.ts';
 import { EnrollError, enroll } from '../core/enroll.ts';
@@ -25,10 +25,10 @@ export function packagedHelperExe(moduleUrl: string): string {
 
 export interface EnrollCliOptions {
   // Windows'da helper (testlar soxta port beradi). null — helper yo'q (boshqa OS).
-  helper?: (opts: { caFile: string | null; rotate: boolean }) => HelperPort | null;
+  helper?: (opts: { ca: string | null; rotate: boolean }) => HelperPort | null;
 }
 
-function defaultHelper(opts: { caFile: string | null; rotate: boolean }): HelperPort | null {
+function defaultHelper(opts: { ca: string | null; rotate: boolean }): HelperPort | null {
   if (process.platform !== 'win32') return null;
   const exe = packagedHelperExe(import.meta.url);
   if (!existsSync(exe)) throw new Error(`netschool-helper.exe was not found next to the package: ${exe}`);
@@ -91,7 +91,8 @@ export async function runEnrollCli(
   let ca: string | null = null;
   if (parsed.ca) {
     try {
-      ca = readFileSync(parsed.ca, 'utf8');
+      // Windows muharrirlari qo'shadigan UTF-8 BOM olib tashlanadi (keyin CA faqat ASCII bo'lishi kerak).
+      ca = readFileSync(parsed.ca, 'utf8').replace(/^\uFEFF/, '');
     } catch {
       io.err(`cannot read the CA file: ${parsed.ca}`);
       return 2;
@@ -100,7 +101,8 @@ export async function runEnrollCli(
   let helper: HelperPort | null;
   try {
     // --force: yangi qurilma yozuvi; eski yozuvdagi helper kaliti hub'da band (unique), shuning uchun yangisi.
-    helper = (options.helper ?? defaultHelper)({ caFile: parsed.ca ? resolve(parsed.ca) : null, rotate: parsed.force });
+    // CA helper'ga yo'l bilan emas, enroll o'qigan va tekshirgan aynan shu matn bilan (set-hub stdin'i) beriladi.
+    helper = (options.helper ?? defaultHelper)({ ca, rotate: parsed.force });
   } catch (err) {
     io.err(err instanceof Error ? err.message : 'the helper is not available');
     return 2;
@@ -129,7 +131,7 @@ export async function runEnrollCli(
     }
     if (err instanceof EnrollError) {
       io.err(err.message);
-      return 4;
+      return err.code === 'invalid_ca' ? 2 : 4;
     }
     if (err instanceof HubError) {
       if (err.kind === 'tls') io.err('the hub certificate is not trusted; check --hub and --ca');
