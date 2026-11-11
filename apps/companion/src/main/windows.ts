@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { BrowserWindow, screen } from 'electron';
 import type { AgentStatus } from '../core/agent.ts';
+import { ReloadBudget, shouldReloadOverlay } from '../core/reload-budget.ts';
 import { hardenContents, windowPreferences } from './security.ts';
 
 const MESSAGE_AUTO_CLOSE_MS = 30_000;
+// Overlay renderer'i 60 s ichida 3 martadan ko'p qayta yuklanmaydi; ortig'i kechiktiriladi (ReloadBudget).
+const OVERLAY_RELOADS = { max: 3, windowMs: 60_000 };
 
 // Companion oynalari: displey boshiga bitta overlay, xabar oynasi va holat oynasi. Hammasi sandbox'da.
 export class Windows {
@@ -101,9 +105,24 @@ export class Windows {
         if (!this.#quitting && this.#status?.overlay.locked) event.preventDefault();
       });
       // O'quvchi renderer jarayonini o'ldirsa (Companion'ning o'zini helper himoyalaydi, Electron bolalarini emas),
-      // oyna qoladi, lekin bo'sh: sahifa qayta yuklanadi va holat did-finish-load'da qayta yuboriladi.
-      win.webContents.on('render-process-gone', () => {
-        if (!win.isDestroyed() && !this.#quitting) win.webContents.reload();
+      // oyna qoladi, lekin bo'sh: sahifa qayta yuklanadi va holat did-finish-load'da qayta yuboriladi. O'ldirish
+      // sikli reload'ni cheksiz takrorlatmasin: 60 s ichida 3 tadan ortig'i kechiktiriladi (bo'sh oyna baribir
+      // ekranni qoplaydi), bitta kutilayotgan reload yetarli.
+      const budget = new ReloadBudget({ ...OVERLAY_RELOADS, nowMs: () => performance.now() });
+      let pending = false;
+      win.webContents.on('render-process-gone', (_event, details) => {
+        if (pending || !shouldReloadOverlay(details.reason)) return;
+        const reload = () => {
+          pending = false;
+          if (!win.isDestroyed() && !this.#quitting) win.webContents.reload();
+        };
+        const wait = budget.reserve();
+        if (wait === 0) {
+          reload();
+          return;
+        }
+        pending = true;
+        setTimeout(reload, wait).unref();
       });
       win.once('ready-to-show', () => this.#reveal(win));
       this.#overlays.set(display.id, win);
