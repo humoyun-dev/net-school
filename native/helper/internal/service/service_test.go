@@ -128,6 +128,8 @@ func (g *fakeGuard) LastError() error { return nil }
 
 type fakeProcGuard struct {
 	startErr error
+	// scanFail ishlayotgan tsikldagi snapshot yiqilgani (procguard.Scanner shunda ham `failed`, Start xatosisiz).
+	scanFail bool
 	failed   bool
 	running  bool
 	starts   []uint32
@@ -145,7 +147,7 @@ func (p *fakeProcGuard) Start(session uint32) error {
 }
 func (p *fakeProcGuard) Stop() { p.running, p.failed = false, false; p.stops++ }
 func (p *fakeProcGuard) State() string {
-	if p.failed {
+	if p.failed || (p.running && p.scanFail) {
 		return hub.ComponentFailed
 	}
 	if p.running {
@@ -696,5 +698,21 @@ func TestMissingHubConfigRunsUnlockedAndLogsOnce(t *testing.T) {
 	}
 	if loads > 5 {
 		t.Fatalf("konfiguratsiya %d marta yuklandi (HubLoadRetry oralig'i buzildi)", loads)
+	}
+}
+
+// Ishlayotgan tsikldagi vaqtinchalik snapshot xatosi (Start xatosiz `failed`) qayta Start'ga sabab bo'lmaydi: Start
+// yangi baseline olardi va bloklash paytida ochilgan dasturlar dars oxirigacha ruxsat etilgan bo'lib qolardi.
+func TestTransientScanFailureDoesNotRebaseline(t *testing.T) {
+	h := newHarness(t)
+	h.hub.lock(600)
+	h.steps(1)
+	h.procGuard.scanFail = true
+	if h.procGuard.State() != hub.ComponentFailed {
+		t.Fatalf("fake holati = %q", h.procGuard.State())
+	}
+	h.steps(int(2*CleanupInterval/time.Second) + 1)
+	if !slices.Equal(h.procGuard.starts, []uint32{2}) || h.procGuard.stops != 0 {
+		t.Fatalf("ishlayotgan Scanner qayta baseline oldi: starts=%v stops=%d", h.procGuard.starts, h.procGuard.stops)
 	}
 }

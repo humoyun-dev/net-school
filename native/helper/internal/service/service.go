@@ -157,6 +157,10 @@ type Service struct {
 
 	locked      bool
 	policyState string
+	// pgStartErr oxirgi ProcGuard.Start xatosi (Stop'da tozalanadi). Qayta urinish faqat shunga qaraydi, State'ga
+	// emas: ishlayotgan Scanner snapshot yiqilganda ham `failed` deydi, uni qayta Start qilish esa bloklash o'rtasida
+	// yangi baseline olardi (bloklash paytida ochilgan dasturlar dars oxirigacha ruxsat etilgan bo'lib qolardi).
+	pgStartErr error
 
 	sessionKnown bool
 	hasSession   bool
@@ -276,7 +280,7 @@ func (s *Service) Step(ctx context.Context) {
 func (s *Service) Stop() {
 	ctx, cancel := context.WithTimeout(context.Background(), StopTimeout)
 	defer cancel()
-	s.d.ProcGuard.Stop()
+	s.stopProcGuard()
 	s.d.Guard.Set(false)
 	s.d.Companion.Move(Session{}, false)
 	s.d.GuardProc.Move(Session{}, false)
@@ -309,10 +313,10 @@ func (s *Service) checkSession() {
 	if s.locked {
 		// Baseline yangi sessiya uchun olinadi; siyosat yangi foydalanuvchi hive'iga (eski foydalanuvchi qoldig'ini
 		// Policy.Apply o'zi tiklaydi).
-		s.d.ProcGuard.Stop()
+		s.stopProcGuard()
 		if ok {
 			s.applyPolicy()
-			s.note("process guard", s.d.ProcGuard.Start(sess.ID))
+			s.startProcGuard(sess.ID)
 		} else {
 			s.policyState = hub.ComponentOff
 		}
@@ -330,7 +334,7 @@ func (s *Service) engage(ctx context.Context, now time.Duration) {
 	s.d.Guard.Set(true)
 	if s.hasSession {
 		s.applyPolicy()
-		s.note("process guard", s.d.ProcGuard.Start(s.session.ID))
+		s.startProcGuard(s.session.ID)
 	}
 	s.nextDrift = now + DriftInterval
 	s.nextCleanup = now + CleanupInterval
@@ -342,7 +346,7 @@ func (s *Service) engage(ctx context.Context, now time.Duration) {
 func (s *Service) release(ctx context.Context) {
 	s.locked = false
 	s.d.Guard.Set(false)
-	s.d.ProcGuard.Stop()
+	s.stopProcGuard()
 	s.restorePolicy()
 	s.d.CAD.Set(ctx, false)
 	s.noteCAD()
@@ -366,6 +370,17 @@ func (s *Service) applyPolicy() {
 
 // restorePolicy jurnal bo'yicha siyosatni qaytaradi. Bloklash yo'q paytida holat shu yerda aniqlanadi: jurnalda
 // tiklanmagan yozuv qolsa `failed` (o'quvchi hali cheklangan bo'lishi mumkin), aks holda `off`.
+// startProcGuard process guard'ni sessiya uchun yoqadi (baseline) va Start xatosini qayta urinish uchun eslaydi.
+func (s *Service) startProcGuard(id uint32) {
+	s.pgStartErr = s.d.ProcGuard.Start(id)
+	s.note("process guard", s.pgStartErr)
+}
+
+func (s *Service) stopProcGuard() {
+	s.d.ProcGuard.Stop()
+	s.pgStartErr = nil
+}
+
 func (s *Service) restorePolicy() {
 	s.note("siyosatni tiklash", s.d.Policy.Restore())
 	if s.locked {
@@ -379,14 +394,14 @@ func (s *Service) restorePolicy() {
 
 // retryFailed bloklash paytida yiqilgan komponentlarni qayta yoqadi ("Set faqat o'zgarishda" har soniyani
 // taqiqlaydi, yiqilganini qayta urinishni emas): Ctrl+Alt+Del `failed` bo'lsa Set(true), sessiya bor va process
-// guard `failed` bo'lsa Start.
+// guard'ning oxirgi Start'i yiqilgan bo'lsa Start (ishlayotgan Scanner hech qachon qayta baseline olmaydi).
 func (s *Service) retryFailed(ctx context.Context) {
 	if s.d.CAD.State() == hub.CADFailed {
 		s.d.CAD.Set(ctx, true)
 		s.noteCAD()
 	}
-	if s.hasSession && s.d.ProcGuard.State() == hub.ComponentFailed {
-		s.note("process guard", s.d.ProcGuard.Start(s.session.ID))
+	if s.hasSession && s.pgStartErr != nil {
+		s.startProcGuard(s.session.ID)
 	}
 }
 
