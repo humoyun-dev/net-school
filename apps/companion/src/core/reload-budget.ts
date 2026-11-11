@@ -28,7 +28,11 @@ export class ReloadBudget {
   }
 }
 
-// `clean-exit` — renderer o'zi to'xtadi (oyna yopilmoqda): qayta yuklanmaydi.
-export function shouldReloadOverlay(reason: string): boolean {
-  return reason !== 'clean-exit';
+// Overlay renderer'i yo'qolganda nima qilinadi. Oyna `show: false` bilan yaratiladi va `ready-to-show`da
+// ko'rsatiladi; renderer birinchi chizishdan oldin o'ldirilsa bu hodisa kelmaydi, shuning uchun oyna har doim darhol
+// ko'rsatiladi (bo'sh bo'lsa ham ekranni qoplaydi) — reload kechiksa ham. Sabab (`clean-exit` ham) ahamiyatsiz:
+// bloklash paytida overlay renderer'ining o'zi to'xtashi normal emas (`TerminateProcess(h, 0)` `clean-exit` bo'ladi).
+// reloadIn: 0 — darhol, son — shuncha ms dan keyin, null — reload allaqachon kutilmoqda.
+export function onOverlayGone(budget: ReloadBudget, pending: boolean): { reveal: true; reloadIn: number | null } {
+  return { reveal: true, reloadIn: pending ? null : budget.reserve() };
 }

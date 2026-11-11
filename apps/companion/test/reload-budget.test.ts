@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { ReloadBudget, shouldReloadOverlay } from '../src/core/reload-budget.ts';
+import { onOverlayGone, ReloadBudget } from '../src/core/reload-budget.ts';
 
 function budget() {
   let now = 0;
@@ -47,11 +47,27 @@ describe('ReloadBudget', () => {
   });
 });
 
-describe('shouldReloadOverlay', () => {
-  test('clean-exit qayta yuklanmaydi, qulash va o‘ldirish yuklanadi', () => {
-    expect(shouldReloadOverlay('clean-exit')).toBe(false);
-    expect(shouldReloadOverlay('killed')).toBe(true);
-    expect(shouldReloadOverlay('crashed')).toBe(true);
-    expect(shouldReloadOverlay('oom')).toBe(true);
+describe('onOverlayGone', () => {
+  test('4-o‘ldirish: oyna darhol ko‘rsatiladi, reload ~57 s kechiktiriladi', () => {
+    const { b, advance } = budget();
+    for (let i = 0; i < 3; i++) {
+      expect(onOverlayGone(b, false)).toEqual({ reveal: true, reloadIn: 0 });
+      advance(1_000);
+    }
+    expect(onOverlayGone(b, false)).toEqual({ reveal: true, reloadIn: 57_000 });
+  });
+
+  test('clean-exit (TerminateProcess(h, 0)) ham boshqa sabablardek: ko‘rsatiladi va qayta yuklanadi', () => {
+    // Sabab qarorga ta'sir qilmaydi: onOverlayGone uni umuman olmaydi.
+    const { b } = budget();
+    expect(onOverlayGone(b, false)).toEqual({ reveal: true, reloadIn: 0 });
+  });
+
+  test('reload allaqachon kutilayotgan bo‘lsa: faqat ko‘rsatiladi, yangi slot band qilinmaydi', () => {
+    const { b } = budget();
+    expect(onOverlayGone(b, true)).toEqual({ reveal: true, reloadIn: null });
+    expect(b.reserve()).toBe(0);
+    expect(b.reserve()).toBe(0);
+    expect(b.reserve()).toBe(0);
   });
 });
