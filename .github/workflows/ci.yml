@@ -112,8 +112,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: native/helper/go.mod
-          # go.sum hozircha yo'q (tashqi bog'liqlik qo'shilguncha); kesh kaliti go.mod'dan.
-          cache-dependency-path: native/helper/go.mod
+          # Kesh kaliti go.sum (tashqi bog'liqlik: golang.org/x/sys).
+          cache-dependency-path: native/helper/go.sum
       - run: go vet ./...
       - run: go test ./...
       # Windows build-tag'li kod Linux'da ham kompilyatsiya qilinishi shart (haqiqiy testlar helper-windows jobida).
@@ -136,7 +136,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: native/helper/go.mod
-          cache-dependency-path: native/helper/go.mod
+          cache-dependency-path: native/helper/go.sum
       # Windows build-tag'li testlar (registry, xizmat, ACL) faqat shu yerda ishlaydi.
       - run: go vet ./...
       - run: go test ./...
