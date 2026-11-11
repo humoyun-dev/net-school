@@ -23,6 +23,7 @@ import { AuditWriter } from '../audit/audit.writer.ts';
 import { EventLog, Outbox } from '../events/event-log.ts';
 import { type ClearedHelp, HelpRequestsService } from '../help-requests/help-requests.service.ts';
 import { closeRemoteSessions } from '../remote-sessions/closing.ts';
+import { effectiveCapabilities } from './enforcement.ts';
 import { DEVICE_MANAGEMENT, type DeviceManagementFactory, requirePort } from './mesh.ts';
 
 export type DeviceRow = typeof devices.$inferSelect;
@@ -238,7 +239,7 @@ export class DevicesService {
         lastHeartbeatAt: row.lastHeartbeatAt?.toISOString() ?? null,
       },
       agent,
-      capabilities: report,
+      capabilities: effectiveCapabilities(report, row.helperStatus, row.helperStatusAt, this.now()),
     };
   }
 

@@ -34,4 +34,12 @@ describe('capabilityReportSchema', () => {
   test('rejects unsupported protocolVersion', () => {
     expect(capabilityReportSchema.safeParse({ ...specExample, protocolVersion: 2 }).success).toBe(false);
   });
+
+  test('capability names allow inner underscores only', () => {
+    const caps = (name: string) => ({ ...specExample, capabilities: { [name]: { state: 'available' } } });
+    expect(capabilityReportSchema.safeParse(caps('classroom.sas_block')).success).toBe(true);
+    for (const bad of ['classroom._sas', 'classroom.sas_', 'classroom', 'Classroom.overlay', 'classroom.sas__block']) {
+      expect(capabilityReportSchema.safeParse(caps(bad)).success, bad).toBe(false);
+    }
+  });
 });

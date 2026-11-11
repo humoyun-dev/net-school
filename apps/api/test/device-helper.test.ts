@@ -1,7 +1,9 @@
 import { generateKeyPairSync } from 'node:crypto';
+import { deviceSchema } from '@netschool/contracts';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import { auditEvents, devices } from '../src/db/schema.ts';
+import { z } from 'zod';
+import { auditEvents, deviceCapabilities, devices } from '../src/db/schema.ts';
 import { startTestApp, type TestApp } from './support/app.ts';
 import { setCapabilities, setHeartbeat } from './support/caps.ts';
 import { type DeviceKey, deviceRequest, helperRequest, makeDeviceKey, seedDevice } from './support/device.ts';
@@ -23,6 +25,7 @@ let deviceId: string;
 const LOCK_STATE = '/api/v1/device/helper/lock-state';
 const STATUS = '/api/v1/device/helper/status';
 const HEARTBEAT = '/api/v1/device/heartbeat';
+const CAPABILITIES = '/api/v1/device/capabilities';
 
 const status = {
   version: '0.1.0',
@@ -314,5 +317,140 @@ describe('claim with a helper key', () => {
     expect(again.status).toBe(409);
     // Tranzaksiya qaytdi: ikkinchi token sarflanmadi.
     expect((await claim(second, makeDeviceKey(), {})).status).toBe(201);
+  });
+});
+
+describe('helper enforcement level', () => {
+  const DEVICES = () => `/api/v1/rooms/${roomId}/devices`;
+  const windowsReport = (overlay: Record<string, unknown>) => ({
+    protocolVersion: 1,
+    os: 'windows',
+    architecture: 'x64',
+    desktopSession: 'windows',
+    capabilities: { 'classroom.message': { state: 'available' }, 'classroom.overlay': overlay },
+  });
+  const active = { ...status, processGuard: 'active' };
+  // Panel ko'radigan capability'lar: javob web panel ishlatadigan shartnoma sxemasidan o'tishi shart.
+  const capabilities = async () => {
+    const res = await app.request('GET', DEVICES(), { cookie: teacher });
+    expect(res.status).toBe(200);
+    expect(z.object({ devices: z.array(deviceSchema) }).safeParse(res.json).success).toBe(true);
+    const device = res.json.devices.find((d: { id: string }) => d.id === deviceId);
+    return device.capabilities.capabilities as Record<string, Record<string, unknown>>;
+  };
+  const reportHelper = async (body: unknown) => expect((await asHelper('PUT', STATUS, body)).status).toBe(204);
+
+  test('overlay is hard only when the helper reports every component active', async () => {
+    // Companion o'zi soft desa ham, yangi helper hisobotida hammasi active bo'lsa — hard.
+    expect(
+      (await asCompanion('PUT', CAPABILITIES, windowsReport({ state: 'available', enforcement: 'soft' }))).status,
+    ).toBe(204);
+    await reportHelper(active);
+    expect((await capabilities())['classroom.overlay']).toEqual({ state: 'available', enforcement: 'hard' });
+
+    // Birinchi yiqilgan komponent sabab bo'ladi (hook → policy → processGuard).
+    await reportHelper({ ...active, processGuard: 'failed' });
+    expect((await capabilities())['classroom.overlay']).toEqual({
+      state: 'available',
+      enforcement: 'soft',
+      reason: 'process_guard_failed',
+    });
+    await reportHelper({ ...active, policy: 'failed', processGuard: 'failed' });
+    expect((await capabilities())['classroom.overlay']).toMatchObject({ enforcement: 'soft', reason: 'policy_failed' });
+    await reportHelper({ ...active, hook: 'failed', policy: 'failed' });
+    expect((await capabilities())['classroom.overlay']).toMatchObject({ enforcement: 'soft', reason: 'hook_failed' });
+    // Bloklash yo'q (komponentlar off): hard isbotlanmagan, lekin yiqilgan komponent ham yo'q.
+    await reportHelper({ ...active, hook: 'off', policy: 'off', processGuard: 'off' });
+    expect((await capabilities())['classroom.overlay']).toEqual({
+      state: 'available',
+      enforcement: 'soft',
+      reason: 'lock_inactive',
+    });
+    // Saqlangan Companion hisoboti o'zgarmaydi: daraja faqat o'qishda hisoblanadi.
+    const [stored] = await app.db.db.select().from(deviceCapabilities).where(eq(deviceCapabilities.deviceId, deviceId));
+    expect(
+      (stored?.report as { capabilities: Record<string, unknown> } | undefined)?.capabilities['classroom.overlay'],
+    ).toEqual({
+      state: 'available',
+      enforcement: 'soft',
+    });
+  });
+
+  test('a stale helper status falls back to soft', async () => {
+    // Companion hard da'vo qilsa ham, helper hisobotisiz hard ko'rsatilmaydi.
+    expect(
+      (await asCompanion('PUT', CAPABILITIES, windowsReport({ state: 'available', enforcement: 'hard' }))).status,
+    ).toBe(204);
+    expect((await capabilities())['classroom.overlay']).toEqual({
+      state: 'available',
+      enforcement: 'soft',
+      reason: 'helper_missing',
+    });
+    await reportHelper(active);
+    const reportedAt = now;
+    expect((await capabilities())['classroom.overlay']).toEqual({ state: 'available', enforcement: 'hard' });
+    // 90 s chegarasi ichida hali yangi.
+    now = reportedAt + 90_000;
+    expect((await capabilities())['classroom.overlay']).toMatchObject({ enforcement: 'hard' });
+    now = reportedAt + 90_001;
+    expect((await capabilities())['classroom.overlay']).toEqual({
+      state: 'available',
+      enforcement: 'soft',
+      reason: 'helper_missing',
+    });
+    // Companion o'zi soft desa, uning sababi saqlanadi.
+    expect(
+      (
+        await asCompanion(
+          'PUT',
+          CAPABILITIES,
+          windowsReport({ state: 'available', enforcement: 'soft', reason: 'hook_unavailable' }),
+        )
+      ).status,
+    ).toBe(204);
+    expect((await capabilities())['classroom.overlay']).toEqual({
+      state: 'available',
+      enforcement: 'soft',
+      reason: 'hook_unavailable',
+    });
+  });
+
+  test('sas_block reports the edition limit', async () => {
+    expect(
+      (await asCompanion('PUT', CAPABILITIES, windowsReport({ state: 'available', enforcement: 'soft' }))).status,
+    ).toBe(204);
+    // Helper hech qachon hisobot bermagan Windows qurilmasi.
+    expect((await capabilities())['classroom.sas_block']).toEqual({ state: 'unsupported', reason: 'helper_missing' });
+    const cases: [string, Record<string, unknown>][] = [
+      ['blocked', { state: 'available' }],
+      ['off', { state: 'available' }],
+      ['unavailable', { state: 'unsupported', reason: 'edition' }],
+      ['failed', { state: 'unsupported', reason: 'failed' }],
+    ];
+    for (const [cad, expected] of cases) {
+      await reportHelper({ ...active, cad });
+      expect((await capabilities())['classroom.sas_block'], `cad=${cad}`).toEqual(expected);
+    }
+    // Eski hisobot: imkoniyat tasdiqlanmagan.
+    now += 90_001;
+    expect((await capabilities())['classroom.sas_block']).toEqual({ state: 'unsupported', reason: 'helper_missing' });
+  });
+
+  test('non-windows devices get no sas_block', async () => {
+    const report = {
+      protocolVersion: 1,
+      os: 'macos',
+      architecture: 'arm64',
+      desktopSession: 'macos',
+      capabilities: {
+        'classroom.overlay': { state: 'available', enforcement: 'soft' },
+        // Companion bu kalitni o'zi da'vo qila olmaydi.
+        'classroom.sas_block': { state: 'available' },
+      },
+    };
+    expect((await asCompanion('PUT', CAPABILITIES, report)).status).toBe(204);
+    const caps = await capabilities();
+    expect(caps['classroom.sas_block']).toBeUndefined();
+    expect(caps['classroom.overlay']).toEqual({ state: 'available', enforcement: 'soft' });
   });
 });

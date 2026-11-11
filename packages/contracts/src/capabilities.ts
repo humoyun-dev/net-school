@@ -19,7 +19,8 @@ export const capabilityReportSchema = z.object({
   desktopSession: z.enum(['x11', 'wayland', 'windows', 'macos', 'none']).nullable(),
   capabilities: z
     .record(
-      z.string().regex(/^[a-z]+(\.[a-z]+)+$/),
+      // Segment ichida `_` ruxsat (`classroom.sas_block`), lekin boshida/oxirida emas.
+      z.string().regex(/^[a-z]+(_[a-z]+)*(\.[a-z]+(_[a-z]+)*)+$/),
       z.strictObject({
         state: capabilityStateSchema,
         provider: z.string().optional(),
