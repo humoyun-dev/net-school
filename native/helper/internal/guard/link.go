@@ -26,6 +26,7 @@ type Link struct {
 	locked    bool
 	connected bool
 	hook      string // ulangan guard'ning oxirgi hisoboti
+	lastErr   error  // oxirgi Accept xatosi; muvaffaqiyatli Accept tozalaydi
 	wake      chan struct{}
 }
 
@@ -61,6 +62,14 @@ func (k *Link) Hook() string {
 	return k.hook
 }
 
+// LastError oxirgi Accept xatosi (masalan, pipe yaratilmadi); guard ulangan bo'lsa nil. Xizmat uni holat
+// hisobotiga yozadi: aks holda xato jim takrorlanaveradi.
+func (k *Link) LastError() error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.lastErr
+}
+
 func (k *Link) current() bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -77,6 +86,11 @@ func (k *Link) setConn(connected bool, hook string) {
 func (k *Link) Run(ctx context.Context) {
 	for ctx.Err() == nil {
 		conn, err := k.l.Accept(ctx)
+		if ctx.Err() == nil {
+			k.mu.Lock()
+			k.lastErr = err
+			k.mu.Unlock()
+		}
 		if err != nil {
 			if sleep(ctx, or(k.RetryDelay, RetryDelay)) != nil {
 				return

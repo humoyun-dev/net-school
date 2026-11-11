@@ -201,13 +201,41 @@ type Dialer func(ctx context.Context) (io.ReadWriteCloser, error)
 type Guard struct {
 	Dial Dialer
 	Hook Hook
+	// HookDone yopilsa hook o'rnatib bo'lmaydi (Windows'da hook oqimi tugagan): Run ErrHookGone bilan qaytadi, jarayon
+	// nol bo'lmagan kod bilan chiqadi va Supervisor uni qayta ishga tushiradi. nil — kuzatilmaydi.
+	HookDone <-chan struct{}
 	// Nol qiymatlar standartni bildiradi (RetryDelay, StaleAfter).
 	RetryDelay time.Duration
 	StaleAfter time.Duration
 }
 
-// Run ctx bekor qilinguncha ulanadi va xizmat qiladi; doim ctx.Err() bilan qaytadi. Qaytganda hook olingan.
+// ErrHookGone hook oqimi tugagan: guard jarayoni hook'siz tirik qolmasligi kerak.
+var ErrHookGone = errors.New("hook oqimi tugagan")
+
+// Run ctx bekor qilinguncha ulanadi va xizmat qiladi. ctx bekor qilinsa ctx.Err(), HookDone yopilsa ErrHookGone
+// qaytaradi. Qaytganda hook olingan.
 func (g *Guard) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	if g.HookDone != nil {
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			select {
+			case <-g.HookDone:
+				cancel(ErrHookGone)
+			case <-stop:
+			}
+		}()
+	}
+	err := g.loop(ctx)
+	if cause := context.Cause(ctx); errors.Is(cause, ErrHookGone) {
+		return cause
+	}
+	return err
+}
+
+func (g *Guard) loop(ctx context.Context) error {
 	for {
 		if conn, err := g.Dial(ctx); err == nil {
 			g.serve(ctx, conn)

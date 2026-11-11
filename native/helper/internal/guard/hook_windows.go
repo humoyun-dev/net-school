@@ -4,7 +4,6 @@ package guard
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -32,8 +31,6 @@ var (
 
 // hookCallback hookProc'ning C ko'rsatkichi (NewCallback soni cheklangan: bir marta yaratiladi).
 var hookCallback = windows.NewCallback(hookProc)
-
-var errHookThreadExited = errors.New("hook oqimi tugagan")
 
 // WinUser.h qiymatlari.
 const (
@@ -121,7 +118,7 @@ func startHookThread() (*hookThread, error) {
 	case <-ready:
 		return t, nil
 	case <-t.exited:
-		return nil, errHookThreadExited
+		return nil, ErrHookGone
 	}
 }
 
@@ -207,7 +204,7 @@ func (t *hookThread) request(id uint32) error {
 	case err := <-t.replies:
 		return err
 	case <-t.exited:
-		return errHookThreadExited
+		return ErrHookGone
 	}
 }
 
@@ -231,6 +228,8 @@ func Main(ctx context.Context) error {
 		return fmt.Errorf("hook oqimi ishga tushmadi: %w", err)
 	}
 	defer t.stop()
-	g := &Guard{Dial: DialPipe, Hook: t}
+	// Hook oqimi o'zi tugasa (GetMessageW -1 yoki begona WM_QUIT) Run ErrHookGone bilan qaytadi va jarayon nol
+	// bo'lmagan kod bilan chiqadi: hook'siz tirik guard'ni Supervisor qayta ishga tushira olmasdi.
+	g := &Guard{Dial: DialPipe, Hook: t, HookDone: t.exited}
 	return g.Run(ctx)
 }

@@ -18,80 +18,110 @@ import (
 // ham yozuvchini bloklamaydi, StaleAfter undan ancha oldin ulanishni yopadi.
 const pipeBuffer = 4096
 
-// PipeListener xizmat tomonidagi pipe: bitta nusxa (bitta guard), faqat SYSTEM ulana oladi.
+// maxInstances bir vaqtda ikki nusxa: biri ulangan guard'da, ikkinchisi doim kutib turadi. Shunda pipe nomi hech qachon
+// bo'shab qolmaydi (aks holda ulanish yopilgan oraliqda o'quvchi jarayoni nomni egallab olishi mumkin edi).
+const maxInstances = 2
+
+// PipeListener xizmat tomonidagi pipe, faqat SYSTEM ulana oladi.
 //
-// Har nusxa FILE_FLAG_FIRST_PIPE_INSTANCE bilan yaratiladi: pipe nomini boshqa jarayon (o'quvchi) oldinroq egallagan
-// bo'lsa yaratish xato beradi va xizmat soxta pipe'ga ishonmaydi. PIPE_REJECT_REMOTE_CLIENTS tarmoqdan ulanishni
-// rad etadi. Ulanish overlapped: Accept ctx bilan bekor qilinadi, olingan *os.File Go runtime'ning IOCP'siga ulanadi
-// va Close kutilayotgan o'qish/yozishni to'xtatadi.
+// Birinchi nusxa (Listen) FILE_FLAG_FIRST_PIPE_INSTANCE bilan yaratiladi: nomni boshqa jarayon (o'quvchi) oldinroq
+// egallagan bo'lsa Listen xato beradi va xizmat soxta pipe'ga ishonmaydi. Keyingi nusxalar ulangan nusxani qaytarishdan
+// OLDIN yaratiladi, shuning uchun Listen'dan Close'gacha kutayotgan nusxa doim bor va nom bo'shamaydi; ular bayroqsiz
+// (nom allaqachon bizniki), to'siq — DACL. PIPE_REJECT_REMOTE_CLIENTS tarmoqdan ulanishni rad etadi. Ulanish overlapped:
+// Accept ctx bilan bekor qilinadi, olingan *os.File Go runtime'ning IOCP'siga ulanadi va Close kutilayotgan
+// o'qish/yozishni to'xtatadi.
 type PipeListener struct {
-	mu sync.Mutex
-	h  windows.Handle // hali ulanmagan nusxa; 0 — keyingi Accept yangisini yaratadi
+	name, sddl string
+	peerOK     func(windows.Handle) error // ulangan mijozni tekshirish (testda almashtiriladi)
+
+	mu      sync.Mutex
+	h       windows.Handle // kutayotgan (ulanmagan) nusxa; Listen'dan Close'gacha doim bor
+	lastErr error
 }
 
 // Listen birinchi nusxani yaratadi (shu paytdan guard ulana oladi).
 func Listen() (*PipeListener, error) {
-	h, err := createInstance()
+	return listen(PipeName, PipeSDDL, func(h windows.Handle) error {
+		return requireSystemPeer(h, windows.GetNamedPipeClientProcessId)
+	})
+}
+
+func listen(name, sddl string, peerOK func(windows.Handle) error) (*PipeListener, error) {
+	l := &PipeListener{name: name, sddl: sddl, peerOK: peerOK}
+	h, err := l.createInstance(true)
 	if err != nil {
 		return nil, err
 	}
-	return &PipeListener{h: h}, nil
+	l.h = h
+	return l, nil
 }
 
-func createInstance() (windows.Handle, error) {
-	sd, err := windows.SecurityDescriptorFromString(PipeSDDL)
+func (l *PipeListener) createInstance(first bool) (windows.Handle, error) {
+	sd, err := windows.SecurityDescriptorFromString(l.sddl)
 	if err != nil {
 		return 0, fmt.Errorf("pipe SDDL o'qilmadi: %w", err)
 	}
 	sa := windows.SecurityAttributes{SecurityDescriptor: sd}
 	sa.Length = uint32(unsafe.Sizeof(sa))
-	name, err := windows.UTF16PtrFromString(PipeName)
+	name, err := windows.UTF16PtrFromString(l.name)
 	if err != nil {
 		return 0, err
 	}
-	h, err := windows.CreateNamedPipe(name,
-		windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_OVERLAPPED|windows.FILE_FLAG_FIRST_PIPE_INSTANCE,
+	flags := uint32(windows.PIPE_ACCESS_DUPLEX | windows.FILE_FLAG_OVERLAPPED)
+	if first {
+		flags |= windows.FILE_FLAG_FIRST_PIPE_INSTANCE
+	}
+	h, err := windows.CreateNamedPipe(name, flags,
 		windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS,
-		1, pipeBuffer, pipeBuffer, 0, &sa)
+		maxInstances, pipeBuffer, pipeBuffer, 0, &sa)
 	if err != nil {
-		return 0, fmt.Errorf("%s yaratilmadi: %w", PipeName, err)
+		return 0, fmt.Errorf("%s yaratilmadi: %w", l.name, err)
 	}
 	return h, nil
 }
 
-// Accept guard ulanishini kutadi. Ulangan jarayon SYSTEM bo'lmasa (DACL buni allaqachon taqiqlaydi, bu ikkinchi
-// to'siq) u uziladi va kutish davom etadi. Oldingi ulanish yopilgan bo'lishi kerak (bitta nusxa).
+// Accept guard ulanishini kutadi. Ulangan jarayon SYSTEM bo'lmasa u uziladi va kutish davom etadi. Ulangan nusxa
+// qaytarilishidan oldin keyingi kutayotgan nusxa yaratiladi; buning iloji bo'lmasa ulanish uziladi, nusxa kutishda
+// qoladi va xato qaytadi (nom bo'shamaydi). Xato LastError'da saqlanadi.
 func (l *PipeListener) Accept(ctx context.Context) (io.ReadWriteCloser, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	c, err := l.accept(ctx)
+	if ctx.Err() == nil {
+		l.lastErr = err
+	}
+	return c, err
+}
+
+func (l *PipeListener) accept(ctx context.Context) (io.ReadWriteCloser, error) {
+	if l.h == 0 {
+		return nil, errors.New("pipe yopilgan")
+	}
 	for {
-		if l.h == 0 {
-			h, err := createInstance()
-			if err != nil {
-				return nil, err
-			}
-			l.h = h
-		}
 		if err := connect(ctx, l.h); err != nil {
-			switch {
-			case ctx.Err() != nil:
+			if ctx.Err() != nil {
 				// Bekor qilingan nusxa ulanmagan holda qoladi va keyingi Accept'da qayta ishlatiladi.
 				return nil, ctx.Err()
-			case errors.Is(err, windows.ERROR_NO_DATA):
-				// Mijoz ulanib, ConnectNamedPipe'gacha uzilgan: nusxani bo'shatib kutish davom etadi.
-				_ = windows.DisconnectNamedPipe(l.h)
+			}
+			// ERROR_NO_DATA: mijoz ulanib, ConnectNamedPipe'gacha uzilgan. Boshqa xatoda ham nusxa yopilmaydi (nom
+			// bo'shamasin): uziladi va xato qaytadi, Link RetryDelay'dan keyin qayta urinadi.
+			_ = windows.DisconnectNamedPipe(l.h)
+			if errors.Is(err, windows.ERROR_NO_DATA) {
 				continue
 			}
-			_ = windows.CloseHandle(l.h)
-			l.h = 0
 			return nil, err
 		}
-		if err := requireSystemPeer(l.h, windows.GetNamedPipeClientProcessId); err != nil {
+		if err := l.peerOK(l.h); err != nil {
 			_ = windows.DisconnectNamedPipe(l.h)
 			continue
 		}
-		f := os.NewFile(uintptr(l.h), PipeName)
-		l.h = 0
+		next, err := l.createInstance(false)
+		if err != nil {
+			_ = windows.DisconnectNamedPipe(l.h)
+			return nil, err
+		}
+		f := os.NewFile(uintptr(l.h), l.name)
+		l.h = next
 		if f == nil {
 			return nil, errors.New("pipe dastagi yaroqsiz")
 		}
@@ -99,7 +129,15 @@ func (l *PipeListener) Accept(ctx context.Context) (io.ReadWriteCloser, error) {
 	}
 }
 
-// Close kutilayotgan (ulanmagan) nusxani yopadi. Accept bilan bir vaqtda chaqirilmaydi: Accept'ni ctx to'xtatadi.
+// LastError oxirgi Accept xatosi (nil — oxirgi Accept muvaffaqiyatli yoki ctx bilan bekor qilingan).
+func (l *PipeListener) LastError() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.lastErr
+}
+
+// Close kutilayotgan nusxani yopadi (bundan keyin nom bo'shaydi). Accept bilan bir vaqtda chaqirilmaydi: Accept'ni
+// ctx to'xtatadi.
 func (l *PipeListener) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -171,6 +209,9 @@ func DialPipe(context.Context) (io.ReadWriteCloser, error) {
 }
 
 // requireSystemPeer pipe'ning narigi tomonidagi jarayon LocalSystem ekanini tekshiradi.
+//
+// Bu tekshiruv maslahat xarakterida (TOCTOU): PID tekshirilguncha jarayon tugab, raqam boshqa jarayonga berilishi
+// mumkin. Haqiqiy to'siq — pipe DACL'i (faqat SYSTEM); bu ikkinchi qatlam, xato pipe'ga ishonmaslik uchun.
 func requireSystemPeer(h windows.Handle, peerPID func(windows.Handle, *uint32) error) error {
 	var pid uint32
 	if err := peerPID(h, &pid); err != nil {

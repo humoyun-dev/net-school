@@ -443,3 +443,53 @@ func TestLinkDropsSilentGuard(t *testing.T) {
 	// Guard endi javob bermaydi (buyruqlar fonda o'qilaveradi).
 	eventually(t, "jim guard uzilishi", func() bool { return k.Hook() == HookFailed })
 }
+
+// Hook oqimi o'lsa guard jarayoni hook'siz tirik qolmasin: Run xato bilan qaytadi, jarayon nol bo'lmagan kod bilan
+// chiqadi va Supervisor uni qayta ishga tushiradi.
+func TestGuardExitsWhenHookThreadDies(t *testing.T) {
+	svc, hook := newFakeService(), &fakeHook{}
+	dead := make(chan struct{})
+	g := &Guard{Dial: svc.dial, Hook: hook, HookDone: dead, RetryDelay: testRetry, StaleAfter: testStale}
+	done := make(chan error, 1)
+	go func() { done <- g.Run(context.Background()) }()
+	c, r := svc.next(t)
+	send(t, c, true)
+	receive(t, c, r)
+
+	close(dead)
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrHookGone) {
+			t.Fatalf("Run = %v, kutilgan ErrHookGone", err)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("hook oqimi o'lgach Run qaytmadi")
+	}
+}
+
+type failingListener struct{ err error }
+
+func (l failingListener) Accept(context.Context) (io.ReadWriteCloser, error) { return nil, l.err }
+
+// Accept doim yiqilsa (masalan pipe nomini boshqa jarayon egallagan) xato jim qolmasin: Task 10 uni hisobotga yozadi.
+func TestLinkKeepsLastAcceptError(t *testing.T) {
+	want := errors.New("pipe yaratilmadi")
+	k := NewLink(failingListener{err: want})
+	k.RetryDelay = testRetry
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go k.Run(ctx)
+	eventually(t, "LastError = Accept xatosi", func() bool { return errors.Is(k.LastError(), want) })
+}
+
+func TestLinkClearsLastErrorOnAccept(t *testing.T) {
+	k, l := startLink(t)
+	if k.LastError() != nil {
+		t.Fatalf("LastError = %v", k.LastError())
+	}
+	_, r := connectGuard(t, l)
+	readCommand(t, r)
+	if k.LastError() != nil {
+		t.Fatalf("ulanishdan keyin LastError = %v", k.LastError())
+	}
+}
