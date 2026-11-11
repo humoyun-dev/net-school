@@ -99,11 +99,17 @@ func (l *Lock) Apply(s hub.LockState) {
 		return
 	}
 
-	lease := time.Duration(s.LeaseSeconds) * time.Second
-	if s.LeaseSeconds <= 0 {
+	// Ko'paytirishdan OLDIN cheklanadi: juda katta leaseSeconds Duration'da to'lib manfiy bo'lardi va lock darhol
+	// ochilardi (fail-open).
+	var lease time.Duration
+	switch {
+	case s.LeaseSeconds <= 0:
 		lease = DefaultLease
+	case s.LeaseSeconds >= int(MaxLease/time.Second):
+		lease = MaxLease
+	default:
+		lease = time.Duration(s.LeaseSeconds) * time.Second
 	}
-	lease = min(lease, MaxLease)
 	l.locked = true
 	l.deadline = l.clock.Uptime() + lease
 	var saved *uint64

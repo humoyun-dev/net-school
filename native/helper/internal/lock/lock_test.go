@@ -535,3 +535,22 @@ func TestLockSurvivesProcessRestartThroughFile(t *testing.T) {
 		t.Fatal("jarayon qayta ishga tushgach lock fayldan tiklanmadi")
 	}
 }
+
+// Juda katta leaseSeconds Duration'ga ko'paytirilganda to'lib, manfiy bo'lib qolmasin (lock darhol ochilardi).
+func TestHugeLeaseIsClampedNotOverflowed(t *testing.T) {
+	for _, secs := range []int{int(MaxLease/time.Second) + 1, 10_000_000_000, 1 << 62} {
+		l, clock, store := newLock("boot-1")
+		l.Apply(hub.LockState{Locked: true, Sequence: seq("1"), LeaseSeconds: secs})
+		if !l.Locked() {
+			t.Fatalf("leaseSeconds=%d: lock qo'llanmadi", secs)
+		}
+		if got := store.saved.DeadlineUptimeMs; got != (clock.uptime + MaxLease).Milliseconds() {
+			t.Fatalf("leaseSeconds=%d: deadline %d ms, kutilgan MaxLease", secs, got)
+		}
+		clock.advance(MaxLease - time.Second)
+		l.Tick()
+		if !l.Locked() {
+			t.Fatalf("leaseSeconds=%d: MaxLease'dan oldin ochildi", secs)
+		}
+	}
+}
