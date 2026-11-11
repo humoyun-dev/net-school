@@ -158,7 +158,7 @@ func startAsUser(s Session, exe string, args []string, job windows.Handle) (supe
 	if sid != s.UserSID {
 		return nil, fmt.Errorf("%w: kutilgan %s, sessiyada %s", ErrSessionChanged, s.UserSID, sid)
 	}
-	return createProcess(tok, exe, args, 0, job)
+	return createProcess(tok, exe, args, 0, job, s.UserSID)
 }
 
 // StartAsSystemInSession exe'ni SYSTEM sifatida s sessiyasining interaktiv ish stolida ishga tushiradi (guard: past
@@ -192,7 +192,7 @@ func startAsSystemInSession(s Session, exe string, args []string, job windows.Ha
 	if err := windows.SetTokenInformation(tok, windows.TokenSessionId, (*byte)(unsafe.Pointer(&id)), uint32(unsafe.Sizeof(id))); err != nil {
 		return nil, fmt.Errorf("tokenga sessiya %d yozilmadi: %w", s.ID, err)
 	}
-	return createProcess(tok, exe, args, windows.CREATE_NO_WINDOW, job)
+	return createProcess(tok, exe, args, windows.CREATE_NO_WINDOW, job, "")
 }
 
 // checkExe faqat mutlaq yo'lni qabul qiladi: nisbiy nom PATH yoki joriy katalogdan qidirilmasin.
@@ -210,7 +210,10 @@ func checkExe(exe string) error {
 // job nol bo'lmasa jarayon CREATE_SUSPENDED bilan yaratiladi, Job'ga qo'shiladi va shundan keyingina ishga
 // tushiriladi: jarayon Job'dan tashqarida bitta ham bola jarayon ochib ulgurmaydi. Job'ga qo'shilmasa jarayon
 // o'ldiriladi (Job'siz bola xizmat qulasa yetim qolardi).
-func createProcess(tok windows.Token, exe string, args []string, flags uint32, job windows.Handle) (supervise.Proc, error) {
+//
+// Jarayon va birinchi ip ProcessSDDL/ThreadSDDL bilan yaratiladi (userSID — o'quvchi, guard uchun bo'sh): o'quvchi
+// ularni to'xtata, muzlata yoki boshqara olmaydi.
+func createProcess(tok windows.Token, exe string, args []string, flags uint32, job windows.Handle, userSID string) (supervise.Proc, error) {
 	exe16, err := windows.UTF16PtrFromString(exe)
 	if err != nil {
 		return nil, fmt.Errorf("exe yo'li yaroqsiz: %w", err)
@@ -233,13 +236,22 @@ func createProcess(tok windows.Token, exe string, args []string, flags uint32, j
 		return nil, err
 	}
 
+	procSA, err := securityAttributes(ProcessSDDL(userSID))
+	if err != nil {
+		return nil, err
+	}
+	threadSA, err := securityAttributes(ThreadSDDL(userSID))
+	if err != nil {
+		return nil, err
+	}
+
 	si := windows.StartupInfo{Desktop: desk16}
 	si.Cb = uint32(unsafe.Sizeof(si))
 	if job != 0 {
 		flags |= windows.CREATE_SUSPENDED
 	}
 	var pi windows.ProcessInformation
-	err = windows.CreateProcessAsUser(tok, exe16, cmd16, nil, nil, false,
+	err = windows.CreateProcessAsUser(tok, exe16, cmd16, procSA, threadSA, false,
 		flags|windows.CREATE_UNICODE_ENVIRONMENT, &env[0], dir16, &si, &pi)
 	if err != nil {
 		return nil, fmt.Errorf("%s ishga tushmadi: %w", exe, err)
@@ -258,6 +270,20 @@ func createProcess(tok windows.Token, exe string, args []string, flags uint32, j
 		}
 	}
 	return newProcess(pi.Process), nil
+}
+
+// securityAttributes SDDL'dan meros qilinmaydigan SECURITY_ATTRIBUTES yasaydi.
+func securityAttributes(sddl string, err error) (*windows.SecurityAttributes, error) {
+	if err != nil {
+		return nil, err
+	}
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return nil, fmt.Errorf("xavfsizlik deskriptori yaratilmadi: %w", err)
+	}
+	sa := &windows.SecurityAttributes{SecurityDescriptor: sd}
+	sa.Length = uint32(unsafe.Sizeof(*sa))
+	return sa, nil
 }
 
 // sanitizedEnv token egasining muhit blokini (CreateEnvironmentBlock: tizim + foydalanuvchi o'zgaruvchilari,

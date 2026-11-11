@@ -183,3 +183,25 @@ func TestSanitizedEnvOwnToken(t *testing.T) {
 		}
 	}
 }
+
+// TestSecurityAttributesParse SDDL'lar Windows'da haqiqatan deskriptorga aylanadi va DACL himoyalangan.
+func TestSecurityAttributesParse(t *testing.T) {
+	for _, sid := range []string{"S-1-5-21-1-2-3-1001", ""} {
+		for _, f := range []func(string) (string, error){ProcessSDDL, ThreadSDDL} {
+			sa, err := securityAttributes(f(sid))
+			if err != nil {
+				t.Fatalf("%q: %v", sid, err)
+			}
+			ctrl, _, err := sa.SecurityDescriptor.Control()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ctrl&windows.SE_DACL_PROTECTED == 0 {
+				t.Fatalf("%q: DACL himoyalanmagan", sid)
+			}
+			if !strings.Contains(sa.SecurityDescriptor.String(), "OW") {
+				t.Fatalf("%q: OWNER RIGHTS ACE yo'q: %s", sid, sa.SecurityDescriptor)
+			}
+		}
+	}
+}
