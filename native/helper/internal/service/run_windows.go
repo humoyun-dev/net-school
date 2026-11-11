@@ -130,7 +130,8 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 
 	// Job: Companion va guard xizmat jarayoni bilan birga o'ladi (oldingi nusxaning yetim jarayonlari qolmaydi).
 	// Job yaratilmasa (bo'lmasligi kerak) jarayonlar Job'siz ishga tushadi va bu jurnalga yoziladi.
-	startUser, startSystem := session.StartAsUser, session.StartAsSystemInSession
+	var startUser userStarter = session.StartAsUser
+	startSystem := session.StartAsSystemInSession
 	job, err := session.NewJob()
 	if err != nil {
 		log.Warn("Job obyekti: %v", err)
@@ -156,9 +157,7 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 		Guard:     link,
 		ProcGuard: pg,
 		CAD:       cad.NewGuard(cad.NewKeyboardFilter(), p.cadJournal),
-		Companion: NewSessionChild("companion", func(s Session) supervise.Launcher {
-			return launcher(func() (supervise.Proc, error) { return startUser(toSession(s), p.companionExe, nil) })
-		}, supervise.SystemClock{}),
+		Companion: NewSessionChild("companion", companionLauncher(startUser, p.companionExe), supervise.SystemClock{}),
 		GuardProc: NewSessionChild("guard", func(s Session) supervise.Launcher {
 			return launcher(func() (supervise.Proc, error) {
 				return startSystem(toSession(s), p.helperExe, []string{"guard"})
@@ -166,7 +165,7 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 		}, supervise.SystemClock{}),
 		Mesh:     meshFunc(meshwatch.Check),
 		Sessions: consoleSessions{},
-		Shell:    explorerShell{exe: p.explorerExe},
+		Shell:    newExplorerShell(p.explorerExe),
 		Clock:    clock,
 		Log:      log.Warn,
 		Version:  version.Version,
@@ -256,6 +255,14 @@ func dataDirVerifier(p paths, log *eventLogger) func() bool {
 			log.Info("helper katalogi tekshirildi, konfiguratsiya yuklanadi")
 		}
 		return true
+	}
+}
+
+// companionLauncher Companion'ni himoyalangan SD va tozalangan muhit bilan (session.CompanionLaunch, aniq) ishga
+// tushiradi.
+func companionLauncher(start userStarter, exe string) func(Session) supervise.Launcher {
+	return func(s Session) supervise.Launcher {
+		return launcher(func() (supervise.Proc, error) { return start(toSession(s), exe, nil, session.CompanionLaunch) })
 	}
 }
 

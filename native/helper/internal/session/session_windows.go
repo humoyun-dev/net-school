@@ -135,14 +135,15 @@ func sessionString(id uint32, class uint32) (string, error) {
 	return windows.UTF16PtrToString(buf), nil
 }
 
-// StartAsUser exe'ni sessiya foydalanuvchisi nomidan, uning muhiti bilan, interaktiv ish stolida ishga tushiradi
-// (Companion). CREATE_NO_WINDOW qo'yilmaydi: Companion GUI ilova, bayroq uning oynalariga ta'sir qilmasa ham bu
-// yerda keraksiz. Token egasi s.UserSID bo'lmasa ErrSessionChanged.
-func StartAsUser(s Session, exe string, args []string) (supervise.Proc, error) {
-	return startAsUser(s, exe, args, 0)
+// StartAsUser exe'ni sessiya foydalanuvchisi nomidan, uning muhiti bilan, interaktiv ish stolida ishga tushiradi.
+// opts himoyani belgilaydi: Companion CompanionLaunch (himoyalangan SD, tozalangan muhit), explorer ShellLaunch
+// (standart SD, to'liq muhit) bilan. CREATE_NO_WINDOW qo'yilmaydi: ikkalasi ham GUI ilova. Token egasi s.UserSID
+// bo'lmasa ErrSessionChanged.
+func StartAsUser(s Session, exe string, args []string, opts LaunchOptions) (supervise.Proc, error) {
+	return startAsUser(s, exe, args, opts, 0)
 }
 
-func startAsUser(s Session, exe string, args []string, job windows.Handle) (supervise.Proc, error) {
+func startAsUser(s Session, exe string, args []string, opts LaunchOptions, job windows.Handle) (supervise.Proc, error) {
 	if err := checkExe(exe); err != nil {
 		return nil, err
 	}
@@ -158,7 +159,7 @@ func startAsUser(s Session, exe string, args []string, job windows.Handle) (supe
 	if sid != s.UserSID {
 		return nil, fmt.Errorf("%w: kutilgan %s, sessiyada %s", ErrSessionChanged, s.UserSID, sid)
 	}
-	return createProcess(tok, exe, args, 0, job, s.UserSID)
+	return createProcess(tok, exe, args, 0, job, s.UserSID, opts)
 }
 
 // StartAsSystemInSession exe'ni SYSTEM sifatida s sessiyasining interaktiv ish stolida ishga tushiradi (guard: past
@@ -192,7 +193,7 @@ func startAsSystemInSession(s Session, exe string, args []string, job windows.Ha
 	if err := windows.SetTokenInformation(tok, windows.TokenSessionId, (*byte)(unsafe.Pointer(&id)), uint32(unsafe.Sizeof(id))); err != nil {
 		return nil, fmt.Errorf("tokenga sessiya %d yozilmadi: %w", s.ID, err)
 	}
-	return createProcess(tok, exe, args, windows.CREATE_NO_WINDOW, job, "")
+	return createProcess(tok, exe, args, windows.CREATE_NO_WINDOW, job, "", LaunchOptions{})
 }
 
 // checkExe faqat mutlaq yo'lni qabul qiladi: nisbiy nom PATH yoki joriy katalogdan qidirilmasin.
@@ -203,17 +204,18 @@ func checkExe(exe string) error {
 	return nil
 }
 
-// createProcess tok nomidan jarayon yaratadi. Muhit bloki token egasiniki (CreateEnvironmentBlock, meros olinmaydi),
-// lekin sanitizedEnv bilan tozalangan (o'quvchi `HKCU\Environment`ga yoza oladi), joriy katalog — exe katalogi, dastaklar meros qilinmaydi. Ip dastagi darhol yopiladi, jarayon dastagi process'ga
+// createProcess tok nomidan jarayon yaratadi. Muhit bloki token egasiniki (CreateEnvironmentBlock, meros olinmaydi);
+// opts.SanitizedEnv() bo'lsa sanitizedEnv bilan tozalangan (o'quvchi `HKCU\Environment`ga yoza oladi). Joriy
+// katalog — exe katalogi, dastaklar meros qilinmaydi. Ip dastagi darhol yopiladi, jarayon dastagi process'ga
 // o'tadi (uni Wait yopadi).
 //
 // job nol bo'lmasa jarayon CREATE_SUSPENDED bilan yaratiladi, Job'ga qo'shiladi va shundan keyingina ishga
 // tushiriladi: jarayon Job'dan tashqarida bitta ham bola jarayon ochib ulgurmaydi. Job'ga qo'shilmasa jarayon
 // o'ldiriladi (Job'siz bola xizmat qulasa yetim qolardi).
 //
-// Jarayon va birinchi ip ProcessSDDL/ThreadSDDL bilan yaratiladi (userSID — o'quvchi, guard uchun bo'sh): o'quvchi
-// ularni to'xtata, muzlata yoki boshqara olmaydi.
-func createProcess(tok windows.Token, exe string, args []string, flags uint32, job windows.Handle, userSID string) (supervise.Proc, error) {
+// opts.DefaultSecurity bo'lmasa jarayon va birinchi ip ProcessSDDL/ThreadSDDL bilan yaratiladi (userSID — o'quvchi,
+// guard uchun bo'sh): o'quvchi ularni to'xtata, muzlata yoki boshqara olmaydi. Aks holda SECURITY_ATTRIBUTES nil.
+func createProcess(tok windows.Token, exe string, args []string, flags uint32, job windows.Handle, userSID string, opts LaunchOptions) (supervise.Proc, error) {
 	exe16, err := windows.UTF16PtrFromString(exe)
 	if err != nil {
 		return nil, fmt.Errorf("exe yo'li yaroqsiz: %w", err)
@@ -231,16 +233,25 @@ func createProcess(tok windows.Token, exe string, args []string, flags uint32, j
 		return nil, err
 	}
 
-	env, err := sanitizedEnv(tok)
+	var env []uint16
+	if opts.SanitizedEnv() {
+		env, err = sanitizedEnv(tok)
+	} else {
+		env, err = fullEnv(tok)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	procSA, err := securityAttributes(ProcessSDDL(userSID))
+	procSDDL, threadSDDL, err := opts.descriptors(userSID)
 	if err != nil {
 		return nil, err
 	}
-	threadSA, err := securityAttributes(ThreadSDDL(userSID))
+	procSA, err := securityAttributes(procSDDL)
+	if err != nil {
+		return nil, err
+	}
+	threadSA, err := securityAttributes(threadSDDL)
 	if err != nil {
 		return nil, err
 	}
@@ -272,10 +283,10 @@ func createProcess(tok windows.Token, exe string, args []string, flags uint32, j
 	return newProcess(pi.Process), nil
 }
 
-// securityAttributes SDDL'dan meros qilinmaydigan SECURITY_ATTRIBUTES yasaydi.
-func securityAttributes(sddl string, err error) (*windows.SecurityAttributes, error) {
-	if err != nil {
-		return nil, err
+// securityAttributes SDDL'dan meros qilinmaydigan SECURITY_ATTRIBUTES yasaydi. Bo'sh SDDL — nil (standart SD).
+func securityAttributes(sddl string) (*windows.SecurityAttributes, error) {
+	if sddl == "" {
+		return nil, nil
 	}
 	sd, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
@@ -325,6 +336,16 @@ func sanitizedEnv(tok windows.Token) ([]uint16, error) {
 		forced = append(forced, EnvVar{Name: n, Value: lookupEnv(system, n)})
 	}
 	return SerializeEnvBlock(SanitizeEnv(user, forced)), nil
+}
+
+// fullEnv token egasining filtrsiz muhit bloki (CreateEnvironmentBlock(tok, false)): explorer uchun, undan ochilgan
+// dasturlar o'quvchining odatiy muhitini (o'z Path'i bilan) olsin.
+func fullEnv(tok windows.Token) ([]uint16, error) {
+	user, err := envBlock(tok)
+	if err != nil {
+		return nil, err
+	}
+	return SerializeEnvBlock(user), nil
 }
 
 // envBlock CreateEnvironmentBlock natijasini satrlarga aylantiradi. tok 0 — faqat tizim o'zgaruvchilari.
@@ -379,8 +400,8 @@ func NewJob() (*Job, error) {
 }
 
 // StartAsUser — session.StartAsUser, jarayon Job ichida.
-func (j *Job) StartAsUser(s Session, exe string, args []string) (supervise.Proc, error) {
-	return startAsUser(s, exe, args, j.h)
+func (j *Job) StartAsUser(s Session, exe string, args []string, opts LaunchOptions) (supervise.Proc, error) {
+	return startAsUser(s, exe, args, opts, j.h)
 }
 
 // StartAsSystemInSession — session.StartAsSystemInSession, jarayon Job ichida.

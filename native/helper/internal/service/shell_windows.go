@@ -12,12 +12,25 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/humoyun-dev/net-school/native/helper/internal/session"
+	"github.com/humoyun-dev/net-school/native/helper/internal/supervise"
 )
+
+// userStarter — session.StartAsUser yoki Job.StartAsUser (testda soxta).
+type userStarter func(s session.Session, exe string, args []string, opts session.LaunchOptions) (supervise.Proc, error)
 
 // explorerShell Shell porti: sessiyada `%SystemRoot%\explorer.exe` (aynan shu yo'l) ishlamayotgan bo'lsa uni
 // sessiya foydalanuvchisi nomidan ishga tushiradi. Explorer Job'ga qo'shilmaydi: xizmat to'xtasa ham o'quvchi
-// ish stoli qolishi kerak.
-type explorerShell struct{ exe string }
+// ish stoli qolishi kerak. Explorer oddiy foydalanuvchi jarayoni (session.ShellLaunch): standart SD va to'liq
+// muhit. Companion'ning himoyasi (tozalangan muhit, cheklangan DACL) bu yerda zarar: explorer'dan ochilgan har
+// dastur muhitni meros oladi, o'quvchi esa o'z shell'ini Task Manager'dan qayta ishga tushira olmasdi.
+type explorerShell struct {
+	exe   string
+	start userStarter
+}
+
+func newExplorerShell(exe string) explorerShell {
+	return explorerShell{exe: exe, start: session.StartAsUser}
+}
 
 func (e explorerShell) Ensure(s Session) error {
 	running, err := processInSession(s.ID, e.exe)
@@ -27,7 +40,7 @@ func (e explorerShell) Ensure(s Session) error {
 	if running {
 		return nil
 	}
-	p, err := session.StartAsUser(session.Session{ID: s.ID, UserSID: s.UserSID}, e.exe, nil)
+	p, err := e.start(toSession(s), e.exe, nil, session.ShellLaunch)
 	if err != nil {
 		return fmt.Errorf("explorer qayta ishga tushmadi: %w", err)
 	}

@@ -38,7 +38,7 @@ func TestActiveConsoleOnRunner(t *testing.T) {
 
 func TestStartRejectsRelativeExe(t *testing.T) {
 	s := Session{ID: 1, UserSID: "S-1-5-21-1-2-3-1001"}
-	if _, err := StartAsUser(s, `companion\NetSchool.exe`, nil); err == nil {
+	if _, err := StartAsUser(s, `companion\NetSchool.exe`, nil, CompanionLaunch); err == nil {
 		t.Fatal("StartAsUser nisbiy yo'lni qabul qildi")
 	}
 	if _, err := StartAsSystemInSession(s, `netschool-helper.exe`, []string{"guard"}); err == nil {
@@ -188,7 +188,11 @@ func TestSanitizedEnvOwnToken(t *testing.T) {
 func TestSecurityAttributesParse(t *testing.T) {
 	for _, sid := range []string{"S-1-5-21-1-2-3-1001", ""} {
 		for _, f := range []func(string) (string, error){ProcessSDDL, ThreadSDDL} {
-			sa, err := securityAttributes(f(sid))
+			sddl, err := f(sid)
+			if err != nil {
+				t.Fatalf("%q: %v", sid, err)
+			}
+			sa, err := securityAttributes(sddl)
 			if err != nil {
 				t.Fatalf("%q: %v", sid, err)
 			}
@@ -203,5 +207,38 @@ func TestSecurityAttributesParse(t *testing.T) {
 				t.Fatalf("%q: OWNER RIGHTS ACE yo'q: %s", sid, sa.SecurityDescriptor)
 			}
 		}
+	}
+}
+
+// TestSecurityAttributesEmptyIsDefault bo'sh SDDL (ShellLaunch) — nil SECURITY_ATTRIBUTES, ya'ni token'ning standart SD'si.
+func TestSecurityAttributesEmptyIsDefault(t *testing.T) {
+	sa, err := securityAttributes("")
+	if err != nil || sa != nil {
+		t.Fatalf("securityAttributes(\"\") = %v, %v; nil, nil kutilgan", sa, err)
+	}
+}
+
+// TestFullEnvOwnToken explorer muhiti: CreateEnvironmentBlock bloki o'zgarishsiz (foydalanuvchi Path'i tizimniki bilan
+// almashtirilmaydi), blok ikki NUL bilan tugaydi.
+func TestFullEnvOwnToken(t *testing.T) {
+	var tok windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &tok); err != nil {
+		t.Fatal(err)
+	}
+	defer tok.Close()
+	b, err := fullEnv(tok)
+	if err != nil {
+		t.Fatalf("fullEnv: %v", err)
+	}
+	if len(b) < 2 || b[len(b)-1] != 0 || b[len(b)-2] != 0 {
+		t.Fatal("blok ikki NUL bilan tugamagan")
+	}
+	user, err := envBlock(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ParseEnvBlock(b)
+	if strings.Join(got, "\n") != strings.Join(user, "\n") {
+		t.Fatalf("fullEnv CreateEnvironmentBlock'dan farq qiladi:\n%q\n%q", got, user)
 	}
 }

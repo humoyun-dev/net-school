@@ -77,6 +77,10 @@ func HelperKey(token string, rotate bool) (HelperKeyResult, error) {
 	if err != nil {
 		return HelperKeyResult{DataRootReplaced: data.RootReplaced}, fmt.Errorf("helper katalogi himoyalanmadi: %w", err)
 	}
+	// Katalog qayta yaratilgan bo'lsa, keyingi xatoda ham enroll/helper-key ogohlantirishni chiqarsin.
+	fail := func(err error) (HelperKeyResult, error) {
+		return HelperKeyResult{DataRootReplaced: data.RootReplaced}, err
+	}
 	var key ed25519.PrivateKey
 	if !rotate {
 		key, _ = hub.LoadKey(p.HelperKey)
@@ -84,18 +88,18 @@ func HelperKey(token string, rotate bool) (HelperKeyResult, error) {
 	if key == nil {
 		pemBytes, k, err := hub.GenerateKeyPEM()
 		if err != nil {
-			return HelperKeyResult{}, err
+			return fail(err)
 		}
 		if err := writeAtomic(p.HelperKeyPending, pemBytes); err != nil {
-			return HelperKeyResult{}, err
+			return fail(err)
 		}
 		key = k
 	} else if err := removeIfExists(p.HelperKeyPending); err != nil {
-		return HelperKeyResult{}, err
+		return fail(err)
 	}
 	pub, err := hub.EncodePublicKey(key.Public().(ed25519.PublicKey))
 	if err != nil {
-		return HelperKeyResult{}, err
+		return fail(err)
 	}
 	return HelperKeyResult{HelperPublicKey: pub, HelperProof: hub.ClaimProof(key, token, pub), DataRootReplaced: data.RootReplaced}, nil
 }
