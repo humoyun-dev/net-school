@@ -15,6 +15,8 @@
     "meshcentral:agents": "node infra/meshcentral/upstream/agents/check-releases.js --output infra/meshcentral/agent-cache",
     "build:api": "pnpm --filter @netschool/api build",
     "build:web": "pnpm --filter @netschool/web build",
+    "build:helper": "node scripts/build-helper.mjs",
+    "test:helper": "cd native/helper && go vet ./... && go test ./...",
     "test:e2e:companion": "NETSCHOOL_COMPANION_TEST_BUILD=1 pnpm --filter @netschool/companion build && vitest run --project companion-e2e",
     "test:e2e:web": "pnpm --filter @netschool/web build && vitest run --project web-e2e"
   },
