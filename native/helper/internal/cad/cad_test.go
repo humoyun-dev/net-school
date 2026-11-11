@@ -162,7 +162,8 @@ func TestStartDisablesLeftoverFilter(t *testing.T) {
 	g := NewGuard(f, path)
 	g.Start(ctx)
 
-	wantCalls(t, f, "unblock")
+	// Qoldiq tozalashdan oldin nashr bir marta tekshiriladi (edition bo'lsa Unblock keraksiz, TestLeftover...Edition).
+	wantCalls(t, f, "available", "unblock")
 	wantState(t, g.State(), StateOff)
 	if exists(t, path) {
 		t.Fatal("qoldiq tozalangach jurnal o'chirilgan bo'lishi kerak")
@@ -170,7 +171,7 @@ func TestStartDisablesLeftoverFilter(t *testing.T) {
 
 	// Ikkinchi Start hech narsa qilmaydi.
 	g.Start(ctx)
-	wantCalls(t, f, "unblock")
+	wantCalls(t, f, "available", "unblock")
 }
 
 func TestStartWithoutJournalDoesNothing(t *testing.T) {
@@ -214,10 +215,190 @@ func TestStartFailureKeepsJournalAndLaterUnlockRetries(t *testing.T) {
 
 	f.unblockErr = nil
 	wantState(t, g.Set(ctx, false), StateOff)
-	wantCalls(t, f, "unblock", "unblock")
+	wantCalls(t, f, "available", "unblock", "unblock")
 	if exists(t, path) {
 		t.Fatal("qayta urinish muvaffaqiyatli bo'lgach jurnal o'chirilishi kerak")
 	}
+}
+
+// leftover oldingi jarayon bloklash paytida qulagani kabi jurnal qoldiradi.
+func leftover(t *testing.T, path string) {
+	t.Helper()
+	wantState(t, NewGuard(ready(), path).Set(context.Background(), true), StateBlocked)
+	if !exists(t, path) {
+		t.Fatal("qoldiq jurnal yaratilmadi")
+	}
+}
+
+func TestPendingTracksJournal(t *testing.T) {
+	path := journalPath(t)
+	g := NewGuard(ready(), path)
+	ctx := context.Background()
+
+	if g.Pending() {
+		t.Fatal("jurnal yo'q: Pending false bo'lishi kerak")
+	}
+	g.Set(ctx, true)
+	if !g.Pending() {
+		t.Fatal("bloklangan holatda Pending true bo'lishi kerak")
+	}
+	g.Set(ctx, false)
+	if g.Pending() {
+		t.Fatal("ochilgandan keyin Pending false bo'lishi kerak")
+	}
+
+	// Buzilgan jurnal ham "qaytarish kerak".
+	if err := os.WriteFile(path, []byte("bu json emas"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Pending() {
+		t.Fatal("buzilgan jurnalda Pending true bo'lishi kerak")
+	}
+	// O'qib bo'lmaydigan jurnal (fayl o'rnida katalog): Stat'dan o'tadi, lekin "yo'q" deb hisoblanmaydi.
+	bad := filepath.Join(t.TempDir(), "cad-journal.json")
+	if err := os.Mkdir(bad, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if !NewGuard(ready(), bad).Pending() {
+		t.Fatal("o'qib bo'lmaydigan jurnalda Pending true bo'lishi kerak")
+	}
+}
+
+// Review Focus #3 (fix round 1): Start boot'da yiqilsa, bloklash holati o'zgarmaydi (reboot'dan keyin lock tiklanmaydi),
+// Set chaqirilmaydi. Tozalashni Retry davom ettiradi.
+func TestRetryClearsLeftoverAfterStartFailed(t *testing.T) {
+	path := journalPath(t)
+	ctx := context.Background()
+	leftover(t, path)
+
+	f := ready()
+	f.unblockErr = errBoom // masalan, WMI provayderi boot'ning boshida hali tayyor emas
+	g := NewGuard(f, path)
+	g.Start(ctx)
+	wantState(t, g.State(), StateFailed)
+	if !g.Pending() {
+		t.Fatal("Start yiqilgach Pending true bo'lishi kerak")
+	}
+
+	// Hali yiqilayotgan bo'lsa Retry jurnalni saqlaydi va yana urinadi.
+	g.Retry(ctx)
+	wantState(t, g.State(), StateFailed)
+	if !g.Pending() || !exists(t, path) {
+		t.Fatal("yiqilgan Retry jurnalni saqlashi kerak")
+	}
+
+	f.unblockErr = nil
+	g.Retry(ctx)
+	wantState(t, g.State(), StateOff)
+	if g.Pending() || exists(t, path) {
+		t.Fatal("muvaffaqiyatli Retry jurnalni o'chirishi kerak")
+	}
+	if g.Reason() != "" {
+		t.Fatalf("sabab bo'sh bo'lishi kerak: %q", g.Reason())
+	}
+	wantCalls(t, f, "available", "unblock", "unblock", "unblock")
+
+	// Tozalangach Retry hech narsa qilmaydi (PowerShell yo'q).
+	g.Retry(ctx)
+	g.Retry(ctx)
+	wantCalls(t, f, "available", "unblock", "unblock", "unblock")
+	wantState(t, g.State(), StateOff)
+}
+
+func TestRetryWithoutJournalDoesNothing(t *testing.T) {
+	f := ready()
+	g := NewGuard(f, journalPath(t))
+	g.Retry(context.Background())
+
+	wantCalls(t, f)
+	wantState(t, g.State(), StateOff)
+}
+
+func TestRetryDoesNotUndoCurrentBlock(t *testing.T) {
+	f := ready()
+	g := NewGuard(f, journalPath(t))
+	ctx := context.Background()
+
+	wantState(t, g.Set(ctx, true), StateBlocked)
+	g.Retry(ctx) // bloklash bor: Retry Set(true) ishiga aralashmaydi
+
+	wantCalls(t, f, "available", "block")
+	wantState(t, g.State(), StateBlocked)
+	if !g.Pending() {
+		t.Fatal("bloklangan holatda jurnal bor")
+	}
+}
+
+// Nashr cheklovi aniq (funksiya/xizmat yo'q): filtr yoqilgan bo'lishi mumkin emas, jurnal PowerShell Unblock'siz
+// o'chiriladi va Retry har 30 s da abadiy yiqilib turmaydi.
+func TestLeftoverJournalIsDroppedWhenEditionIsDefinitive(t *testing.T) {
+	path := journalPath(t)
+	ctx := context.Background()
+	leftover(t, path)
+
+	f := &fakeBackend{available: false, reason: ReasonEdition, unblockErr: errBoom}
+	g := NewGuard(f, path)
+	g.Start(ctx)
+
+	wantCalls(t, f, "available") // Unblock chaqirilmagan
+	wantState(t, g.State(), StateUnavailable)
+	if g.Reason() != ReasonEdition {
+		t.Fatalf("sabab = %q, kutilgan edition", g.Reason())
+	}
+	if g.Pending() || exists(t, path) {
+		t.Fatal("jurnal o'chirilishi kerak")
+	}
+
+	// Natija keshlangan: keyingi Retry va Set(true) backend'dan qayta so'ramaydi.
+	g.Retry(ctx)
+	wantState(t, g.Set(ctx, true), StateUnavailable)
+	wantState(t, g.Set(ctx, false), StateUnavailable)
+	wantCalls(t, f, "available")
+}
+
+func TestEditionDropAlsoCleansCorruptJournal(t *testing.T) {
+	path := journalPath(t)
+	if err := os.WriteFile(path, []byte("bu json emas"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeBackend{available: false, reason: ReasonEdition}
+	g := NewGuard(f, path)
+	g.Start(context.Background())
+
+	wantCalls(t, f, "available")
+	wantState(t, g.State(), StateUnavailable)
+	if exists(t, path) {
+		t.Fatal("buzilgan jurnal ham o'chirilishi kerak")
+	}
+}
+
+// Mavjudlik so'rovi xato bersa (edition emas) filtr bor deb faraz qilinadi: Unblock baribir uriniladi.
+func TestLeftoverJournalSurvivesProbeError(t *testing.T) {
+	path := journalPath(t)
+	ctx := context.Background()
+	leftover(t, path)
+
+	f := &fakeBackend{available: false, reason: "probe: powershell yiqildi"}
+	g := NewGuard(f, path)
+	g.Start(ctx)
+
+	wantCalls(t, f, "available", "unblock")
+	wantState(t, g.State(), StateOff)
+	if g.Pending() {
+		t.Fatal("Unblock muvaffaqiyatli bo'lgach jurnal o'chirilishi kerak")
+	}
+}
+
+// Bu jarayon o'zi bloklagan bo'lsa nashr qayta so'ralmaydi (kesh) va jurnal faqat Unblock'dan keyin o'chadi.
+func TestOwnBlockIsNotSubjectToEditionDrop(t *testing.T) {
+	path := journalPath(t)
+	f := ready()
+	g := NewGuard(f, path)
+	ctx := context.Background()
+
+	wantState(t, g.Set(ctx, true), StateBlocked)
+	wantState(t, g.Set(ctx, false), StateOff)
+	wantCalls(t, f, "available", "block", "unblock")
 }
 
 func TestCorruptJournalIsTreatedAsBlocked(t *testing.T) {
@@ -238,7 +419,7 @@ func TestCorruptJournalIsTreatedAsBlocked(t *testing.T) {
 			g.Start(context.Background())
 
 			// Noaniq jurnal "bloklanmagan" deb o'qilmaydi: filtr yoqilgan bo'lishi mumkin, shuning uchun o'chiriladi.
-			wantCalls(t, f, "unblock")
+			wantCalls(t, f, "available", "unblock")
 			wantState(t, g.State(), StateOff)
 			if exists(t, path) {
 				t.Fatal("buzilgan jurnal tozalangach o'chirilishi kerak")

@@ -9,7 +9,9 @@
 // bloklash paytida qulasa yoki kompyuter o'chib qolsa, Ctrl+Alt+Del bloklangan holda qolib ketadi. Shuning uchun
 // Block'dan OLDIN jurnal (`cad-journal.json`, `%ProgramData%\NetSchool\helper\`) atomik yoziladi, Unblock
 // muvaffaqiyatli bo'lgachgina o'chiriladi, helper keyingi ishga tushishda (Start) jurnalda qoldiq bo'lsa filtrni
-// o'chiradi.
+// o'chiradi. Start boot'ning boshida yiqilishi mumkin (WMI hali tayyor emas), bloklash holati esa o'zgarmasligi
+// mumkin (reboot'dan keyin lock tiklanmaydi), shuning uchun chaqiruvchi bloklash yo'q va Pending true bo'lganda
+// Retry'ni RetryInterval oralig'ida chaqiradi, jurnal tozalanguncha.
 package cad
 
 import (
@@ -20,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Guard holatlari (contracts'dagi helperStatusSchema `cad` maydoni bilan bir xil).
@@ -98,12 +101,37 @@ func (g *Guard) set(state, reason string) string {
 	return state
 }
 
+// RetryInterval chaqiruvchi Retry'ni (bloklash yo'q, Pending true bo'lganda) shuncha oraliqda chaqirishi kerak.
+// Har soniya emas: har urinish sekin PowerShell chaqiruvi (30 s gacha).
+const RetryInterval = 30 * time.Second
+
+// Pending jurnal borligini bildiradi, ya'ni filtr bizning tomonimizdan yoqilgan va hali tasdiqlangan holda
+// o'chirilmagan bo'lishi mumkin. Jurnal buzilgan yoki o'qilmasa ham true: "bloklash yo'q" deb o'ylamaymiz
+// (policy.Pending kabi). Sekin backend chaqiruvini kutmaydi.
+//
+// Shartnoma: bloklash YO'Q (Set(false) holati) paytida Pending true bo'lsa, chaqiruvchi Retry'ni (yoki Set(ctx,
+// false)'ni) RetryInterval oralig'ida qayta chaqirishi kerak, to'xtamaguncha. Aks holda Start boot'da yiqilsa
+// (masalan, WMI hali tayyor emas) va reboot'dan keyin bloklash tiklanmasa (lock.json faqat shu boot ichida
+// tiklanadi), holat hech o'zgarmaydi, Set chaqirilmaydi va Ctrl+Alt+Del keyingi darsgacha to'silgan qoladi.
+func (g *Guard) Pending() bool { return g.journalPending() }
+
 // Start helper ishga tushganda, birinchi Set'dan oldin, bir marta chaqiriladi: jurnal qolgan bo'lsa (oldingi ish
-// bloklash paytida qulagan yoki kompyuter o'chgan), filtr o'chiriladi. Jurnal yo'q bo'lsa hech narsa qilmaydi
-// (PowerShell ishga tushmaydi, holat `off`). Unblock yiqilsa jurnal qoladi, holat `failed` (sabab Reason'da);
-// keyingi Set(false) qayta urinadi. Bu jarayonda allaqachon bloklangan bo'lsa (Set(true) muvaffaqiyatli bo'lgan)
-// qoldiq emas: tegilmaydi.
-func (g *Guard) Start(ctx context.Context) {
+// bloklash paytida qulagan yoki kompyuter o'chgan), filtr o'chiriladi (Retry'ning o'zi). Jurnal yo'q bo'lsa hech
+// narsa qilmaydi (PowerShell ishga tushmaydi, holat `off`).
+//
+// Unblock yiqilsa jurnal qoladi, holat `failed` (sabab Reason'da). Start'dan keyin ham Pending true bo'lsa va
+// bloklash yo'q bo'lsa, chaqiruvchi tozalanmaguncha Retry'ni RetryInterval oralig'ida chaqiradi (Pending'ga qarang).
+func (g *Guard) Start(ctx context.Context) { g.Retry(ctx) }
+
+// Retry bloklash YO'Q paytida qoldiq jurnalni tozalashga urinadi: filtrni o'chiradi va jurnalni o'chiradi. Jurnal
+// yo'q bo'lsa hech narsa qilmaydi (PowerShell ishga tushmaydi). Bu jarayonda allaqachon bloklangan bo'lsa
+// (Set(true) muvaffaqiyatli bo'lgan) tegilmaydi. Bloklash BOR paytida chaqirilmaydi: u Set(true) ishi (u `failed`ni
+// qayta urinadi), bu yerda esa qisman yoqilgan filtr o'chirilib qo'yilardi.
+//
+// Qoldiq "bloklash yo'q" hukmiga tayanadi, shuning uchun nashr cheklovi aniq bo'lsa (Available `edition`: funksiya
+// yoki xizmat yo'q) filtr yoqilgan bo'lishi mumkin emas: jurnal PowerShell'siz o'chiriladi va holat `unavailable`
+// bo'ladi (aks holda Unblock har 30 s da abadiy yiqilardi). Mavjudlik so'rovi xato bersa, Unblock baribir uriniladi.
+func (g *Guard) Retry(ctx context.Context) {
 	g.opMu.Lock()
 	defer g.opMu.Unlock()
 	if g.blocked || !g.journalPending() {
@@ -115,9 +143,13 @@ func (g *Guard) Start(ctx context.Context) {
 // Set bloklash holatini filtrga qo'llaydi va natijaviy holatni qaytaradi: `blocked`, `unavailable`, `failed` yoki
 // `off`. Takroriy chaqiruv xavfsiz: allaqachon bloklangan bo'lsa Set(true), qaytariladigan narsa yo'q bo'lsa
 // Set(false) backend'ga (PowerShell) tegmaydi. `failed` esa har chaqiruvda qayta uriniladi, shuning uchun
-// chaqiruvchi uni o'zgarishda yoki siyrak oraliqda chaqirishi kerak (har soniya emas).
+// chaqiruvchi uni o'zgarishda yoki RetryInterval kabi siyrak oraliqda chaqirishi kerak (har soniya emas).
 //
-// Set(false) hech qachon Available'ni so'ramaydi: filtr yoqilmagan bo'lsa, ochish tez va PowerShell'siz.
+// Set faqat holat O'ZGARGANDA chaqiriladi, shuning uchun Set(false) o'zi qoldiqni tozalashni kafolatlamaydi: qoldiq
+// bloklash holati o'zgarmaganda (reboot'dan keyin ochiq) qoladi. Buning uchun Pending/Retry shartnomasi bor.
+//
+// Set(false) hech qachon Available'ni so'ramaydi (qoldiq jurnal bo'lmasa): filtr yoqilmagan bo'lsa, ochish tez va
+// PowerShell'siz.
 func (g *Guard) Set(ctx context.Context, locked bool) string {
 	g.opMu.Lock()
 	defer g.opMu.Unlock()
@@ -153,6 +185,15 @@ func (g *Guard) unblock(ctx context.Context) string {
 			return g.set(StateUnavailable, ReasonEdition)
 		}
 		return g.set(StateOff, "")
+	}
+	// Qoldiq jurnal (bu jarayon bloklamagan), lekin bu kompyuterda filtr yo'q: yoqilgan bo'lishi mumkin emas.
+	if !g.blocked {
+		if state, _ := g.probe(); state == StateUnavailable {
+			if err := g.removeJournal(); err != nil {
+				return g.set(StateFailed, err.Error())
+			}
+			return g.set(StateUnavailable, ReasonEdition)
+		}
 	}
 	// Unblock yiqilsa ham filtr qisman o'chgan bo'lishi mumkin: "bloklangan" belgisi tushiriladi, keyingi
 	// Set(true) filtrni to'liq qayta yoqadi; jurnal esa qoldiqni eslab turadi.
