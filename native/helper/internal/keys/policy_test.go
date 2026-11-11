@@ -45,11 +45,11 @@ func loadSequences(t *testing.T) []fixtureSequence {
 
 func TestFixtureHasEnoughSequences(t *testing.T) {
 	sequences := loadSequences(t)
-	if len(sequences) < 8 {
-		t.Fatalf("fixture'da kamida 8 ketma-ketlik bo'lishi kerak, bor: %d", len(sequences))
+	if len(sequences) < 40 {
+		t.Fatalf("fixture'da kamida 40 ketma-ketlik bo'lishi kerak, bor: %d", len(sequences))
 	}
 	names := map[string]bool{}
-	var blocked, passed, reset bool
+	var blocked, passed, reset, lowerILBlocked, injectedPassed bool
 	for _, s := range sequences {
 		if names[s.Name] {
 			t.Errorf("ketma-ketlik nomi takrorlangan: %q", s.Name)
@@ -66,11 +66,19 @@ func TestFixtureHasEnoughSequences(t *testing.T) {
 			if s.Block[i] != nil {
 				blocked = blocked || *s.Block[i]
 				passed = passed || !*s.Block[i]
+				// Pastroq darajadagi injected hodisa to'siladi, oddiy injected esa o'tadi: ikkalasi ham fixture'da bo'lishi shart.
+				if e.Kind == "down" && e.Flags&0x12 == 0x12 && *s.Block[i] {
+					lowerILBlocked = true
+				}
+				if e.Kind == "down" && e.Flags&0x12 == 0x10 && !*s.Block[i] {
+					injectedPassed = true
+				}
 			}
 		}
 	}
-	if !blocked || !passed || !reset {
-		t.Fatalf("fixture to'siladigan (%v), o'tadigan (%v) va reset (%v) holatlarini qamrashi kerak", blocked, passed, reset)
+	if !blocked || !passed || !reset || !lowerILBlocked || !injectedPassed {
+		t.Fatalf("fixture to'siladigan (%v), o'tadigan (%v), reset (%v), to'siladigan pastroq-daraja injected (%v) va o'tadigan injected (%v) holatlarini qamrashi kerak",
+			blocked, passed, reset, lowerILBlocked, injectedPassed)
 	}
 }
 
@@ -124,6 +132,7 @@ func TestHandleDoesNotAllocate(t *testing.T) {
 		{VK: 0x5b, Down: true},
 		{VK: 0x5b, Down: false},
 		{VK: 0x41, Flags: 0x10, Down: true},
+		{VK: 0x5b, Flags: 0x12, Down: true},
 	}
 	allocs := testing.AllocsPerRun(100, func() {
 		for _, e := range events {

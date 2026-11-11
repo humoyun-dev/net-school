@@ -13,6 +13,8 @@ export const VK = {
 // KBDLLHOOKSTRUCT.flags bitlari.
 export const LLKHF_ALTDOWN = 0x20;
 export const LLKHF_INJECTED = 0x10;
+// Windows bu bitni boshqa (pastroq ishonchlilik darajasidagi) jarayon yuborgan kiritishga INJECTED bilan birga qo'yadi.
+export const LLKHF_LOWER_IL_INJECTED = 0x02;
 
 const CTRL_KEYS: ReadonlySet<number> = new Set([0x11, 0xa2, 0xa3]);
 const ALT_KEYS: ReadonlySet<number> = new Set([0x12, 0xa4, 0xa5]);
@@ -25,15 +27,20 @@ export interface KeyEvent {
 
 export type KeyVerdict = 'pass' | 'block';
 
+function isTrustedInjected(flags: number): boolean {
+  return (flags & LLKHF_INJECTED) !== 0 && (flags & LLKHF_LOWER_IL_INJECTED) === 0;
+}
+
 // Hodisalar ketma-ketligini kuzatadi: modifier holati va to'silgan tugmaning "up"i (aks holda Win'ning "up"i Start'ni ochadi).
 export class KeyPolicy {
   readonly #held = new Set<number>();
   readonly #swallowed = new Set<number>();
 
   handle(event: KeyEvent): KeyVerdict {
-    // Dasturiy yuborilgan kiritish (MeshAgent orqali o'qituvchining masofaviy boshqaruvi) hech qachon to'silmaydi
-    // va modifier holatiga ta'sir qilmaydi.
-    if ((event.flags & LLKHF_INJECTED) !== 0) return 'pass';
+    // Ishonchli dasturiy kiritish (SYSTEM'dagi MeshAgent orqali o'qituvchining masofaviy boshqaruvi) to'silmaydi
+    // va modifier holatiga ta'sir qilmaydi. Talaba jarayoni (pastroq daraja) yuborgan SendInput esa LOWER_IL_INJECTED
+    // bilan keladi: u jismoniy kiritish kabi ishlanadi, aks holda Win/Alt+Tab bilan bloklashni aylanib o'tish mumkin.
+    if (isTrustedInjected(event.flags)) return 'pass';
 
     if (event.kind === 'up') {
       this.#held.delete(event.vkCode);

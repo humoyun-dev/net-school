@@ -23,8 +23,9 @@ const (
 
 // KBDLLHOOKSTRUCT.flags bitlari.
 const (
-	LLKHFInjected = 0x10
-	LLKHFAltDown  = 0x20
+	LLKHFLowerILInjected = 0x02 // Windows bu bitni pastroq ishonchlilik darajasidagi jarayon yuborgan kiritishga INJECTED bilan birga qo'yadi
+	LLKHFInjected        = 0x10
+	LLKHFAltDown         = 0x20
 )
 
 // Event hook'ga kelgan bitta tugma hodisasi (WH_KEYBOARD_LL).
@@ -109,9 +110,10 @@ type Policy struct {
 
 // Handle hodisani qayta ishlaydi va uni to'sish kerakmi (true) yoki keyingi hook'ga o'tkazish kerakmi (false) qaytaradi.
 func (p *Policy) Handle(e Event) (block bool) {
-	// Dasturiy yuborilgan kiritish (MeshAgent orqali o'qituvchining masofaviy boshqaruvi) hech qachon to'silmaydi
-	// va modifier holatiga ta'sir qilmaydi.
-	if e.Flags&LLKHFInjected != 0 {
+	// Ishonchli dasturiy kiritish (SYSTEM'dagi MeshAgent orqali o'qituvchining masofaviy boshqaruvi) to'silmaydi
+	// va modifier holatiga ta'sir qilmaydi. Talaba jarayoni (pastroq daraja) yuborgan SendInput esa LOWER_IL_INJECTED
+	// bilan keladi: u jismoniy kiritish kabi ishlanadi, aks holda Win/Alt+Tab bilan bloklashni aylanib o'tish mumkin.
+	if e.Flags&(LLKHFInjected|LLKHFLowerILInjected) == LLKHFInjected {
 		return false
 	}
 
