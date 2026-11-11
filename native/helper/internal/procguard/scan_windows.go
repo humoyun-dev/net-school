@@ -33,12 +33,6 @@ const noSession = 0xFFFFFFFF
 // maxImagePath QueryFullProcessImageNameW buferining yuqori chegarasi (uzun yo'llar, belgilarda).
 const maxImagePath = 32768
 
-// procKey jarayonni PID qayta ishlatilishidan ajratadi.
-type procKey struct {
-	pid     uint32
-	created time.Time
-}
-
 // Scanner bloklash paytida o'quvchi sessiyasini har Interval'da ko'rib chiqadi va Decide true degan jarayonlarni
 // TerminateProcess bilan to'xtatadi. Start baseline'ni oladi, Stop to'xtatadi. Xizmat (Task 10) bloklash yoqilganda
 // Start, o'chganda yoki sessiya almashganda Stop/Start chaqiradi.
@@ -64,6 +58,7 @@ type Scanner struct {
 	killed   uint64
 	failed   uint64
 	attempts map[procKey]bool // bu bloklashda hisoblangan jarayonlar (har biri bir marta sanaladi)
+	stale    staleTracker     // Stale istisnosi har jarayonga bir scan (faqat loop goroutine'i ishlatadi)
 }
 
 // NewScanner ruxsat ro'yxatini %ProgramFiles% va %SystemRoot% (Known Folders) bo'yicha yasaydi.
@@ -88,7 +83,7 @@ func (s *Scanner) Start(session uint32) error {
 	closeAll(handles)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.killed, s.failed, s.attempts = 0, 0, map[procKey]bool{}
+	s.killed, s.failed, s.attempts, s.stale = 0, 0, map[procKey]bool{}, staleTracker{}
 	if err != nil {
 		s.state, s.lastErr = StateFailed, err
 		return err
@@ -153,6 +148,7 @@ func (s *Scanner) scan(session uint32, baseline Baseline) {
 		s.mu.Unlock()
 		return
 	}
+	s.stale.Round(procs)
 	live := baseline.Live(procs)
 	type result struct {
 		key procKey
@@ -275,7 +271,10 @@ func inspect(pid, ppid, session uint32, withKill bool, before time.Time) (Proc, 
 	var created, exit, kernel, user windows.Filetime
 	if windows.GetProcessTimes(h, &created, &exit, &kernel, &user) == nil {
 		p.Created = time.Unix(0, created.Nanoseconds())
-		p.Stale = p.Created.After(before)
+		// Created >= before: yadro yaratish vaqti va time.Now() bir tick'ga tushishi mumkin, shuning uchun teng vaqt ham
+		// Stale (aks holda aynan shu tick'da qayta berilgan PID o'tib ketardi). Soat orqaga ketsa Stale abadiy qolmasin:
+		// scan'da staleTracker uni bir scan'dan keyin olib tashlaydi.
+		p.Stale = !p.Created.Before(before)
 	}
 	p.Image = imagePath(h)
 	if access&windows.PROCESS_TERMINATE != 0 && p.Session == session {

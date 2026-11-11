@@ -411,3 +411,47 @@ func TestStaleParentRound(t *testing.T) {
 		t.Fatal("eskirgan jarayon baseline'ga kirmasligi kerak")
 	}
 }
+
+func TestStaleSkippedOneScanOnly(t *testing.T) {
+	var tr staleTracker
+	notepad := func(created time.Time) map[uint32]Proc {
+		procs, _ := world()
+		procs[1400] = Proc{PID: 1400, ParentPID: 700, Session: student, Image: sysroot + `\system32\notepad.exe`, Created: created, Stale: true}
+		return procs
+	}
+	_, baseline := world()
+
+	// 1-scan: Stale bir marta → o'tkazib yuboriladi.
+	procs := notepad(at(100))
+	tr.Round(procs)
+	if !procs[1400].Stale || Decide(procs[1400], student, baseline, procs, allow()) {
+		t.Fatal("birinchi Stale scan'da jarayon o'tkazib yuborilishi kerak")
+	}
+	// 2-scan: o'sha kalit yana Stale (soat orqaga ketgan) → oddiy qaror, o'ldiriladi.
+	procs = notepad(at(100))
+	tr.Round(procs)
+	if procs[1400].Stale || !Decide(procs[1400], student, baseline, procs, allow()) {
+		t.Fatal("ikkinchi marta Stale bo'lgan jarayon oddiy qaror bilan o'ldirilishi kerak")
+	}
+	// 2b-scan: hali ham Stale → yana baholanadi (istisno bir marta).
+	procs = notepad(at(100))
+	tr.Round(procs)
+	if procs[1400].Stale {
+		t.Fatal("istisno kalitga faqat bir marta beriladi")
+	}
+	// 3-scan: o'sha PID, boshqa Created → yangi kalit, yana bir marta o'tkaziladi.
+	procs = notepad(at(200))
+	tr.Round(procs)
+	if !procs[1400].Stale {
+		t.Fatal("boshqa Created bilan PID yangi kalit hisoblanadi")
+	}
+	// Eski kalitlar saqlanib qolmaydi (to'plam har scan'da almashtiriladi).
+	if len(tr.prev) != 1 {
+		t.Fatalf("prev = %v", tr.prev)
+	}
+	procs, _ = world()
+	tr.Round(procs)
+	if len(tr.prev) != 0 {
+		t.Fatalf("Stale yo'q scan'dan keyin prev bo'sh bo'lishi kerak: %v", tr.prev)
+	}
+}

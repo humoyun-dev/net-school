@@ -185,6 +185,39 @@ func (b Baseline) Live(procs map[uint32]Proc) map[uint32]bool {
 	return live
 }
 
+// procKey jarayonni PID qayta ishlatilishidan ajratadi.
+type procKey struct {
+	pid     uint32
+	created time.Time
+}
+
+// staleTracker Stale istisnosini har jarayonga ko'pi bilan bitta scan beradi. Stale belgisi "jarayon snapshot
+// boshlanganidan keyin yaratilgan" degani; soat orqaga ketsa (NTP qadami, Set-Date) bu shart har scan'da rost
+// bo'lib qolishi va jarayon hech qachon baholanmasligi mumkin edi (fail-open). Shuning uchun oldingi scan'da ham
+// Stale bo'lgan kalit (PID + Created) uchun belgi olib tashlanadi va jarayon oddiy qaror bilan baholanadi.
+type staleTracker struct {
+	prev map[procKey]bool // oldingi scan'dagi Stale kalitlar
+}
+
+// Round shu scan'ning procs'ini tuzatadi va oldingi to'plamni shu scan'dagi Stale kalitlar bilan almashtiradi
+// (cheksiz o'smaydi). Belgisi olib tashlangan kalit ham to'plamda qoladi: u Stale bo'lib turgan har keyingi scan'da
+// ham baholanadi, ya'ni istisno kalitga bir marta beriladi.
+func (t *staleTracker) Round(procs map[uint32]Proc) {
+	cur := map[procKey]bool{}
+	for pid, p := range procs {
+		if !p.Stale {
+			continue
+		}
+		key := procKey{pid, p.Created}
+		cur[key] = true
+		if t.prev[key] {
+			p.Stale = false
+			procs[pid] = p
+		}
+	}
+	t.prev = cur
+}
+
 // trustedParent parent haqiqatan child'ning otasi bo'lishi mumkinmi: ikkala vaqt ma'lum va ota boladan keyin
 // yaratilmagan.
 func trustedParent(parent, child Proc) bool {
