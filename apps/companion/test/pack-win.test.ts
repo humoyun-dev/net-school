@@ -7,6 +7,7 @@ import { readZip, writeZip } from '../scripts/zip.mjs';
 
 let dir: string;
 let appDist: string;
+let helperDist: string;
 const requested: { version: string; arch: string }[] = [];
 
 function fakeElectronZip(arch: string): Buffer {
@@ -25,6 +26,11 @@ beforeEach(() => {
   writeFileSync(join(appDist, 'main.cjs'), 'require("electron")');
   writeFileSync(join(appDist, 'enroll.mjs'), 'export {}');
   writeFileSync(join(appDist, 'renderer', 'status.html'), '<html></html>');
+  // `pnpm build:helper` natijasi (native/helper/dist): Go arch nomlari.
+  helperDist = join(dir, 'helper-dist');
+  mkdirSync(helperDist);
+  for (const goArch of ['amd64', 'arm64'])
+    writeFileSync(join(helperDist, `netschool-helper-windows-${goArch}.exe`), `MZ helper ${goArch}`);
   requested.length = 0;
 });
 
@@ -59,6 +65,7 @@ const pack = (arch: 'x64' | 'arm64', nodeModules = fakeNodeModules(arch)) =>
   packWin({
     arch,
     appDistDir: appDist,
+    helperDistDir: helperDist,
     nodeModules,
     outDir: join(dir, 'out'),
     getElectronZip: async (opts: { version: string; arch: string }) => {
@@ -111,25 +118,45 @@ describe('Windows portable package', () => {
     expect(names.get('start.cmd')).toContain('"%~dp0NetSchool Companion.exe"');
   });
 
-  // Companion har foydalanuvchi kirishida o'zi ishga tushadi: HKLM Run (oddiy o'quvchi o'chira olmaydi).
-  test('a successful enroll registers Companion to start at every sign-in', async () => {
+  // Companion'ni endi SYSTEM xizmati (NetSchool Helper) ishga tushiradi va kuzatadi: enroll muvaffaqiyatli bo'lsa
+  // helper o'rnatiladi. HKLM Run autostart yozilmaydi (install eskisini o'chiradi), aks holda ikki Companion bo'lardi.
+  test('enroll.cmd installs the helper after a successful enroll', async () => {
     const out = await pack('x64');
     const names = new Map(readZip(readFileSync(out)).map((e) => [e.name, e.data.toString()]));
     const lines = (names.get('enroll.cmd') ?? '').split('\r\n');
     const run = lines.findIndex((l) => l.includes('enroll.mjs'));
     const stop = lines.indexOf('if errorlevel 1 exit /b %errorlevel%');
-    const reg = lines.findIndex((l) => l.startsWith('reg add '));
-    // Ro'yxatdan o'tish yiqilsa autostart yozilmaydi.
+    const install = lines.findIndex((l) => l.includes('netschool-helper.exe'));
+    // Ro'yxatdan o'tish yiqilsa helper o'rnatilmaydi.
     expect(run).toBeGreaterThanOrEqual(0);
     expect(stop).toBe(run + 1);
-    expect(reg).toBeGreaterThan(stop);
-    expect(lines[reg]).toBe(
-      'reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run" /v "NetSchool Companion" /t REG_SZ /d "\\"%~dp0NetSchool Companion.exe\\"" /f >nul',
-    );
-    const off = names.get('remove-autostart.cmd') ?? '';
-    expect(off).toContain(
-      'reg delete "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run" /v "NetSchool Companion" /f',
-    );
+    expect(install).toBeGreaterThan(stop);
+    // `%~dp0` `\` bilan tugaydi: `"...\"` Windows argv'da qo'shtirnoqni ekranlaydi, shuning uchun `%~dp0.`.
+    expect(lines[install]).toBe('"%~dp0netschool-helper.exe" install --companion-dir "%~dp0."');
+    expect(lines[install + 1]).toBe('if errorlevel 1 exit /b %errorlevel%');
+    for (const cmd of names.keys()) {
+      if (cmd.endsWith('.cmd')) expect(names.get(cmd)).not.toMatch(/reg add/i);
+    }
+    expect(names.has('remove-autostart.cmd')).toBe(false);
+    expect(names.get('uninstall.cmd')).toContain('"%~dp0netschool-helper.exe" uninstall');
+    // Yangi versiyani qayta ro'yxatdan o'tkazmasdan o'rnatish (yangilash).
+    expect(names.get('install.cmd')).toContain('"%~dp0netschool-helper.exe" install --companion-dir "%~dp0."');
+  });
+
+  test('the package carries the helper and refuses to build without it', async () => {
+    for (const [arch, goArch] of [
+      ['x64', 'amd64'],
+      ['arm64', 'arm64'],
+    ] as const) {
+      const out = await pack(arch);
+      const names = new Map(readZip(readFileSync(out)).map((e) => [e.name, e.data.toString()]));
+      expect(names.get('netschool-helper.exe')).toBe(`MZ helper ${goArch}`);
+    }
+    rmSync(join(helperDist, 'netschool-helper-windows-amd64.exe'));
+    await expect(pack('x64')).rejects.toThrow(/netschool-helper-windows-amd64\.exe/);
+    // Boshqa arch'niki o'rniga qo'yilmaydi va PE bo'lmagan fayl qabul qilinmaydi.
+    writeFileSync(join(helperDist, 'netschool-helper-windows-amd64.exe'), 'not a PE');
+    await expect(pack('x64')).rejects.toThrow(/helper/);
   });
 
   // Hook koffi'siz yuklanmaydi va overlay jimgina yumshoq qoladi: bunday paket umuman yig'ilmaydi.

@@ -22,6 +22,8 @@ export interface Enrollment {
 const CONFIG_FILE = 'device.json';
 const KEY_FILE = 'device.key';
 const CA_FILE = 'hub-ca.pem';
+// OS helper kaliti (faqat Windows): `netschool-helper install` uni helper katalogiga ko'chiradi va bu yerdan o'chiradi.
+const HELPER_KEY_FILE = 'helper.key';
 // P2d'gacha har OS user o'qiy oladi (ADR 0009 cheklovi): Companion oddiy user sessiyasida ishlaydi.
 const DIR_MODE = 0o755;
 const FILE_MODE = 0o644;
@@ -94,17 +96,17 @@ export function enrollmentExists(dir: string): boolean {
   return existsSync(join(dir, CONFIG_FILE));
 }
 
-function writeAtomic(file: string, data: string): void {
+function writeAtomic(file: string, data: string, mode = FILE_MODE): void {
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, data, { mode: FILE_MODE });
-  chmodSync(tmp, FILE_MODE); // umask'dan qat'i nazar
+  writeFileSync(tmp, data, { mode });
+  chmodSync(tmp, mode); // umask'dan qat'i nazar
   renameSync(tmp, file);
 }
 
 // Har fayl atomik; device.json oxirida yoziladi — u bor bo'lsa enrollment to'liq.
 export function saveEnrollment(
   dir: string,
-  e: { config: DeviceConfig; privateKeyPem: string; ca: string | null },
+  e: { config: DeviceConfig; privateKeyPem: string; ca: string | null; helperKeyPem?: string | null },
 ): void {
   const config = configSchema.parse(e.config);
   mkdirSync(dir, { recursive: true, mode: DIR_MODE });
@@ -112,5 +114,9 @@ export function saveEnrollment(
   writeAtomic(join(dir, KEY_FILE), e.privateKeyPem);
   if (e.ca === null) rmSync(join(dir, CA_FILE), { force: true });
   else writeAtomic(join(dir, CA_FILE), e.ca);
+  // Helper kaliti Companion'ga kerak emas (POSIX'da 0600; Windows'da ACL'ni install o'rnatadi). Kalitsiz qayta
+  // enroll eski kalitni qoldirmaydi: u endi hub'dagi qurilmaga tegishli emas.
+  if (e.helperKeyPem) writeAtomic(join(dir, HELPER_KEY_FILE), e.helperKeyPem, 0o600);
+  else rmSync(join(dir, HELPER_KEY_FILE), { force: true });
   writeAtomic(join(dir, CONFIG_FILE), `${JSON.stringify(config, null, 2)}\n`);
 }

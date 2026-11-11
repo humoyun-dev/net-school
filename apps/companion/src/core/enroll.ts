@@ -41,6 +41,15 @@ export async function enroll(input: EnrollInput): Promise<DeviceConfig> {
   ensureWritable(input.dir);
   const key = generateDeviceKey();
   const proof = claimProof(createPrivateKey(key.privateKeyPem), input.token, key.publicKey);
+  // Windows OS helper (P2d1) hub'ga o'z kaliti bilan murojaat qiladi: kalit shu yerda yaratiladi va claim'da
+  // isbotlanadi, `netschool-helper install` uni faqat SYSTEM/Administrators o'qiy oladigan katalogga ko'chiradi.
+  const helper = input.facts.platform === 'win32' ? generateDeviceKey() : null;
+  const helperClaim = helper
+    ? {
+        helperPublicKey: helper.publicKey,
+        helperProof: claimProof(createPrivateKey(helper.privateKeyPem), input.token, helper.publicKey),
+      }
+    : {};
   const hub = new HubClient({ origin: input.hubOrigin, ca: input.ca, signer: null });
   try {
     const claimed = await hub.json(
@@ -52,6 +61,7 @@ export async function enroll(input: EnrollInput): Promise<DeviceConfig> {
         proof,
         hostname: sanitizeHostname(input.hostname),
         capabilities: capabilityReport(input.facts),
+        ...helperClaim,
       },
       claimResponseSchema,
     );
@@ -62,7 +72,12 @@ export async function enroll(input: EnrollInput): Promise<DeviceConfig> {
       publicKey: key.publicKey,
       enrolledAt: new Date().toISOString(),
     };
-    saveEnrollment(input.dir, { config, privateKeyPem: key.privateKeyPem, ca: input.ca });
+    saveEnrollment(input.dir, {
+      config,
+      privateKeyPem: key.privateKeyPem,
+      ca: input.ca,
+      helperKeyPem: helper?.privateKeyPem ?? null,
+    });
     return config;
   } finally {
     hub.close();

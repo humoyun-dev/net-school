@@ -1,5 +1,6 @@
 // P0c: Windows uchun installer'siz Companion (P2e'gacha). Electron win32 zip'i + resources/app (oddiy build) +
-// enroll.cmd/start.cmd. Hech narsa Mac'da ishga tushirilmaydi — faqat zip yig'iladi.
+// netschool-helper.exe (P2d1 OS helper) + enroll.cmd/install.cmd/uninstall.cmd/start.cmd. Hech narsa Mac'da ishga
+// tushirilmaydi — faqat zip yig'iladi.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -11,25 +12,31 @@ import { readZip, writeZip } from './zip.mjs';
 export const ELECTRON_VERSION = '45.2.1';
 const EXE = 'NetSchool Companion.exe';
 const crlf = (lines) => `${lines.join('\r\n')}\r\n`;
-const RUN_KEY = 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run';
-const RUN_VALUE = 'NetSchool Companion';
+const HELPER = 'netschool-helper.exe';
+// `%~dp0` teskari chiziq bilan tugaydi: `"C:\pkg\"` Windows argv qoidasida yopuvchi qo'shtirnoqni ekranlaydi.
+const INSTALL_LINE = `"%~dp0${HELPER}" install --companion-dir "%~dp0."`;
 
+// Ro'yxatdan o'tkazadi, keyin helper'ni SYSTEM xizmati sifatida o'rnatadi: u Companion'ni har kirishda ishga
+// tushiradi va kuzatadi. install eski HKLM Run autostart'ini (P0c) o'chiradi.
 const ENROLL_CMD = crlf([
   '@echo off',
-  "rem Ro'yxatdan o'tkazish (administrator sifatida): enroll.cmd --hub https://<hub> --ca <hub-ca.pem>",
+  "rem Ro'yxatdan o'tkazish va helper'ni o'rnatish (administrator sifatida): enroll.cmd --hub https://<hub> --ca <hub-ca.pem>",
+  "rem Oldin ro'yxatdan o'tgan kompyuter (helper kalitisiz): yangi token bilan --force qo'shing.",
   'setlocal',
   'set ELECTRON_RUN_AS_NODE=1',
   `"%~dp0${EXE}" "%~dp0resources\\app\\dist\\enroll.mjs" %*`,
   'if errorlevel 1 exit /b %errorlevel%',
-  "rem Har foydalanuvchi kirishida Companion o'zi ishga tushadi (HKLM: oddiy foydalanuvchi o'chira olmaydi).",
-  `reg add "${RUN_KEY}" /v "${RUN_VALUE}" /t REG_SZ /d "\\"%~dp0${EXE}\\"" /f >nul`,
-  'if errorlevel 1 (echo autostart yozilmadi: enroll.cmd ni administrator sifatida oching & exit /b 5)',
-  'echo autostart: NetSchool Companion har kirishda ishga tushadi',
+  'set ELECTRON_RUN_AS_NODE=',
+  INSTALL_LINE,
+  'if errorlevel 1 exit /b %errorlevel%',
+  "echo NetSchool Helper o'rnatildi: Companion'ni endi xizmat ishga tushiradi",
 ]);
-const REMOVE_AUTOSTART_CMD = crlf([
+// Yangi paketni qayta ro'yxatdan o'tkazmasdan o'rnatish (helper kaliti allaqachon helper katalogida).
+const INSTALL_CMD = crlf(['@echo off', "rem Helper va Companion'ni yangilash (administrator sifatida).", INSTALL_LINE]);
+const UNINSTALL_CMD = crlf([
   '@echo off',
-  "rem Autostart'ni olib tashlash (administrator sifatida).",
-  `reg delete "${RUN_KEY}" /v "${RUN_VALUE}" /f`,
+  "rem Helper xizmatini, Companion'ni va siyosatlarni olib tashlash (administrator sifatida).",
+  `"%~dp0${HELPER}" uninstall`,
 ]);
 const START_CMD = crlf(['@echo off', `start "" "%~dp0${EXE}"`]);
 
@@ -51,8 +58,34 @@ const RUNTIME_FILE = /\.(c?js|mjs|json|node)$/;
 export const KOFFI_VERSION = '3.3.6';
 const koffiNative = (arch) => `@koromix/koffi-win32-${arch}`;
 
-export async function packWin({ arch, appDistDir, outDir, getElectronZip, nodeModules, version = ELECTRON_VERSION }) {
+// Electron arch nomi → Go arch nomi (`pnpm build:helper`: native/helper/dist/netschool-helper-windows-<goarch>.exe).
+const GO_ARCH = { x64: 'amd64', arm64: 'arm64' };
+
+// Helper'siz paket bloklashni majburlay olmaydi va Companion autostart'siz qoladi: bunday paket yig'ilmaydi.
+function readHelper(helperDistDir, arch) {
+  const file = join(helperDistDir, `netschool-helper-windows-${GO_ARCH[arch]}.exe`);
+  let data;
+  try {
+    data = readFileSync(file);
+  } catch {
+    throw new Error(`refusing to pack without the helper: ${file} is missing (run pnpm build:helper)`);
+  }
+  if (data.subarray(0, 2).toString('latin1') !== 'MZ')
+    throw new Error(`the helper ${file} is not a Windows executable`);
+  return data;
+}
+
+export async function packWin({
+  arch,
+  appDistDir,
+  helperDistDir,
+  outDir,
+  getElectronZip,
+  nodeModules,
+  version = ELECTRON_VERSION,
+}) {
   if (arch !== 'x64' && arch !== 'arm64') throw new Error('arch must be x64 or arm64');
+  const helper = readHelper(helperDistDir, arch);
   const main = readFileSync(join(appDistDir, 'main.cjs'), 'utf8');
   // Yashirin sinov rejimi faqat e2e test build'ida: o'quvchi kompyuteriga hech qachon tushmasin.
   if (main.includes('NETSCHOOL_COMPANION_TEST_HIDDEN')) throw new Error('refusing to pack a test build');
@@ -91,9 +124,11 @@ export async function packWin({ arch, appDistDir, outDir, getElectronZip, nodeMo
     throw new Error(`refusing to pack without the keyboard hook: koffi and ${koffiNative(arch)} are required`);
   }
   entries.push(
+    { name: HELPER, data: helper },
     { name: 'enroll.cmd', data: Buffer.from(ENROLL_CMD) },
+    { name: 'install.cmd', data: Buffer.from(INSTALL_CMD) },
+    { name: 'uninstall.cmd', data: Buffer.from(UNINSTALL_CMD) },
     { name: 'start.cmd', data: Buffer.from(START_CMD) },
-    { name: 'remove-autostart.cmd', data: Buffer.from(REMOVE_AUTOSTART_CMD) },
   );
   mkdirSync(outDir, { recursive: true });
   const out = join(outDir, `netschool-companion-win32-${arch}.zip`);
@@ -121,6 +156,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const out = await packWin({
       arch,
       appDistDir: build,
+      helperDistDir: join(root, '..', '..', 'native', 'helper', 'dist'),
       nodeModules: [
         { name: 'koffi', dir: koffiDir },
         { name: koffiNative(arch), dir: nativeDir },

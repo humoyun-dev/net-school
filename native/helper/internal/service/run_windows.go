@@ -8,15 +8,16 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/windows"
 	winsvc "golang.org/x/sys/windows/svc"
 
 	"github.com/humoyun-dev/net-school/native/helper/internal/cad"
+	"github.com/humoyun-dev/net-school/native/helper/internal/fsacl"
 	"github.com/humoyun-dev/net-school/native/helper/internal/guard"
 	"github.com/humoyun-dev/net-school/native/helper/internal/hub"
+	"github.com/humoyun-dev/net-school/native/helper/internal/layout"
 	"github.com/humoyun-dev/net-school/native/helper/internal/lock"
 	"github.com/humoyun-dev/net-school/native/helper/internal/meshwatch"
 	"github.com/humoyun-dev/net-school/native/helper/internal/policy"
@@ -29,9 +30,6 @@ import (
 // Name Windows xizmati nomi (Global Constraints).
 const Name = "NetSchoolHelper"
 
-// companionExe Companion paketidagi exe nomi (apps/companion/scripts/pack-win.mjs `EXE`).
-const companionExe = "NetSchool Companion.exe"
-
 // stopWaitHint SCM'ga to'xtash qancha davom etishi mumkinligi: Step tsikli bekor qilinadi, keyin Ctrl+Alt+Del
 // PowerShell bilan qaytariladi (StopTimeout).
 const stopWaitHint = StopTimeout + 15*time.Second
@@ -39,7 +37,8 @@ const stopWaitHint = StopTimeout + 15*time.Second
 // paths helper ishlatadigan fayllar. Hammasi Known Folders'dan: muhit o'zgaruvchilariga ishonilmaydi.
 //
 // Helper hamma faylini faqat o'z katalogidan, `%ProgramData%\NetSchool\helper\`dan oladi (ACL: faqat SYSTEM va
-// Administrators, o'qish ham; Task 11 `install` o'rnatadi):
+// Administrators, o'qish ham; `install` o'rnatadi, xizmat har ishga tushishda fsacl.HardenHelperData bilan qayta
+// o'rnatadi):
 //   - `device.json` — hub konfiguratsiyasi (hubOrigin, deviceId; Companion enroll formati, install nusxalaydi);
 //   - `hub-ca.pem` — hub CA'si; yo'q bo'lsa tizim root'lari (install nusxalaydi, agar enroll'da bo'lgan bo'lsa);
 //   - `helper.key`, `lock.json`, `policy-journal.json`, `cad-journal.json`.
@@ -48,6 +47,7 @@ const stopWaitHint = StopTimeout + 15*time.Second
 // oladi (ProgramData standart ACL'i), masalan soxta `hub-ca.pem` — shunda helper hub'ga ulanolmay, lock hech qachon
 // yoqilmasdi. Fayllar yo'q bo'lsa xizmat ochiq holatda ishlaydi, hisobot yubormaydi va buni bir marta jurnalga yozadi.
 type paths struct {
+	dataRoot, helperData                       string
 	deviceJSON, hubCA                          string
 	helperKey, lock, policyJournal, cadJournal string
 	helperExe, companionExe, explorerExe       string
@@ -66,18 +66,19 @@ func resolvePaths() (paths, error) {
 	if err != nil {
 		return paths{}, fmt.Errorf("%%SystemRoot%% aniqlanmadi: %w", err)
 	}
-	helperData := filepath.Join(data, "NetSchool", "helper")
-	install := filepath.Join(pf, "NetSchool")
+	l := layout.New(pf, data, root)
 	return paths{
-		deviceJSON:    filepath.Join(helperData, "device.json"),
-		hubCA:         filepath.Join(helperData, "hub-ca.pem"),
-		helperKey:     filepath.Join(helperData, "helper.key"),
-		lock:          filepath.Join(helperData, "lock.json"),
-		policyJournal: filepath.Join(helperData, "policy-journal.json"),
-		cadJournal:    filepath.Join(helperData, "cad-journal.json"),
-		helperExe:     filepath.Join(install, "helper", "netschool-helper.exe"),
-		companionExe:  filepath.Join(install, "companion", companionExe),
-		explorerExe:   filepath.Join(root, "explorer.exe"),
+		dataRoot:      l.DataRoot,
+		helperData:    l.HelperData,
+		deviceJSON:    l.DeviceJSON,
+		hubCA:         l.HubCA,
+		helperKey:     l.HelperKey,
+		lock:          l.Lock,
+		policyJournal: l.PolicyJournal,
+		cadJournal:    l.CADJournal,
+		helperExe:     l.HelperExe,
+		companionExe:  l.CompanionExe,
+		explorerExe:   l.Explorer,
 	}, nil
 }
 
@@ -118,6 +119,14 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 	if err != nil {
 		log.Warn("ishga tushmadi: %v", err)
 		return true, 1
+	}
+	// O'z-o'zini tiklash: ma'lumot katalogining egasi va himoyalangan DACL'i har ishga tushishda, hech narsa
+	// o'qilishidan oldin qayta o'rnatiladi. Yiqilsa jurnalga yoziladi va davom etiladi (fayl yo'q bo'lsa xizmat
+	// baribir ochiq holatda ishlaydi).
+	if trusted, err := fsacl.HardenHelperData(p.dataRoot, p.helperData); err != nil {
+		log.Warn("helper katalogi himoyalanmadi: %v", err)
+	} else if !trusted {
+		log.Warn("helper katalogining egasi yoki DACL'i o'zgartirilgan edi, qayta o'rnatildi: %s", p.helperData)
 	}
 	clock := newSystemClock()
 

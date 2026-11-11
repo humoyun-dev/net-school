@@ -39,3 +39,24 @@ func TestVersionPrints(t *testing.T) {
 		t.Fatalf("stdout %q does not contain version %q", stdout.String(), version.Version)
 	}
 }
+
+func TestParseInstallArgs(t *testing.T) {
+	dir, err := parseInstallArgs([]string{"--companion-dir", `C:\pkg\.`})
+	if err != nil || dir != `C:\pkg\.` {
+		t.Fatalf("dir=%q err=%v", dir, err)
+	}
+	for _, bad := range [][]string{nil, {"--companion-dir"}, {"--companion-dir", ""}, {"--bogus", "x"}, {"--companion-dir", "a", "b"}} {
+		if _, err := parseInstallArgs(bad); err == nil {
+			t.Fatalf("%q qabul qilindi", bad)
+		}
+	}
+}
+
+func TestInstallAndUninstallUsageExits2(t *testing.T) {
+	for _, args := range [][]string{{"install"}, {"install", "--bogus"}, {"uninstall", "extra"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 2 {
+			t.Fatalf("%q: exit code = %d, want 2 (stderr %q)", args, code, stderr.String())
+		}
+	}
+}

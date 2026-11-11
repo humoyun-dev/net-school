@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,12 +14,14 @@ import (
 // command — bitta subbuyruq. args subbuyruq nomidan keyingi argumentlar.
 type command func(args []string, stdout, stderr io.Writer) int
 
-// commands — subbuyruqlar jadvali. Qolganlari (install, uninstall) keyingi vazifalarda ulanadi. run (xizmat) va
-// guard faqat Windows'da ishlaydi (run_windows.go, guard_windows.go), boshqa OS'da xato bilan chiqadi (*_other.go).
+// commands — subbuyruqlar jadvali. run (xizmat), guard, install va uninstall faqat Windows'da ishlaydi
+// (*_windows.go), boshqa OS'da xato bilan chiqadi (*_other.go).
 var commands = map[string]command{
-	"guard":   runGuard,
-	"run":     runService,
-	"version": runVersion,
+	"guard":     runGuard,
+	"install":   runInstall,
+	"run":       runService,
+	"uninstall": runUninstall,
+	"version":   runVersion,
 }
 
 func main() {
@@ -56,4 +59,14 @@ func printUsage(w io.Writer) {
 func runVersion(_ []string, stdout, _ io.Writer) int {
 	fmt.Fprintln(stdout, version.Version)
 	return 0
+}
+
+const installUsage = "usage: netschool-helper install --companion-dir <yoyilgan paket katalogi>"
+
+// parseInstallArgs `install --companion-dir <dir>` argumentlari.
+func parseInstallArgs(args []string) (string, error) {
+	if len(args) != 2 || args[0] != "--companion-dir" || args[1] == "" {
+		return "", errors.New(installUsage)
+	}
+	return args[1], nil
 }

@@ -1,3 +1,4 @@
+import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +6,7 @@ import { heartbeatResponseSchema } from '@netschool/contracts';
 import { makeCert } from '@netschool/test-support';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { startTestApp, type TestApp } from '../../api/test/support/app.ts';
+import { helperRequest } from '../../api/test/support/device.ts';
 import { loginAs } from '../../api/test/support/login.ts';
 import { seedOrg, seedUser } from '../../api/test/support/seed.ts';
 import { runEnrollCli } from '../src/cli/enroll.ts';
@@ -75,6 +77,33 @@ describe('enroll', () => {
     // Hub qurilmani hisobotdagi capability bilan saqlagan.
     const devices = await app.request('GET', `/api/v1/sites/${siteId}/devices`, { cookie: admin });
     expect(JSON.stringify(devices.json)).toContain(config.deviceId);
+  });
+
+  // OS helper (P2d1) o'z kaliti bilan imzolaydi: enroll uni yaratadi, claim'da isbotlaydi va `install` uni helper
+  // katalogiga ko'chirishi uchun mashina katalogiga yozadi.
+  test('enroll writes a helper key and sends its proof', async () => {
+    const dir = tempDir();
+    const config = await enroll(input(await newToken(), dir));
+    const pem = readFileSync(join(dir, 'helper.key'), 'utf8');
+    expect(pem).toMatch(/^-----BEGIN PRIVATE KEY-----/);
+    const privateKey = createPrivateKey(pem);
+    expect(privateKey.asymmetricKeyType).toBe('ed25519');
+    const publicKey = createPublicKey(privateKey).export({ type: 'spki', format: 'der' }).toString('base64url');
+    // Companion kaliti emas: alohida juftlik.
+    expect(publicKey).not.toBe(config.publicKey);
+    expect(readFileSync(join(dir, 'device.key'), 'utf8')).not.toBe(pem);
+
+    // Hub helper kalitini qabul qilgan: helper imzosi bilan helper yo'li ishlaydi.
+    const key = {
+      publicKey,
+      sign: (m: Buffer | string) => sign(null, Buffer.from(m), privateKey).toString('base64url'),
+    };
+    const res = await helperRequest(app, key, config.deviceId, 'GET', '/api/v1/device/helper/lock-state');
+    expect(res.status).toBe(200);
+
+    // Helper faqat Windows'da: boshqa OS'da kalit yaratilmaydi va qayta enroll eskisini o'chiradi.
+    await enroll(input(await newToken(), dir, { force: true, facts: { ...facts, platform: 'linux' } }));
+    expect(existsSync(join(dir, 'helper.key'))).toBe(false);
   });
 
   test('a used or unknown token is rejected and nothing is written', async () => {
