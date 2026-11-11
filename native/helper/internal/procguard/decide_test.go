@@ -15,12 +15,16 @@ var t0 = time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
 
 func at(sec int) time.Time { return t0.Add(time.Duration(sec) * time.Second) }
 
-func allow() Allow { return DefaultAllow(`C:\Program Files`, `C:\Windows`) }
+// servicePID helper xizmati (session 0): Scanner o'z PID'ini ishonchli deb beradi.
+const servicePID = uint32(400)
+
+func allow() Allow { return DefaultAllow(`C:\Program Files`, `C:\Windows`, servicePID) }
 
 // world baseline'dagi oddiy o'quvchi sessiyasi: winlogon → userinit (tugagan) → explorer → chrome → renderer.
 func world() (map[uint32]Proc, map[uint32]bool) {
 	procs := map[uint32]Proc{
 		4:   {PID: 4, ParentPID: 0, Session: 0, Image: "", Created: at(0)},
+		400: {PID: 400, ParentPID: 380, Session: 0, Image: pf + `\netschool\helper\netschool-helper.exe`, Created: at(3)},
 		600: {PID: 600, ParentPID: 500, Session: student, Image: sysroot + `\system32\winlogon.exe`, Created: at(10)},
 		700: {PID: 700, ParentPID: 650, Session: student, Image: sysroot + `\explorer.exe`, Created: at(20)},
 		800: {PID: 800, ParentPID: 700, Session: student, Image: pf + `\google\chrome\application\chrome.exe`, Created: at(30)},
@@ -119,13 +123,9 @@ func TestChildOfExplorerIsKilled(t *testing.T) {
 	}
 }
 
-func TestNetSchoolAndMeshAgentAllowed(t *testing.T) {
+func TestSystemImagesAllowed(t *testing.T) {
 	procs, baseline := world()
 	allowed := []string{
-		`C:\Program Files\NetSchool\helper\netschool-helper.exe`,
-		`C:\Program Files\NetSchool\companion\NetSchool Companion.exe`,
-		`C:\Program Files\Mesh Agent\MeshAgent.exe`,
-		`\\?\C:\Program Files\NetSchool\companion\NetSchool Companion.exe`,
 		sysroot + `\system32\conhost.exe`,
 		sysroot + `\system32\dwm.exe`,
 		sysroot + `\system32\csrss.exe`,
@@ -159,6 +159,155 @@ func TestNetSchoolAndMeshAgentAllowed(t *testing.T) {
 		if !decide(p, procs, baseline) {
 			t.Errorf("%s o'ldirilishi kerak", img)
 		}
+	}
+}
+
+const (
+	companionExe = `C:\Program Files\NetSchool\companion\NetSchool Companion.exe`
+	guardExe     = `C:\Program Files\NetSchool\helper\netschool-helper.exe`
+	meshExe      = `C:\Program Files\Mesh Agent\MeshAgent.exe`
+)
+
+// NetSchool katalogidagi exe faqat helper xizmati ochgan bo'lsa (yoki uning NetSchool bolasi bo'lsa) yashaydi.
+func TestNetSchoolImagesNeedHelperParent(t *testing.T) {
+	procs, baseline := world()
+	// Helper ochgan Companion va guard, Companion'ning Electron bolalari (bir xil exe).
+	procs[1500] = Proc{PID: 1500, ParentPID: servicePID, Session: student, Image: companionExe, Created: at(50)}
+	procs[1501] = Proc{PID: 1501, ParentPID: 1500, Session: student, Image: companionExe, Created: at(51)}
+	procs[1502] = Proc{PID: 1502, ParentPID: servicePID, Session: student, Image: guardExe, Created: at(50)}
+	for _, pid := range []uint32{1500, 1501, 1502} {
+		if Decide(procs[pid], student, baseline, procs, allow()) {
+			t.Fatalf("helper ochgan %d (%s) yashashi kerak", pid, procs[pid].Image)
+		}
+	}
+	// Bloklash paytida yangi renderer ham.
+	r := Proc{PID: 1503, ParentPID: 1500, Session: student, Image: companionExe, Created: at(100)}
+	if decide(r, procs, baseline) {
+		t.Fatal("Companion'ning yangi renderer'i yashashi kerak")
+	}
+	// O'quvchi o'zi (explorer, cmd yoki baseline'dan) ochgan Companion exe — o'ldiriladi (RunAsNode skript ishga
+	// tushirgich bo'lib qolmasin).
+	for i, parent := range []uint32{700, 800, 12345} {
+		p := Proc{PID: uint32(1510 + i), ParentPID: parent, Session: student, Image: companionExe, Created: at(100)}
+		if !decide(p, procs, baseline) {
+			t.Fatalf("ota %d: o'quvchi ochgan Companion o'ldirilishi kerak", parent)
+		}
+	}
+	// Bloklashdan oldin o'quvchi ochgan (baseline'dagi) Companion ham.
+	procs[1520] = Proc{PID: 1520, ParentPID: 700, Session: student, Image: companionExe, Created: at(40)}
+	baseline[1520] = true
+	if !Decide(procs[1520], student, baseline, procs, allow()) {
+		t.Fatal("baseline'dagi o'quvchi Companion'i o'ldirilishi kerak")
+	}
+	// Uning bolasi (bir xil exe, baseline ajdod) ham.
+	c := Proc{PID: 1521, ParentPID: 1520, Session: student, Image: companionExe, Created: at(100)}
+	if !decide(c, procs, baseline) {
+		t.Fatal("o'quvchi Companion'ining bolasi o'ldirilishi kerak")
+	}
+	// Electron bolasini ota qilib (PARENT_PROCESS) ochilgan Companion: zanjir 3 bo'g'in — o'ldiriladi.
+	spoof := Proc{PID: 1530, ParentPID: 1501, Session: student, Image: companionExe, Created: at(100)}
+	if !decide(spoof, procs, baseline) {
+		t.Fatal("Companion nevarasi (3-bo'g'in) o'ldirilishi kerak")
+	}
+	// Zanjirda NetSchool bo'lmagan exe: helper → cmd → Companion o'ldiriladi.
+	procs[1540] = Proc{PID: 1540, ParentPID: servicePID, Session: student, Image: cmd, Created: at(60)}
+	viaCmd := Proc{PID: 1541, ParentPID: 1540, Session: student, Image: companionExe, Created: at(100)}
+	if !decide(viaCmd, procs, baseline) {
+		t.Fatal("helper → cmd → Companion o'ldirilishi kerak")
+	}
+	// PID qayta ishlatilishi: "ota" boladan keyin yaratilgan — ishonilmaydi.
+	late := Proc{PID: 1542, ParentPID: servicePID, Session: student, Image: companionExe, Created: at(1)}
+	if !decide(late, procs, baseline) {
+		t.Fatal("xizmatdan oldin yaratilgan Companion o'ldirilishi kerak")
+	}
+	// Ishonchli PID berilmagan bo'lsa NetSchool exe hech qachon yashamaydi.
+	noTrust := DefaultAllow(`C:\Program Files`, `C:\Windows`)
+	if !Decide(procs[1500], student, baseline, procs, noTrust) {
+		t.Fatal("ishonchli PID'siz Companion o'ldirilishi kerak")
+	}
+}
+
+// Mesh Agent exe faqat session 0 jarayoni (MeshAgent xizmati) yoki shunday Mesh Agent zanjiri ochgan bo'lsa yashaydi.
+func TestMeshAgentImagesNeedSessionZeroParent(t *testing.T) {
+	procs, baseline := world()
+	procs[350] = Proc{PID: 350, ParentPID: 300, Session: 0, Image: meshExe, Created: at(4)}
+	kvm := Proc{PID: 1600, ParentPID: 350, Session: student, Image: meshExe, Created: at(100)}
+	if decide(kvm, procs, baseline) {
+		t.Fatal("MeshAgent KVM bolasi yashashi kerak")
+	}
+	sub := Proc{PID: 1601, ParentPID: 1600, Session: student, Image: meshExe, Created: at(101)}
+	if decide(sub, procs, baseline) {
+		t.Fatal("MeshAgent KVM bolasining Mesh bolasi yashashi kerak")
+	}
+	// O'quvchi ochgan MeshAgent.exe (explorer, baseline yoki noma'lum ota) — o'ldiriladi.
+	for i, parent := range []uint32{700, 800, 12345} {
+		p := Proc{PID: uint32(1610 + i), ParentPID: parent, Session: student, Image: meshExe, Created: at(100)}
+		if !decide(p, procs, baseline) {
+			t.Fatalf("ota %d: o'quvchi ochgan MeshAgent o'ldirilishi kerak", parent)
+		}
+	}
+	// O'quvchi ochgan Mesh'ning Mesh bolasi ham.
+	procs[1620] = Proc{PID: 1620, ParentPID: 700, Session: student, Image: meshExe, Created: at(100)}
+	child := Proc{PID: 1621, ParentPID: 1620, Session: student, Image: meshExe, Created: at(101)}
+	if !decide(child, procs, baseline) {
+		t.Fatal("o'quvchi MeshAgent'ining bolasi o'ldirilishi kerak")
+	}
+}
+
+// Kirish paytidagi shell jarayonlari (bloklash kirishdan oldin boshlangan): session 0, winlogon yoki userinit ochgan
+// tizim jarayonlari yashaydi; explorer faqat userinit'dan.
+func TestLogonShellProcessesAllowed(t *testing.T) {
+	procs, baseline := world()
+	procs[300] = Proc{PID: 300, ParentPID: 4, Session: 0, Image: sysroot + `\system32\svchost.exe`, Created: at(5)}
+	procs[610] = Proc{PID: 610, ParentPID: 600, Session: student, Image: sysroot + `\system32\userinit.exe`, Created: at(11)}
+	logon := []struct {
+		image  string
+		parent uint32
+	}{
+		{`\system32\userinit.exe`, 600},
+		{`\system32\sihost.exe`, 300},
+		{`\system32\taskhostw.exe`, 300},
+		{`\system32\RuntimeBroker.exe`, 300},
+		{`\system32\dllhost.exe`, 300},
+		{`\system32\ctfmon.exe`, 300},
+		{`\system32\sihost.exe`, 610},
+		{`\explorer.exe`, 610},
+	}
+	for i, c := range logon {
+		p := Proc{PID: uint32(1700 + i), ParentPID: c.parent, Session: student, Image: sysroot + c.image, Created: at(100)}
+		if decide(p, procs, baseline) {
+			t.Errorf("%s (ota %s) yashashi kerak", c.image, procs[c.parent].Image)
+		}
+	}
+	killed := []struct {
+		image  string
+		parent uint32
+	}{
+		// Explorer faqat userinit'dan: winlogon, svchost yoki chrome'dan emas (baseline explorer'ning o'z bolasi esa
+		// umumiy bir xil exe qoidasi bilan yashaydi).
+		{`\explorer.exe`, 600},
+		{`\explorer.exe`, 300},
+		{`\explorer.exe`, 800},
+		// Ro'yxatdagi tizim jarayoni o'quvchi jarayonidan (baseline explorer, chrome) — o'ldiriladi.
+		{`\system32\userinit.exe`, 700},
+		{`\system32\dllhost.exe`, 800},
+		{`\system32\RuntimeBroker.exe`, 700},
+		// Ro'yxatda yo'q exe session 0 otadan.
+		{`\system32\cmd.exe`, 300},
+		{`\system32\taskmgr.exe`, 300},
+		// SysWOW64 nusxasi ro'yxatda emas.
+		{`\syswow64\dllhost.exe`, 300},
+	}
+	for i, c := range killed {
+		p := Proc{PID: uint32(1750 + i), ParentPID: c.parent, Session: student, Image: sysroot + c.image, Created: at(100)}
+		if !decide(p, procs, baseline) {
+			t.Errorf("%s (ota %d) o'ldirilishi kerak", c.image, c.parent)
+		}
+	}
+	// Ota boladan keyin yaratilgan (PID qayta berilgan) — ishonilmaydi.
+	late := Proc{PID: 1790, ParentPID: 300, Session: student, Image: sysroot + `\system32\dllhost.exe`, Created: at(1)}
+	if !decide(late, procs, baseline) {
+		t.Fatal("ota keyin yaratilgan: dllhost o'ldirilishi kerak")
 	}
 }
 
@@ -231,15 +380,15 @@ func TestSystemPidsNeverKilled(t *testing.T) {
 }
 
 func TestDefaultAllow(t *testing.T) {
-	a := DefaultAllow(`C:\Program Files\`, `\\?\C:\Windows`)
-	want := map[string]bool{`c:\program files\netschool\`: true, `c:\program files\mesh agent\`: true}
-	if len(a.Dirs) != len(want) {
-		t.Fatalf("Dirs = %q", a.Dirs)
+	a := DefaultAllow(`C:\Program Files\`, `\\?\C:\Windows`, 7)
+	if a.NetSchoolDir != `c:\program files\netschool\` || a.MeshDir != `c:\program files\mesh agent\` {
+		t.Fatalf("NetSchoolDir = %q, MeshDir = %q", a.NetSchoolDir, a.MeshDir)
 	}
-	for _, d := range a.Dirs {
-		if !want[d] {
-			t.Fatalf("kutilmagan katalog %q", d)
-		}
+	if !a.Trusted[7] || len(a.Trusted) != 1 {
+		t.Fatalf("Trusted = %v", a.Trusted)
+	}
+	if a.Explorer != `c:\windows\explorer.exe` || len(a.LogonImages) != 6 || len(a.LogonParents) != 2 {
+		t.Fatalf("Explorer = %q, LogonImages = %q, LogonParents = %q", a.Explorer, a.LogonImages, a.LogonParents)
 	}
 	if len(a.Images) != 10 {
 		t.Fatalf("Images = %q", a.Images)
@@ -247,13 +396,14 @@ func TestDefaultAllow(t *testing.T) {
 	if len(a.Kill) != 1 || a.Kill[0] != `c:\windows\system32\taskmgr.exe` {
 		t.Fatalf("Kill = %q", a.Kill)
 	}
-	for _, img := range a.Images {
+	for _, img := range append(append(a.Images, a.LogonImages...), a.LogonParents...) {
 		if img != Normalize(img) {
 			t.Fatalf("%q normallashtirilmagan", img)
 		}
 	}
 	// Bo'sh ildiz: ruxsat ro'yxati bo'sh, nisbiy yo'l hech narsaga mos kelmaydi.
-	if e := DefaultAllow("", ""); len(e.Dirs) != 0 || len(e.Images) != 0 || len(e.Kill) != 0 {
+	if e := DefaultAllow("", ""); e.NetSchoolDir != "" || e.MeshDir != "" || e.Explorer != "" || len(e.Images) != 0 ||
+		len(e.Kill) != 0 || len(e.LogonImages) != 0 || len(e.LogonParents) != 0 {
 		t.Fatalf("bo'sh ildiz bilan ruxsat ro'yxati bo'sh bo'lishi kerak: %+v", e)
 	}
 }
@@ -365,8 +515,8 @@ func TestSameImageChain(t *testing.T) {
 	if !decide(e, procs, baseline) {
 		t.Fatal("explorer → WerFault → cmd o'ldirilishi kerak")
 	}
-	// Ruxsat etilgan jarayon (Companion) ham ishonchli ajdod emas.
-	procs[1150] = Proc{PID: 1150, ParentPID: 700, Session: student, Image: pf + `\netschool\companion\companion.exe`, Created: at(100)}
+	// Ruxsat etilgan jarayon (helper ochgan Companion) ham ishonchli ajdod emas.
+	procs[1150] = Proc{PID: 1150, ParentPID: servicePID, Session: student, Image: pf + `\netschool\companion\companion.exe`, Created: at(100)}
 	f := Proc{PID: 1151, ParentPID: 1150, Session: student, Image: pf + `\netschool\companion\companion.exe`, Created: at(101)}
 	g := Proc{PID: 1152, ParentPID: 1151, Session: student, Image: pf + `\other\x.exe`, Created: at(102)}
 	if decide(f, procs, baseline) || !decide(g, procs, baseline) {

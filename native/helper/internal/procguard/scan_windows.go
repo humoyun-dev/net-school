@@ -61,7 +61,8 @@ type Scanner struct {
 	stale    staleTracker     // Stale istisnosi har jarayonga bir scan (faqat loop goroutine'i ishlatadi)
 }
 
-// NewScanner ruxsat ro'yxatini %ProgramFiles% va %SystemRoot% (Known Folders) bo'yicha yasaydi.
+// NewScanner ruxsat ro'yxatini %ProgramFiles% va %SystemRoot% (Known Folders) bo'yicha yasaydi; ishonchli ota —
+// joriy (xizmat) jarayon.
 func NewScanner() (*Scanner, error) {
 	pf, err := windows.KnownFolderPath(windows.FOLDERID_ProgramFiles, 0)
 	if err != nil {
@@ -71,7 +72,10 @@ func NewScanner() (*Scanner, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%%SystemRoot%% aniqlanmadi: %w", err)
 	}
-	return &Scanner{allow: DefaultAllow(pf, root), self: windows.GetCurrentProcessId(), state: StateOff}, nil
+	// Helper xizmatining o'zi ishonchli ota: Companion va guard'ni u ishga tushiradi (CreateProcessAsUser'da ota —
+	// chaqiruvchi jarayon).
+	self := windows.GetCurrentProcessId()
+	return &Scanner{allow: DefaultAllow(pf, root, self), self: self, state: StateOff}, nil
 }
 
 // Start session uchun guard'ni yoqadi: hozirgi jarayonlar baseline bo'ladi. Ishlab turgan bo'lsa avval to'xtatadi

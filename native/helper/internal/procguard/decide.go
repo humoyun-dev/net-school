@@ -5,10 +5,18 @@
 // Qoida (ADR 0014):
 //   - boshqa sessiyadagi jarayon, PID 0 va 4 → tegilmaydi; Toolhelp'dagi ota PID'i eskirgan (Stale) jarayon → bu
 //     safar tegilmaydi, keyingi snapshot'da qayta ko'riladi;
-//   - Allow.Dirs (%ProgramFiles%\NetSchool\, %ProgramFiles%\Mesh Agent\) ichidagi yoki Allow.Images'dagi (to'liq yo'l
-//     bilan) jarayon → tegilmaydi. Ruxsat etilgan jarayon boshqalar uchun ishonchli ajdod emas;
+//   - %ProgramFiles%\NetSchool\ ichidagi exe → faqat ota zanjiri (faqat NetSchool exe'lari orqali, ko'pi bilan 2
+//     bo'g'in) helper xizmatiga (Allow.Trusted) yetsa yashaydi, aks holda baseline'da bo'lsa ham o'ldiriladi: o'quvchi
+//     o'zi ochgan Companion exe'si (RunAsNode bilan skript ishga tushirgich) yashamasin;
+//   - %ProgramFiles%\Mesh Agent\ ichidagi exe → faqat ota zanjiri (Mesh Agent exe'lari orqali) session 0 jarayoniga
+//     (MeshAgent xizmati) yetsa yashaydi;
+//   - Allow.Images'dagi (to'liq yo'l bilan) tizim jarayoni → tegilmaydi. Ruxsat etilgan jarayon boshqalar uchun
+//     ishonchli ajdod emas;
 //   - Allow.Kill'dagi jarayon (%SystemRoot%\System32\taskmgr.exe) → baseline'da bo'lsa ham o'ldiriladi: bloklashdan
 //     oldin ochilgan Task Manager bilan Companion'ni yoki boshqa jarayonni to'xtatish mumkin edi;
+//   - kirish (logon) shell jarayonlari: System32 userinit, sihost, taskhostw, RuntimeBroker, dllhost, ctfmon — otasi
+//     session 0 jarayoni, winlogon yoki userinit bo'lsa; %SystemRoot%\explorer.exe — faqat userinit'dan → tegilmaydi
+//     (bloklash kirishdan oldin boshlangan bo'lsa ham ish stoli yuklansin);
 //   - baseline'dagi (bloklash boshlanganda sessiyada bo'lgan) jarayon → tegilmaydi (o'quvchining ochiq ishi);
 //   - baseline'da bo'lmagan jarayon faqat bir xil dastur avlodi bo'lsa yashaydi: ParentPID zanjiri tirik baseline
 //     ajdodga yetadi va jarayonning o'zi, oradagi har bir jarayon va o'sha ajdod aynan bir xil yo'lli exe (masalan,
@@ -42,13 +50,28 @@ type Proc struct {
 	Stale bool
 }
 
-// Allow ruxsat ro'yxati. Dirs — normallashtirilgan, oxiri `\` bilan tugaydigan kataloglar (prefiks bo'yicha);
-// Images — normallashtirilgan to'liq yo'llar (aniq moslik). Kill — baseline'da bo'lsa ham o'ldiriladigan to'liq
-// yo'llar (aniq moslik).
+// Allow ruxsat ro'yxati. Hamma yo'llar normallashtirilgan (Normalize); kataloglar oxiri `\` bilan.
 type Allow struct {
-	Dirs   []string
+	// NetSchoolDir `%ProgramFiles%\NetSchool\`: ichidagi exe faqat helper xizmati (Trusted) ochgan bo'lsa yashaydi
+	// (helperChain). Baseline va avlod qoidalari unga qo'llanmaydi.
+	NetSchoolDir string
+	// MeshDir `%ProgramFiles%\Mesh Agent\`: ichidagi exe faqat session 0 jarayoni ochgan bo'lsa yashaydi (meshChain).
+	MeshDir string
+	// Images har doim ruxsat etilgan tizim jarayonlari (aniq moslik).
 	Images []string
-	Kill   []string
+	// Kill baseline'da bo'lsa ham o'ldiriladigan exe'lar (aniq moslik).
+	Kill []string
+	// LogonImages kirish (logon) paytida shell ochadigan System32 jarayonlari: otasi session 0 jarayoni yoki
+	// LogonParents'dan biri bo'lsa yashaydi.
+	LogonImages []string
+	// LogonParents System32 winlogon.exe va userinit.exe.
+	LogonParents []string
+	// Explorer `%SystemRoot%\explorer.exe`: faqat userinit (LogonParents'dagi userinit) ochgan bo'lsa yashaydi.
+	Explorer string
+	// Userinit `%SystemRoot%\System32\userinit.exe`.
+	Userinit string
+	// Trusted helper xizmati jarayonlarining PID'lari (Scanner o'zini beradi; xizmat tirik ekan PID qayta berilmaydi).
+	Trusted map[uint32]bool
 }
 
 // system32Images %SystemRoot%\System32\ ichidagi ruxsat etilgan tizim jarayonlari (bloklash/kirish ekrani, matn
@@ -58,22 +81,41 @@ var system32Images = []string{
 	"LogonUI.exe", "consent.exe", "WerFault.exe", "SystemSettingsBroker.exe",
 }
 
+// logonImages kirish paytida (bloklash kirishdan oldin boshlangan bo'lsa ham) yashashi kerak bo'lgan System32 shell
+// jarayonlari. Ular session 0 xizmatlari (svchost: DcomLaunch, Schedule), winlogon yoki userinit'dan ochiladi.
+var logonImages = []string{"userinit.exe", "sihost.exe", "taskhostw.exe", "RuntimeBroker.exe", "dllhost.exe", "ctfmon.exe"}
+
 // textInputHost Windows 10 21H1+ va 11 dagi sensorli klaviatura / emoji paneli, %SystemRoot%'ga nisbatan.
 const textInputHost = `SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\TextInputHost.exe`
 
+// maxHelperDepth helper xizmatidan NetSchool exe'gacha bo'g'inlar: xizmat → Companion/guard (1) → Electron bolasi
+// (2). Chuqurroq zanjir (masalan, o'quvchi Electron bolasini PROC_THREAD_ATTRIBUTE_PARENT_PROCESS bilan ota qilib
+// Companion exe'sini ochgan) yashamaydi.
+const maxHelperDepth = 2
+
 // DefaultAllow %ProgramFiles% va %SystemRoot% (ishga tushish vaqtida aniqlangan) bo'yicha ruxsat ro'yxatini yasaydi.
-// Bo'sh ildiz o'tkazib yuboriladi (nisbiy yo'l hech qachon ruxsat bo'lmasin).
-func DefaultAllow(programFiles, systemRoot string) Allow {
-	var a Allow
+// trusted — helper xizmati PID'lari. Bo'sh ildiz o'tkazib yuboriladi (nisbiy yo'l hech qachon ruxsat bo'lmasin).
+func DefaultAllow(programFiles, systemRoot string, trusted ...uint32) Allow {
+	a := Allow{Trusted: map[uint32]bool{}}
+	for _, pid := range trusted {
+		a.Trusted[pid] = true
+	}
 	if pf := trimSep(Normalize(programFiles)); pf != "" {
-		a.Dirs = append(a.Dirs, pf+`\netschool\`, pf+`\mesh agent\`)
+		a.NetSchoolDir, a.MeshDir = pf+`\netschool\`, pf+`\mesh agent\`
 	}
 	if root := trimSep(Normalize(systemRoot)); root != "" {
+		sys32 := root + `\System32\`
 		for _, name := range system32Images {
-			a.Images = append(a.Images, Normalize(root+`\System32\`+name))
+			a.Images = append(a.Images, Normalize(sys32+name))
 		}
 		a.Images = append(a.Images, Normalize(root+`\`+textInputHost))
-		a.Kill = append(a.Kill, Normalize(root+`\System32\taskmgr.exe`))
+		a.Kill = append(a.Kill, Normalize(sys32+`taskmgr.exe`))
+		for _, name := range logonImages {
+			a.LogonImages = append(a.LogonImages, Normalize(sys32+name))
+		}
+		a.Userinit = Normalize(sys32 + `userinit.exe`)
+		a.LogonParents = []string{Normalize(sys32 + `winlogon.exe`), a.Userinit}
+		a.Explorer = Normalize(root + `\explorer.exe`)
 	}
 	return a
 }
@@ -97,16 +139,9 @@ func hasPrefixFold(s, prefix string) bool {
 
 func trimSep(p string) string { return strings.TrimRight(p, `\`) }
 
-func (a Allow) allows(image string) bool {
-	if image == "" {
-		return false
-	}
-	for _, d := range a.Dirs {
-		if d != "" && strings.HasSuffix(d, `\`) && strings.HasPrefix(image, d) {
-			return true
-		}
-	}
-	return contains(a.Images, image)
+// inDir image dir katalogi ichidami (dir bo'sh emas va `\` bilan tugaydi).
+func inDir(image, dir string) bool {
+	return image != "" && dir != "" && strings.HasSuffix(dir, `\`) && strings.HasPrefix(image, dir)
 }
 
 func contains(list []string, image string) bool {
@@ -129,16 +164,20 @@ func Decide(p Proc, session uint32, baseline map[uint32]bool, procs map[uint32]P
 		return false
 	}
 	image := Normalize(p.Image)
-	if allow.allows(image) {
+	switch {
+	case inDir(image, allow.NetSchoolDir):
+		return !helperChain(p, procs, allow)
+	case inDir(image, allow.MeshDir):
+		return !meshChain(p, procs, allow)
+	case contains(allow.Images, image):
 		return false
-	}
-	if contains(allow.Kill, image) {
+	case contains(allow.Kill, image):
 		return true
-	}
-	if baseline[p.PID] {
+	case logonShell(p, image, procs, allow):
 		return false
-	}
-	if image == "" {
+	case baseline[p.PID]:
+		return false
+	case image == "":
 		return true
 	}
 	visited := map[uint32]bool{p.PID: true}
@@ -155,6 +194,67 @@ func Decide(p Proc, session uint32, baseline map[uint32]bool, procs map[uint32]P
 		cur = parent
 	}
 	return true
+}
+
+// helperChain NetSchool exe'si helper xizmatining bolasi yoki (maxHelperDepth gacha) NetSchool exe'lari orqali
+// nevarasi. Har bo'g'inda ota boladan oldin yaratilgan bo'lishi shart (trustedParent).
+func helperChain(p Proc, procs map[uint32]Proc, allow Allow) bool {
+	cur := p
+	for range maxHelperDepth {
+		parent, ok := procs[cur.ParentPID]
+		if !ok || parent.PID == cur.PID || !trustedParent(parent, cur) {
+			return false
+		}
+		if allow.Trusted[parent.PID] {
+			return true
+		}
+		if !inDir(Normalize(parent.Image), allow.NetSchoolDir) {
+			return false
+		}
+		cur = parent
+	}
+	return false
+}
+
+// meshChain Mesh Agent exe'si session 0 jarayonining (MeshAgent xizmati) bolasi yoki faqat Mesh Agent exe'lari orqali
+// avlodi.
+func meshChain(p Proc, procs map[uint32]Proc, allow Allow) bool {
+	visited := map[uint32]bool{p.PID: true}
+	cur := p
+	for range maxDepth {
+		parent, ok := procs[cur.ParentPID]
+		if !ok || visited[parent.PID] || !trustedParent(parent, cur) {
+			return false
+		}
+		if parent.Session == 0 {
+			return true
+		}
+		if !inDir(Normalize(parent.Image), allow.MeshDir) {
+			return false
+		}
+		visited[parent.PID] = true
+		cur = parent
+	}
+	return false
+}
+
+// logonShell kirish paytidagi shell jarayonimi: LogonImages'dagi exe otasi session 0 jarayoni yoki winlogon/userinit
+// bo'lsa; explorer faqat userinit'dan. Bloklash kirishdan oldin boshlanganda (yoki dars paytida RuntimeBroker,
+// dllhost kabi COM jarayonlari) ish stoli yuklanishi uchun.
+func logonShell(p Proc, image string, procs map[uint32]Proc, allow Allow) bool {
+	isLogonImage := contains(allow.LogonImages, image)
+	if !isLogonImage && (allow.Explorer == "" || image != allow.Explorer) {
+		return false
+	}
+	parent, ok := procs[p.ParentPID]
+	if !ok || parent.PID == p.PID || !trustedParent(parent, p) {
+		return false
+	}
+	parentImage := Normalize(parent.Image)
+	if !isLogonImage {
+		return allow.Userinit != "" && parentImage == allow.Userinit
+	}
+	return parent.Session == 0 || contains(allow.LogonParents, parentImage)
 }
 
 // Baseline bloklash boshlanganda o'quvchi sessiyasida bo'lgan jarayonlar: PID → o'sha paytdagi jarayon.
