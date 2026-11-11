@@ -227,9 +227,11 @@ func TestNetSchoolImagesNeedHelperParent(t *testing.T) {
 	}
 }
 
-// Mesh Agent exe faqat session 0 jarayoni (MeshAgent xizmati) yoki shunday Mesh Agent zanjiri ochgan bo'lsa yashaydi.
+// Mesh Agent exe faqat session 0'dagi Mesh Agent exe'si (MeshAgent xizmati) yoki shunday Mesh Agent zanjiri ochgan
+// bo'lsa yashaydi.
 func TestMeshAgentImagesNeedSessionZeroParent(t *testing.T) {
 	procs, baseline := world()
+	procs[300] = Proc{PID: 300, ParentPID: 4, Session: 0, Image: sysroot + `\system32\svchost.exe`, Created: at(2)}
 	procs[350] = Proc{PID: 350, ParentPID: 300, Session: 0, Image: meshExe, Created: at(4)}
 	kvm := Proc{PID: 1600, ParentPID: 350, Session: student, Image: meshExe, Created: at(100)}
 	if decide(kvm, procs, baseline) {
@@ -246,6 +248,11 @@ func TestMeshAgentImagesNeedSessionZeroParent(t *testing.T) {
 			t.Fatalf("ota %d: o'quvchi ochgan MeshAgent o'ldirilishi kerak", parent)
 		}
 	}
+	// Session 0'dagi boshqa jarayon (svchost: Task Scheduler) ochgan Mesh exe — o'ldiriladi.
+	viaSvc := Proc{PID: 1615, ParentPID: 300, Session: student, Image: meshExe, Created: at(100)}
+	if !decide(viaSvc, procs, baseline) {
+		t.Fatal("svchost ochgan MeshAgent o'ldirilishi kerak")
+	}
 	// O'quvchi ochgan Mesh'ning Mesh bolasi ham.
 	procs[1620] = Proc{PID: 1620, ParentPID: 700, Session: student, Image: meshExe, Created: at(100)}
 	child := Proc{PID: 1621, ParentPID: 1620, Session: student, Image: meshExe, Created: at(101)}
@@ -254,60 +261,48 @@ func TestMeshAgentImagesNeedSessionZeroParent(t *testing.T) {
 	}
 }
 
-// Kirish paytidagi shell jarayonlari (bloklash kirishdan oldin boshlangan): session 0, winlogon yoki userinit ochgan
-// tizim jarayonlari yashaydi; explorer faqat userinit'dan.
-func TestLogonShellProcessesAllowed(t *testing.T) {
+// Baseline'dan keyin ochilgan shell/UWP xostlari uchun istisno yo'q: session 0 ota (Task Scheduler, DcomLaunch)
+// ularni oqlamaydi (o'quvchi vazifasi yoki HKCU COM surrogate'i ham shunday ochiladi).
+func TestShellHostsAfterBaselineAreKilled(t *testing.T) {
 	procs, baseline := world()
 	procs[300] = Proc{PID: 300, ParentPID: 4, Session: 0, Image: sysroot + `\system32\svchost.exe`, Created: at(5)}
-	procs[610] = Proc{PID: 610, ParentPID: 600, Session: student, Image: sysroot + `\system32\userinit.exe`, Created: at(11)}
-	logon := []struct {
+	procs[610] = Proc{PID: 610, ParentPID: 600, Session: student, Image: sysroot + `\system32\userinit.exe`, Created: at(100)}
+	cases := []struct {
 		image  string
 		parent uint32
 	}{
-		{`\system32\userinit.exe`, 600},
-		{`\system32\sihost.exe`, 300},
+		{`\system32\dllhost.exe`, 300},
 		{`\system32\taskhostw.exe`, 300},
 		{`\system32\RuntimeBroker.exe`, 300},
-		{`\system32\dllhost.exe`, 300},
-		{`\system32\ctfmon.exe`, 300},
-		{`\system32\sihost.exe`, 610},
+		{`\system32\sihost.exe`, 300},
+		{`\system32\userinit.exe`, 600},
 		{`\explorer.exe`, 610},
-	}
-	for i, c := range logon {
-		p := Proc{PID: uint32(1700 + i), ParentPID: c.parent, Session: student, Image: sysroot + c.image, Created: at(100)}
-		if decide(p, procs, baseline) {
-			t.Errorf("%s (ota %s) yashashi kerak", c.image, procs[c.parent].Image)
-		}
-	}
-	killed := []struct {
-		image  string
-		parent uint32
-	}{
-		// Explorer faqat userinit'dan: winlogon, svchost yoki chrome'dan emas (baseline explorer'ning o'z bolasi esa
-		// umumiy bir xil exe qoidasi bilan yashaydi).
 		{`\explorer.exe`, 600},
-		{`\explorer.exe`, 300},
-		{`\explorer.exe`, 800},
-		// Ro'yxatdagi tizim jarayoni o'quvchi jarayonidan (baseline explorer, chrome) — o'ldiriladi.
-		{`\system32\userinit.exe`, 700},
-		{`\system32\dllhost.exe`, 800},
-		{`\system32\RuntimeBroker.exe`, 700},
-		// Ro'yxatda yo'q exe session 0 otadan.
 		{`\system32\cmd.exe`, 300},
-		{`\system32\taskmgr.exe`, 300},
-		// SysWOW64 nusxasi ro'yxatda emas.
-		{`\syswow64\dllhost.exe`, 300},
 	}
-	for i, c := range killed {
-		p := Proc{PID: uint32(1750 + i), ParentPID: c.parent, Session: student, Image: sysroot + c.image, Created: at(100)}
+	for i, c := range cases {
+		p := Proc{PID: uint32(1700 + i), ParentPID: c.parent, Session: student, Image: sysroot + c.image, Created: at(101)}
 		if !decide(p, procs, baseline) {
-			t.Errorf("%s (ota %d) o'ldirilishi kerak", c.image, c.parent)
+			t.Errorf("%s (ota %d) baseline'dan keyin o'ldirilishi kerak", c.image, c.parent)
 		}
 	}
-	// Ota boladan keyin yaratilgan (PID qayta berilgan) — ishonilmaydi.
-	late := Proc{PID: 1790, ParentPID: 300, Session: student, Image: sysroot + `\system32\dllhost.exe`, Created: at(1)}
-	if !decide(late, procs, baseline) {
-		t.Fatal("ota keyin yaratilgan: dllhost o'ldirilishi kerak")
+}
+
+// Kirish jarayonlari baseline'dan (kechiktirilgan, explorer paydo bo'lgach) OLDIN ochilgan: ular baseline'da va
+// yashaydi.
+func TestLogonProcessesBeforeDeferredBaselineSurvive(t *testing.T) {
+	procs, _ := world()
+	procs[300] = Proc{PID: 300, ParentPID: 4, Session: 0, Image: sysroot + `\system32\svchost.exe`, Created: at(5)}
+	procs[610] = Proc{PID: 610, ParentPID: 600, Session: student, Image: sysroot + `\system32\userinit.exe`, Created: at(11)}
+	procs[620] = Proc{PID: 620, ParentPID: 300, Session: student, Image: sysroot + `\system32\sihost.exe`, Created: at(12)}
+	procs[630] = Proc{PID: 630, ParentPID: 300, Session: student, Image: sysroot + `\system32\taskhostw.exe`, Created: at(13)}
+	procs[700] = Proc{PID: 700, ParentPID: 610, Session: student, Image: sysroot + `\explorer.exe`, Created: at(20)}
+	b := NewBaseline(procs, student)
+	live := b.Live(procs)
+	for _, pid := range []uint32{600, 610, 620, 630, 700} {
+		if Decide(procs[pid], student, live, procs, allow()) {
+			t.Fatalf("baseline'dagi kirish jarayoni %s yashashi kerak", procs[pid].Image)
+		}
 	}
 }
 
@@ -387,23 +382,19 @@ func TestDefaultAllow(t *testing.T) {
 	if !a.Trusted[7] || len(a.Trusted) != 1 {
 		t.Fatalf("Trusted = %v", a.Trusted)
 	}
-	if a.Explorer != `c:\windows\explorer.exe` || len(a.LogonImages) != 6 || len(a.LogonParents) != 2 {
-		t.Fatalf("Explorer = %q, LogonImages = %q, LogonParents = %q", a.Explorer, a.LogonImages, a.LogonParents)
-	}
 	if len(a.Images) != 10 {
 		t.Fatalf("Images = %q", a.Images)
 	}
 	if len(a.Kill) != 1 || a.Kill[0] != `c:\windows\system32\taskmgr.exe` {
 		t.Fatalf("Kill = %q", a.Kill)
 	}
-	for _, img := range append(append(a.Images, a.LogonImages...), a.LogonParents...) {
+	for _, img := range a.Images {
 		if img != Normalize(img) {
 			t.Fatalf("%q normallashtirilmagan", img)
 		}
 	}
 	// Bo'sh ildiz: ruxsat ro'yxati bo'sh, nisbiy yo'l hech narsaga mos kelmaydi.
-	if e := DefaultAllow("", ""); e.NetSchoolDir != "" || e.MeshDir != "" || e.Explorer != "" || len(e.Images) != 0 ||
-		len(e.Kill) != 0 || len(e.LogonImages) != 0 || len(e.LogonParents) != 0 {
+	if e := DefaultAllow("", ""); e.NetSchoolDir != "" || e.MeshDir != "" || len(e.Images) != 0 || len(e.Kill) != 0 {
 		t.Fatalf("bo'sh ildiz bilan ruxsat ro'yxati bo'sh bo'lishi kerak: %+v", e)
 	}
 }
