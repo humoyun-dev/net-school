@@ -27,7 +27,7 @@ func runUninstall(args []string, _, stderr io.Writer) int {
 }
 
 func runHelperKey(args []string, _, stderr io.Writer) int {
-	if _, _, err := parseHelperKeyArgs(args); err != nil {
+	if _, err := parseHelperKeyArgs(args); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}

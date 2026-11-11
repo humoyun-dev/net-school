@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
+	"github.com/humoyun-dev/net-school/native/helper/internal/install"
 	"github.com/humoyun-dev/net-school/native/helper/internal/version"
 )
 
@@ -106,26 +108,50 @@ func flagValues(args []string, allowed []string, boolFlags []string) (map[string
 	return out, nil
 }
 
-const helperKeyUsage = "usage: netschool-helper helper-key --token <enrollment token> [--rotate]"
+const helperKeyUsage = "usage: netschool-helper helper-key --token-stdin [--rotate]  (token stdin'dan, bitta qator)"
 
-// parseHelperKeyArgs `helper-key --token <t> [--rotate]`.
-func parseHelperKeyArgs(args []string) (token string, rotate bool, err error) {
-	v, err := flagValues(args, []string{"--token"}, []string{"--rotate"})
-	if err != nil || v["--token"] == "" {
-		return "", false, errors.New(helperKeyUsage)
+// parseHelperKeyArgs `helper-key --token-stdin [--rotate]`. Token argv'da emas (jarayonlar ro'yxatida ko'rinmasin):
+// faqat stdin'dan.
+func parseHelperKeyArgs(args []string) (rotate bool, err error) {
+	v, err := flagValues(args, nil, []string{"--token-stdin", "--rotate"})
+	if err != nil || v["--token-stdin"] != "true" {
+		return false, errors.New(helperKeyUsage)
 	}
-	return v["--token"], v["--rotate"] == "true", nil
+	return v["--rotate"] == "true", nil
 }
 
-const setHubUsage = "usage: netschool-helper set-hub --origin <https://hub> --device-id <uuid> [--ca-file <pem>]"
+// maxTokenLine stdin'dagi token qatorining eng katta hajmi (install.ValidateToken 512 belgigacha qabul qiladi).
+const maxTokenLine = 1024
 
-type setHubArgs struct{ origin, deviceID, caFile string }
+// readTokenLine stdin'dan bitta qatorni o'qiydi (oxiridagi \r\n yoki \n olib tashlanadi), undan keyin hech narsa
+// bo'lmasligi kerak. Qiymat install.ValidateToken bilan tekshiriladi.
+func readTokenLine(r io.Reader) (string, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, maxTokenLine+1))
+	if err != nil {
+		return "", err
+	}
+	if len(raw) > maxTokenLine {
+		return "", errors.New("token qatori juda uzun")
+	}
+	line := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
+	if err := install.ValidateToken(line); err != nil {
+		return "", err
+	}
+	return line, nil
+}
 
-// parseSetHubArgs `set-hub --origin <url> --device-id <id> [--ca-file <path>]`.
+const setHubUsage = "usage: netschool-helper set-hub --origin <https://hub> --device-id <uuid> [--ca-stdin]  (CA PEM stdin'dan)"
+
+type setHubArgs struct {
+	origin, deviceID string
+	caStdin          bool
+}
+
+// parseSetHubArgs `set-hub --origin <url> --device-id <id> [--ca-stdin]`.
 func parseSetHubArgs(args []string) (setHubArgs, error) {
-	v, err := flagValues(args, []string{"--origin", "--device-id", "--ca-file"}, nil)
+	v, err := flagValues(args, []string{"--origin", "--device-id"}, []string{"--ca-stdin"})
 	if err != nil || v["--origin"] == "" || v["--device-id"] == "" {
 		return setHubArgs{}, errors.New(setHubUsage)
 	}
-	return setHubArgs{origin: v["--origin"], deviceID: v["--device-id"], caFile: v["--ca-file"]}, nil
+	return setHubArgs{origin: v["--origin"], deviceID: v["--device-id"], caStdin: v["--ca-stdin"] == "true"}, nil
 }

@@ -120,12 +120,13 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 		log.Warn("ishga tushmadi: %v", err)
 		return true, 1
 	}
-	// O'z-o'zini tiklash: ma'lumot katalogining egasi va himoyalangan DACL'i har ishga tushishda, hech narsa
-	// o'qilishidan oldin qayta o'rnatiladi. Hardening yiqilsa yoki katalog undan keyin ham ishonchli bo'lmasa,
-	// hub konfiguratsiyasi (device.json, hub-ca.pem, helper.key) bu ishga tushishda umuman o'qilmaydi
-	// (GuardedLoad): xizmat ochiq holatda ishlaydi, bu bir marta jurnalga yoziladi.
-	verified := verifyDataDir(p, log)
+	// O'z-o'zini tiklash: ma'lumot katalogining egasi va himoyalangan DACL'i hech narsa o'qilishidan oldin qayta
+	// o'rnatiladi. Hardening yiqilsa yoki katalog undan keyin ham ishonchli bo'lmasa, device.json, hub-ca.pem,
+	// helper.key va lock.json o'qilmaydi (GatedLoad, GatedStore): xizmat hub'siz va ochiq holatda ishlaydi, DirGate
+	// har VerifyRetry (60 s) da qayta uradi va o'tgach konfiguratsiya odatdagidek yuklanadi.
 	clock := newSystemClock()
+	gate := NewDirGate(dataDirVerifier(p, log), clock)
+	gate.Verified()
 
 	// Job: Companion va guard xizmat jarayoni bilan birga o'ladi (oldingi nusxaning yetim jarayonlari qolmaydi).
 	// Job yaratilmasa (bo'lmasligi kerak) jarayonlar Job'siz ishga tushadi va bu jurnalga yoziladi.
@@ -149,8 +150,8 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 	listener := &lazyListener{}
 	link := guard.NewLink(listener)
 	s := New(Deps{
-		Hub:       NewLazyHub(GuardedLoad(verified, func() (Hub, error) { return loadHub(p) }), clock),
-		Lock:      lock.New(clock, lock.NewFileStore(p.lock)),
+		Hub:       NewLazyHub(GatedLoad(gate, func() (Hub, error) { return loadHub(p) }), clock),
+		Lock:      lock.New(clock, GatedStore(gate, lock.NewFileStore(p.lock))),
 		Policy:    policy.NewPolicy(policy.NewRegistry(), p.policyJournal),
 		Guard:     link,
 		ProcGuard: pg,
@@ -223,23 +224,35 @@ loop:
 	return false, 0
 }
 
-// verifyDataDir helper katalogini himoyalaydi va natijani tekshiradi: true faqat xatosiz va katalog ishonchli
-// (egasi Administrators/SYSTEM, himoyalangan DACL, reparse point emas) bo'lsa.
-func verifyDataDir(p paths, log *eventLogger) bool {
-	trusted, err := fsacl.HardenHelperData(p.dataRoot, p.helperData)
-	if err != nil {
-		log.Warn("helper katalogi himoyalanmadi, hub konfiguratsiyasi o'qilmaydi: %v", err)
-		return false
+// dataDirVerifier helper katalogini himoyalaydi va tekshiradi: true faqat xatosiz va katalog ishonchli (egasi
+// Administrators/SYSTEM, himoyalangan DACL, reparse point emas) bo'lsa. Yiqilish bir marta, tiklanish bir marta
+// jurnalga yoziladi (har 60 s emas).
+func dataDirVerifier(p paths, log *eventLogger) func() bool {
+	failedLogged := false
+	return func() bool {
+		trusted, err := fsacl.HardenHelperData(p.dataRoot, p.helperData)
+		if err == nil {
+			var ok bool
+			ok, err = fsacl.IsTrustedDir(p.helperData)
+			if err == nil && !ok {
+				err = errors.New("egasi yoki DACL ishonchli emas")
+			}
+		}
+		if err != nil {
+			if !failedLogged {
+				log.Warn("helper katalogi tekshiruvdan o'tmadi, konfiguratsiya o'qilmaydi (har %s qayta uriniladi): %v", VerifyRetry, err)
+				failedLogged = true
+			}
+			return false
+		}
+		if !trusted {
+			log.Warn("helper katalogining egasi yoki DACL'i begona edi: katalog yangidan yaratildi (%s)", p.helperData)
+		}
+		if failedLogged {
+			log.Info("helper katalogi tekshirildi, konfiguratsiya yuklanadi")
+		}
+		return true
 	}
-	if !trusted {
-		log.Warn("helper katalogining egasi yoki DACL'i begona edi: katalog yangidan yaratildi (%s)", p.helperData)
-	}
-	ok, err := fsacl.IsTrustedDir(p.helperData)
-	if err != nil || !ok {
-		log.Warn("helper katalogi tekshiruvdan o'tmadi (%v), hub konfiguratsiyasi o'qilmaydi", err)
-		return false
-	}
-	return true
 }
 
 func toSession(s Session) session.Session { return session.Session{ID: s.ID, UserSID: s.UserSID} }

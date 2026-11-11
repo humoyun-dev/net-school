@@ -160,6 +160,8 @@ func TestValidateHubChecksTheCA(t *testing.T) {
 		"buzilgan":      []byte(testCA),
 		"kalit":         []byte("-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIA==\n-----END PRIVATE KEY-----\n"),
 		"ortiqcha matn": append(append([]byte{}, ca...), []byte("junk")...),
+		"oldida matn":   append([]byte("junk\n"), ca...),
+		"sarlavhali":    []byte(strings.Replace(string(ca), "-----\n", "-----\nProc-Type: 4,ENCRYPTED\n\n", 1)),
 		"juda katta":    make([]byte, MaxCABytes+1),
 	} {
 		if _, err := ValidateHub("https://hub.school.lan", deviceID, bad); err == nil {

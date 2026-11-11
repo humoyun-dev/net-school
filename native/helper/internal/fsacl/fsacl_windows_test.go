@@ -5,6 +5,8 @@ package fsacl
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -154,4 +156,27 @@ func TestHardenReplacesLinkedDir(t *testing.T) {
 	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
 		t.Fatalf("RemoveTree: %v", err)
 	}
+}
+
+// Ota katalog avval himoyalanadi (begona bo'lsa yangidan yaratiladi), keyin helper katalogi; ko'p fayl bir nechta
+// ro'yxat sahifasida o'qiladi.
+func TestHardenHelperDataHardensRootThenHelper(t *testing.T) {
+	requireElevated(t)
+	root := filepath.Join(t.TempDir(), "NetSchool")
+	helper := filepath.Join(root, "helper")
+	if _, err := HardenHelperData(root, helper); err != nil {
+		t.Fatalf("HardenHelperData: %v", err)
+	}
+	for i := 0; i < 600; i++ {
+		write(t, filepath.Join(helper, "f"+strings.Repeat("x", 100)+strconv.Itoa(i)))
+	}
+	trusted, err := HardenHelperData(root, helper)
+	if err != nil || !trusted {
+		t.Fatalf("trusted=%v err=%v", trusted, err)
+	}
+	if ok, err := IsTrustedDir(root); err != nil || !ok {
+		t.Fatalf("root: %v %v", ok, err)
+	}
+	assertHardened(t, helper)
+	assertHardened(t, filepath.Join(helper, "f"+strings.Repeat("x", 100)+"599"))
 }

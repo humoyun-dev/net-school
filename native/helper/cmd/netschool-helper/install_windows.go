@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/humoyun-dev/net-school/native/helper/internal/install"
 )
@@ -49,10 +50,10 @@ func runUninstall(args []string, stdout, stderr io.Writer) int {
 	return install.ExitOK
 }
 
-// runHelperKey `helper-key --token <t> [--rotate]`: enroll (elevated) claim'dan oldin chaqiradi. stdout'ga faqat
-// JSON {helperPublicKey, helperProof}; token chiqarilmaydi.
+// runHelperKey `helper-key --token-stdin [--rotate]`: enroll (elevated) claim'dan oldin chaqiradi va tokenni
+// stdin'ga yozadi. stdout'ga faqat JSON {helperPublicKey, helperProof}; token chiqarilmaydi.
 func runHelperKey(args []string, stdout, stderr io.Writer) int {
-	token, rotate, err := parseHelperKeyArgs(args)
+	rotate, err := parseHelperKeyArgs(args)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return install.ExitUsage
@@ -60,6 +61,11 @@ func runHelperKey(args []string, stdout, stderr io.Writer) int {
 	if !install.IsElevated() {
 		fmt.Fprintln(stderr, "helper-key administrator sifatida ishga tushirilishi kerak")
 		return install.ExitNotAdmin
+	}
+	token, err := readTokenLine(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(stderr, "helper-key: stdin'dagi token yaroqsiz: %v\n", err)
+		return install.ExitUsage
 	}
 	res, err := install.HelperKey(token, rotate)
 	if err != nil {
@@ -73,7 +79,8 @@ func runHelperKey(args []string, stdout, stderr io.Writer) int {
 	return install.ExitOK
 }
 
-// runSetHub `set-hub --origin <url> --device-id <id> [--ca-file <path>]`: enroll claim'dan keyin chaqiradi.
+// runSetHub `set-hub --origin <url> --device-id <id> [--ca-stdin]`: enroll claim'dan keyin chaqiradi. CA PEM
+// baytlari (enroll claim'dan oldin tekshirgan aynan o'sha baytlar) stdin'dan o'qiladi va qayta tekshiriladi.
 func runSetHub(args []string, stdout, stderr io.Writer) int {
 	a, err := parseSetHubArgs(args)
 	if err != nil {
@@ -84,7 +91,15 @@ func runSetHub(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "set-hub administrator sifatida ishga tushirilishi kerak")
 		return install.ExitNotAdmin
 	}
-	if err := install.SetHub(a.origin, a.deviceID, a.caFile); err != nil {
+	var ca []byte
+	if a.caStdin {
+		ca, err = io.ReadAll(io.LimitReader(os.Stdin, install.MaxCABytes+1))
+		if err != nil {
+			fmt.Fprintf(stderr, "set-hub: CA o'qilmadi: %v\n", err)
+			return install.ExitFailed
+		}
+	}
+	if err := install.SetHub(a.origin, a.deviceID, ca); err != nil {
 		fmt.Fprintf(stderr, "set-hub: %v\n", err)
 		return install.ExitFailed
 	}

@@ -100,21 +100,9 @@ func HelperKey(token string, rotate bool) (HelperKeyResult, error) {
 }
 
 // SetHub (`set-hub`, enroll claim muvaffaqiyatidan keyin chaqiradi) hub konfiguratsiyasini helper katalogiga
-// yozadi: device.json, hub-ca.pem (caFile bo'sh — eski hub-ca.pem o'chiriladi) va kutayotgan kalitni helper.key
-// qiladi. CA faylini shu (elevated) jarayon o'qiydi va tekshiradi.
-func SetHub(origin, deviceID, caFile string) error {
-	var ca []byte
-	if caFile != "" {
-		f, err := os.Open(caFile)
-		if err != nil {
-			return fmt.Errorf("CA fayli o'qilmadi: %w", err)
-		}
-		ca, err = io.ReadAll(io.LimitReader(f, MaxCABytes+1))
-		f.Close()
-		if err != nil {
-			return fmt.Errorf("CA fayli o'qilmadi: %w", err)
-		}
-	}
+// yozadi: device.json, hub-ca.pem (ca nil — eski hub-ca.pem o'chiriladi) va kutayotgan kalitni helper.key qiladi.
+// ca — enroll claim'dan oldin tekshirgan baytlar (stdin orqali); bu yerda yana tekshiriladi.
+func SetHub(origin, deviceID string, ca []byte) error {
 	deviceJSON, err := ValidateHub(origin, deviceID, ca)
 	if err != nil {
 		return err

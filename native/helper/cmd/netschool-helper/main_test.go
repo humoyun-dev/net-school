@@ -62,29 +62,42 @@ func TestInstallAndUninstallUsageExits2(t *testing.T) {
 }
 
 func TestParseHelperKeyArgs(t *testing.T) {
-	token, rotate, err := parseHelperKeyArgs([]string{"--token", "nse_x"})
-	if err != nil || token != "nse_x" || rotate {
-		t.Fatalf("token=%q rotate=%v err=%v", token, rotate, err)
-	}
-	if _, rotate, err := parseHelperKeyArgs([]string{"--rotate", "--token", "nse_x"}); err != nil || !rotate {
+	if rotate, err := parseHelperKeyArgs([]string{"--token-stdin"}); err != nil || rotate {
 		t.Fatalf("rotate=%v err=%v", rotate, err)
 	}
-	for _, bad := range [][]string{nil, {"--token"}, {"--token", ""}, {"--token", "a", "--token", "b"}, {"--x", "y"}} {
-		if _, _, err := parseHelperKeyArgs(bad); err == nil {
+	if rotate, err := parseHelperKeyArgs([]string{"--rotate", "--token-stdin"}); err != nil || !rotate {
+		t.Fatalf("rotate=%v err=%v", rotate, err)
+	}
+	// Token argv'da hech qachon: --token yo'q.
+	for _, bad := range [][]string{nil, {"--rotate"}, {"--token", "nse_x"}, {"--token-stdin", "--token-stdin"}, {"--token-stdin", "x"}} {
+		if _, err := parseHelperKeyArgs(bad); err == nil {
+			t.Fatalf("%q qabul qilindi", bad)
+		}
+	}
+}
+
+func TestReadTokenLine(t *testing.T) {
+	for in, want := range map[string]string{"nse_x\n": "nse_x", "nse_x\r\n": "nse_x", "nse_x": "nse_x"} {
+		if got, err := readTokenLine(strings.NewReader(in)); err != nil || got != want {
+			t.Fatalf("%q: %q %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"", "\n", "a\nb\n", "a b\n", strings.Repeat("x", 2000)} {
+		if _, err := readTokenLine(strings.NewReader(bad)); err == nil {
 			t.Fatalf("%q qabul qilindi", bad)
 		}
 	}
 }
 
 func TestParseSetHubArgs(t *testing.T) {
-	a, err := parseSetHubArgs([]string{"--origin", "https://hub", "--device-id", "id", "--ca-file", `C:\ca.pem`})
-	if err != nil || a.origin != "https://hub" || a.deviceID != "id" || a.caFile != `C:\ca.pem` {
+	a, err := parseSetHubArgs([]string{"--origin", "https://hub", "--device-id", "id", "--ca-stdin"})
+	if err != nil || a.origin != "https://hub" || a.deviceID != "id" || !a.caStdin {
 		t.Fatalf("%+v %v", a, err)
 	}
-	if a, err := parseSetHubArgs([]string{"--device-id", "id", "--origin", "https://hub"}); err != nil || a.caFile != "" {
+	if a, err := parseSetHubArgs([]string{"--device-id", "id", "--origin", "https://hub"}); err != nil || a.caStdin {
 		t.Fatalf("%+v %v", a, err)
 	}
-	for _, bad := range [][]string{nil, {"--origin", "https://hub"}, {"--device-id", "id"}, {"--origin", "https://hub", "--device-id", "id", "--ca-file"}, {"--origin", "https://hub", "--device-id", "id", "--bogus", "x"}, {"--origin", "a", "--origin", "b", "--device-id", "id"}} {
+	for _, bad := range [][]string{nil, {"--origin", "https://hub"}, {"--device-id", "id"}, {"--origin", "https://hub", "--device-id", "id", "--ca-file", "x"}, {"--origin", "https://hub", "--device-id", "id", "--bogus", "x"}, {"--origin", "a", "--origin", "b", "--device-id", "id"}} {
 		if _, err := parseSetHubArgs(bad); err == nil {
 			t.Fatalf("%q qabul qilindi", bad)
 		}

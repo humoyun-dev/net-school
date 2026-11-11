@@ -77,26 +77,29 @@ func checkCA(caPEM []byte) error {
 	if len(caPEM) > MaxCABytes {
 		return errors.New("hub CA fayli juda katta")
 	}
-	rest, n := caPEM, 0
-	for {
-		var block *pem.Block
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			break
+	// Qat'iy: bloklar orasida va atrofida faqat bo'sh joy (pem.Decode BEGIN'dan oldingi matnni jimgina o'tkazib
+	// yuboradi), sarlavhasiz CERTIFICATE bloklari. Companion enroll ham xuddi shu qoidani claim'dan oldin qo'llaydi
+	// (apps/companion/src/core/helper.ts `checkCaPem`).
+	rest, n := bytes.TrimSpace(caPEM), 0
+	for len(rest) > 0 {
+		if !bytes.HasPrefix(rest, []byte("-----BEGIN ")) {
+			return errors.New("hub CA faylida sertifikatdan tashqari matn bor")
 		}
-		if block.Type != "CERTIFICATE" {
-			return fmt.Errorf("hub CA faylida %q bloki bor (faqat CERTIFICATE)", block.Type)
+		block, r := pem.Decode(rest)
+		if block == nil {
+			return errors.New("hub CA faylida buzilgan PEM bloki bor")
+		}
+		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+			return fmt.Errorf("hub CA faylida %q bloki bor (faqat sarlavhasiz CERTIFICATE)", block.Type)
 		}
 		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
 			return fmt.Errorf("hub CA sertifikati o'qilmadi: %w", err)
 		}
 		n++
+		rest = bytes.TrimSpace(r)
 	}
 	if n == 0 {
 		return errors.New("hub CA faylida sertifikat yo'q")
-	}
-	if len(bytes.TrimSpace(rest)) != 0 {
-		return errors.New("hub CA faylida sertifikatdan tashqari matn bor")
 	}
 	return nil
 }
