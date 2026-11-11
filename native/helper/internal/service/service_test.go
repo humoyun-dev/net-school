@@ -231,12 +231,16 @@ func (f *fakeSessions) ActiveConsole() (Session, bool, error) { return f.s, f.ok
 type fakeShell struct {
 	ensured    []string
 	noExplorer bool
+	runErr     error
 	checks     int
 }
 
 func (f *fakeShell) Ensure(s Session) error { f.ensured = append(f.ensured, s.UserSID); return nil }
 func (f *fakeShell) Running(Session) (bool, error) {
 	f.checks++
+	if f.runErr != nil {
+		return false, f.runErr
+	}
 	return !f.noExplorer, nil
 }
 
@@ -794,5 +798,22 @@ func TestDeferredProcGuardCancelledOnUnlock(t *testing.T) {
 	h.steps(70)
 	if len(h.procGuard.starts) != 0 {
 		t.Fatalf("ochilgandan keyin ProcGuard.Start = %v", h.procGuard.starts)
+	}
+}
+
+// Explorer tekshiruvi yiqilsa kutilmaydi: baseline darhol (fail-closed), xato jurnalga yoziladi.
+func TestShellCheckErrorStartsProcGuardNow(t *testing.T) {
+	h := newHarnessWith(t, func(h *harness) { h.sessions.ok = false })
+	h.hub.lock(120)
+	h.steps(1)
+	h.sessions.ok = true
+	h.shell.runErr = errors.New("snapshot yiqildi")
+	h.svc.NotifySessionChange()
+	h.steps(1)
+	if !slices.Equal(h.procGuard.starts, []uint32{2}) {
+		t.Fatalf("tekshiruv xatosida ProcGuard.Start = %v", h.procGuard.starts)
+	}
+	if h.logs.count("snapshot yiqildi") != 1 {
+		t.Fatal("tekshiruv xatosi jurnalga yozilmadi")
 	}
 }

@@ -416,13 +416,14 @@ func (s *Service) stopProcGuard() {
 }
 
 // startProcGuardWhenReady baseline'ni sessiyada explorer bo'lsa yoki sessiya LogonGrace'dan beri ko'rinib tursa
-// oladi; aks holda kechiktiradi (Step har soniyada qayta tekshiradi). Klaviatura guard'i, siyosat va Ctrl+Alt+Del
-// kutmaydi. Kutish paytida process guard `off` (panelda `soft`).
+// oladi; faqat explorer aniq yo'q bo'lsa (Running → false, xatosiz) kechiktiradi (Step har soniyada qayta
+// tekshiradi). Tekshiruv xatosi kutishga sabab emas: baseline darhol olinadi (fail-closed). Klaviatura guard'i,
+// siyosat va Ctrl+Alt+Del kutmaydi. Kutish paytida process guard `off` (panelda `soft`).
 func (s *Service) startProcGuardWhenReady(now time.Duration) {
 	if now-s.sessionSince < LogonGrace {
 		running, err := s.d.Shell.Running(s.session)
 		s.note("explorer tekshiruvi", err)
-		if err != nil || !running {
+		if err == nil && !running {
 			s.pgDeferred = true
 			return
 		}
