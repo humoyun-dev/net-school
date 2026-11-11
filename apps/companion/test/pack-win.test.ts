@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { packWin } from '../scripts/pack-win.mjs';
+import { FUSE_SENTINEL, flipFuses, packWin } from '../scripts/pack-win.mjs';
 import { readZip, writeZip } from '../scripts/zip.mjs';
 
 let dir: string;
@@ -10,9 +10,15 @@ let appDist: string;
 let helperDist: string;
 const requested: { version: string; arch: string }[] = [];
 
+// Haqiqiy electron.exe'dagi fuse simi (Electron 45.2.1 win32-x64: versiya 1, 9 fuse, "101100011").
+const fuseWire = (fuses = '101100011') =>
+  Buffer.concat([Buffer.from(FUSE_SENTINEL), Buffer.from([1, fuses.length]), Buffer.from(fuses, 'latin1')]);
+const fakeExe = (arch: string) =>
+  Buffer.concat([Buffer.from(`MZ electron ${arch} `), fuseWire(), Buffer.from(' tail')]);
+
 function fakeElectronZip(arch: string): Buffer {
   return writeZip([
-    { name: 'electron.exe', data: Buffer.from(`MZ electron ${arch}`) },
+    { name: 'electron.exe', data: fakeExe(arch) },
     { name: 'ffmpeg.dll', data: Buffer.from('dll') },
     { name: 'resources/default_app.asar', data: Buffer.from('default app') },
     { name: 'version', data: Buffer.from('45.2.1') },
@@ -90,7 +96,7 @@ describe('Windows portable package', () => {
     expect(out).toMatch(/netschool-companion-win32-arm64\.zip$/);
     expect(requested).toEqual([{ version: '45.2.1', arch: 'arm64' }]);
     const names = new Map(readZip(readFileSync(out)).map((e) => [e.name, e.data]));
-    expect(names.get('NetSchool Companion.exe')?.toString()).toBe('MZ electron arm64');
+    expect(names.get('NetSchool Companion.exe')?.toString('latin1')).toMatch(/^MZ electron arm64 /);
     expect(names.has('electron.exe')).toBe(false);
     expect(names.has('resources/default_app.asar')).toBe(false);
     expect(names.has('ffmpeg.dll')).toBe(true);
@@ -177,5 +183,29 @@ describe('Windows portable package', () => {
   test('a package without the native module for the requested arch is refused', async () => {
     await expect(pack('x64', [])).rejects.toThrow(/koffi/);
     await expect(pack('x64', fakeNodeModules('arm64'))).rejects.toThrow(/koffi-win32-x64/);
+  });
+
+  // O'quvchi muhitidagi NODE_OPTIONS (kod yuklash) va --inspect argumentlari Companion'ga ta'sir qilmasin. RunAsNode
+  // qoladi: enroll.cmd uni ishlatadi (helper muhitni tozalaydi, process guard o'quvchi ochgan exe'ni o'ldiradi).
+  test('the Companion exe has the NODE_OPTIONS and inspect fuses off', async () => {
+    const out = await pack('x64');
+    const exe = readZip(readFileSync(out)).find((e) => e.name === 'NetSchool Companion.exe')?.data ?? Buffer.alloc(0);
+    const at = exe.indexOf(Buffer.from(FUSE_SENTINEL)) + FUSE_SENTINEL.length;
+    expect(exe.subarray(at + 2, at + 11).toString('latin1')).toBe('100000011');
+    expect(exe.subarray(0, 16).toString('latin1')).toBe('MZ electron x64 ');
+    expect(exe.subarray(-5).toString('latin1')).toBe(' tail');
+  });
+
+  test('fuses are refused when the wire is missing, duplicated or unknown', () => {
+    expect(() => flipFuses(Buffer.from('MZ no wire'))).toThrow(/fuse/);
+    expect(() => flipFuses(Buffer.concat([fuseWire(), fuseWire()]))).toThrow(/fuse/);
+    const v2 = fuseWire();
+    v2[FUSE_SENTINEL.length] = 2;
+    expect(() => flipFuses(v2)).toThrow(/fuse/);
+    expect(() => flipFuses(fuseWire('10'))).toThrow(/fuse/);
+    // Asl bufer o'zgarmaydi.
+    const original = fuseWire();
+    flipFuses(original);
+    expect(original.subarray(FUSE_SENTINEL.length + 2).toString('latin1')).toBe('101100011');
   });
 });

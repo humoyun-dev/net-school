@@ -43,6 +43,31 @@ const UNINSTALL_CMD = crlf([
 ]);
 const START_CMD = crlf(['@echo off', `start "" "%~dp0${EXE}"`]);
 
+// Electron fuse'lari (@electron/fuses formati, o'sha kutubxonasiz): exe ichida FUSE_SENTINEL, keyin sim versiyasi (1),
+// fuse soni va har fuse uchun bitta ASCII bayt ('0' o'chiq, '1' yoqiq). Tartib FuseV1Options: 0 RunAsNode,
+// 1 EnableCookieEncryption, 2 EnableNodeOptionsEnvironmentVariable, 3 EnableNodeCliInspectArguments, ...
+// O'quvchi muhitidagi NODE_OPTIONS (`--require` bilan kod yuklash) va `--inspect` Companion'ga ta'sir qilmasin.
+// RunAsNode qoladi: enroll.cmd `ELECTRON_RUN_AS_NODE=1` bilan enroll.mjs'ni ishga tushiradi (helper Companion muhitidan
+// ELECTRON_* ni olib tashlaydi, process guard esa o'quvchi o'zi ochgan Companion exe'sini bloklashda o'ldiradi).
+export const FUSE_SENTINEL = 'dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX';
+const FUSES_OFF = [2, 3];
+const FUSE_DISABLE = 0x30;
+
+export function flipFuses(exe) {
+  const sentinel = Buffer.from(FUSE_SENTINEL, 'latin1');
+  const at = exe.indexOf(sentinel);
+  if (at < 0 || exe.indexOf(sentinel, at + 1) >= 0)
+    throw new Error('refusing to pack: the Electron fuse wire was not found exactly once');
+  const wire = at + sentinel.length;
+  const version = exe[wire];
+  const count = exe[wire + 1];
+  if (version !== 1 || count === undefined || count <= Math.max(...FUSES_OFF) || wire + 2 + count > exe.length)
+    throw new Error(`refusing to pack: unknown Electron fuse wire (version ${version}, ${count} fuses)`);
+  const out = Buffer.from(exe);
+  for (const i of FUSES_OFF) out[wire + 2 + i] = FUSE_DISABLE;
+  return out;
+}
+
 function filesUnder(root) {
   const out = [];
   const walk = (d) => {
@@ -96,7 +121,7 @@ export async function packWin({
   const entries = [];
   for (const e of electron) {
     if (e.name === 'resources/default_app.asar') continue;
-    entries.push({ name: e.name === 'electron.exe' ? EXE : e.name, data: e.data });
+    entries.push(e.name === 'electron.exe' ? { name: EXE, data: flipFuses(e.data) } : e);
   }
   entries.push({
     name: 'resources/app/package.json',

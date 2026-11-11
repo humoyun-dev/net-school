@@ -100,6 +100,11 @@ export class Windows {
       win.on('close', (event) => {
         if (!this.#quitting && this.#status?.overlay.locked) event.preventDefault();
       });
+      // O'quvchi renderer jarayonini o'ldirsa (Companion'ning o'zini helper himoyalaydi, Electron bolalarini emas),
+      // oyna qoladi, lekin bo'sh: sahifa qayta yuklanadi va holat did-finish-load'da qayta yuboriladi.
+      win.webContents.on('render-process-gone', () => {
+        if (!win.isDestroyed() && !this.#quitting) win.webContents.reload();
+      });
       win.once('ready-to-show', () => this.#reveal(win));
       this.#overlays.set(display.id, win);
     }

@@ -28,8 +28,20 @@ describe('machine store', () => {
     expect(machineDir('linux', {})).toBe('/var/lib/netschool/companion');
     expect(machineDir('freebsd', {})).toBe('/var/lib/netschool/companion');
     for (const platform of ['win32', 'darwin', 'linux'] as const) {
-      expect(machineDir(platform, { NETSCHOOL_COMPANION_DIR: '/tmp/ns', ProgramData: 'D:\\Data' })).toBe('/tmp/ns');
+      expect(
+        machineDir(platform, { NETSCHOOL_COMPANION_DIR: '/tmp/ns', ProgramData: 'D:\\Data' }, { allowOverride: true }),
+      ).toBe('/tmp/ns');
     }
+  });
+
+  test('production Companion ignores the directory override', () => {
+    // O'quvchi `setx NETSCHOOL_COMPANION_DIR ...` bilan Companion'ni soxta enrollment'ga yo'naltira olmasin.
+    expect(machineDir('win32', { NETSCHOOL_COMPANION_DIR: 'C:\\Users\\s\\fake', ProgramData: 'D:\\Data' })).toBe(
+      'D:\\Data\\NetSchool\\companion',
+    );
+    expect(machineDir('linux', { NETSCHOOL_COMPANION_DIR: '/tmp/ns' }, { allowOverride: false })).toBe(
+      '/var/lib/netschool/companion',
+    );
   });
 
   test('a missing enrollment loads as null', () => {

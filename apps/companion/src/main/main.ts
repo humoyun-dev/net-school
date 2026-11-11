@@ -61,7 +61,8 @@ async function main(): Promise<void> {
   let cache: StateCache | null = null;
   let broken = false;
   try {
-    enrollment = loadEnrollment(machineDir(process.platform, process.env));
+    // Katalogni muhit orqali almashtirish faqat e2e test build'ida (oddiy build'da o'quvchi uni `setx` bilan bera olardi).
+    enrollment = loadEnrollment(machineDir(process.platform, process.env, { allowOverride: __NETSCHOOL_TEST_BUILD__ }));
     if (enrollment) cache = StateCache.open(join(app.getPath('userData'), 'state.sqlite'));
   } catch (err) {
     broken = true;

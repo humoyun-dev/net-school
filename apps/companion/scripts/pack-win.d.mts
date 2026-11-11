@@ -1,5 +1,8 @@
 export const ELECTRON_VERSION: string;
 export const KOFFI_VERSION: string;
+export const FUSE_SENTINEL: string;
+// electron.exe nusxasi: EnableNodeOptionsEnvironmentVariable va EnableNodeCliInspectArguments o'chiq.
+export function flipFuses(exe: Buffer): Buffer;
 export function packWin(opts: {
   arch: 'x64' | 'arm64';
   appDistDir: string;
