@@ -383,6 +383,31 @@ describe('helper enforcement level', () => {
     });
   });
 
+  test('a locked overlay is hard only while the helper reports Companion running', async () => {
+    expect(
+      (await asCompanion('PUT', CAPABILITIES, windowsReport({ state: 'available', enforcement: 'soft' }))).status,
+    ).toBe(204);
+    const lessonId = await lockDevice();
+    // Overlay ekranni Companion yopadi: u yo'q bo'lsa (o'quvchi o'ldirib turibdi, sessiya yo'q) kuchli emas.
+    for (const companion of ['restarting', 'no_session'] as const) {
+      await reportHelper({ ...active, companion });
+      expect((await capabilities())['classroom.overlay']).toEqual({
+        state: 'available',
+        enforcement: 'soft',
+        reason: 'companion_down',
+      });
+    }
+    // Komponent sababi Companion'dan oldin keladi (hook → policy → processGuard → companion).
+    await reportHelper({ ...active, processGuard: 'failed', companion: 'restarting' });
+    expect((await capabilities())['classroom.overlay']).toMatchObject({ reason: 'process_guard_failed' });
+    await reportHelper(active);
+    expect((await capabilities())['classroom.overlay']).toEqual({ state: 'available', enforcement: 'hard' });
+    // Bloklash yo'q: Companion holati darajaga ta'sir qilmaydi.
+    expect((await issueCommand(app, teacher, lessonId, { type: 'overlay.unlock', payload: {} })).status).toBe(202);
+    await reportHelper({ ...active, hook: 'off', policy: 'off', processGuard: 'off', companion: 'restarting' });
+    expect((await capabilities())['classroom.overlay']).toEqual({ state: 'available', enforcement: 'hard' });
+  });
+
   test('unlocked overlay is hard unless a component failed', async () => {
     expect(
       (await asCompanion('PUT', CAPABILITIES, windowsReport({ state: 'available', enforcement: 'soft' }))).status,

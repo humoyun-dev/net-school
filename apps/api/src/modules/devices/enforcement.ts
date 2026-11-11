@@ -16,8 +16,10 @@ const COMPONENTS = [
 // holatlaridan taxmin qilinmaydi. Yangi helper hisoboti bilan:
 //   - bloklash yo'q: hech bir komponent `failed` bo'lmasa `hard` (bloklashda komponentlar `off` dan `active`ga o'tadi);
 //     biri `failed` bo'lsa `soft` + o'sha komponentning `*_failed` sababi;
-//   - bloklangan: hook, siyosat va process guard uchalasi `active` bo'lsa `hard`; aks holda `soft` + `active` bo'lmagan
-//     birinchi komponentning (hook → policy → processGuard) `*_failed` sababi.
+//   - bloklangan: hook, siyosat va process guard uchalasi `active` va Companion `running` bo'lsa `hard`; aks holda
+//     `soft` + `active` bo'lmagan birinchi komponentning (hook → policy → processGuard) `*_failed` sababi, ular
+//     hammasi `active` bo'lsa `companion_down` (ekranni overlay yopadi, uni Companion ko'rsatadi: o'quvchi uni
+//     o'ldirib tursa yoki sessiyada yo'q bo'lsa daraja kuchli emas).
 // Helper hisoboti yo'q, eski yoki yaroqsiz: Companion hisoboti, lekin hech qachon `hard` emas (`helper_missing`).
 function overlay(entry: Capability, helper: HelperStatus | null, locked: boolean): Capability {
   if (entry.state !== 'available') return entry;
@@ -26,7 +28,9 @@ function overlay(entry: Capability, helper: HelperStatus | null, locked: boolean
     const weak = locked
       ? COMPONENTS.find(([key]) => helper[key] !== 'active')
       : COMPONENTS.find(([key]) => helper[key] === 'failed');
-    return weak ? { ...rest, enforcement: 'soft', reason: weak[1] } : { ...rest, enforcement: 'hard' };
+    if (weak) return { ...rest, enforcement: 'soft', reason: weak[1] };
+    if (locked && helper.companion !== 'running') return { ...rest, enforcement: 'soft', reason: 'companion_down' };
+    return { ...rest, enforcement: 'hard' };
   }
   if (entry.enforcement === 'hard') return { ...rest, enforcement: 'soft', reason: 'helper_missing' };
   return entry;
