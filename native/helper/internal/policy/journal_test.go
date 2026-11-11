@@ -573,6 +573,10 @@ func TestBrokenJournalIsRefusedNotIgnored(t *testing.T) {
 		"ortiqcha ma'lumot":    `[] []`,
 		"uint32 dan katta":     `[{"root":"HKLM","key":"k","name":"n","previous":4294967296,"sid":""}]`,
 		"manfiy":               `[{"root":"HKLM","key":"k","name":"n","previous":-1,"sid":""}]`,
+		// Faqat bloklash siyosatining qiymatlari: begona jurnal ixtiyoriy HKLM qiymatini "tiklatib" yubormasin.
+		"siyosatdan tashqari HKLM": `[{"root":"HKLM","key":"SYSTEM\\CurrentControlSet\\Services\\x","name":"Start","previous":2,"sid":""}]`,
+		"HKLM qiymati HKU'da":      `[{"root":"HKU\\S-1-5-21-1-2-3-4","key":"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System","name":"HideFastUserSwitching","previous":null,"sid":"S-1-5-21-1-2-3-4"}]`,
+		"HKU qiymati HKLM'da":      `[{"root":"HKLM","key":"Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System","name":"DisableTaskMgr","previous":null,"sid":""}]`,
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {

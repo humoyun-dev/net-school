@@ -60,3 +60,42 @@ func TestInstallAndUninstallUsageExits2(t *testing.T) {
 		}
 	}
 }
+
+func TestParseHelperKeyArgs(t *testing.T) {
+	token, rotate, err := parseHelperKeyArgs([]string{"--token", "nse_x"})
+	if err != nil || token != "nse_x" || rotate {
+		t.Fatalf("token=%q rotate=%v err=%v", token, rotate, err)
+	}
+	if _, rotate, err := parseHelperKeyArgs([]string{"--rotate", "--token", "nse_x"}); err != nil || !rotate {
+		t.Fatalf("rotate=%v err=%v", rotate, err)
+	}
+	for _, bad := range [][]string{nil, {"--token"}, {"--token", ""}, {"--token", "a", "--token", "b"}, {"--x", "y"}} {
+		if _, _, err := parseHelperKeyArgs(bad); err == nil {
+			t.Fatalf("%q qabul qilindi", bad)
+		}
+	}
+}
+
+func TestParseSetHubArgs(t *testing.T) {
+	a, err := parseSetHubArgs([]string{"--origin", "https://hub", "--device-id", "id", "--ca-file", `C:\ca.pem`})
+	if err != nil || a.origin != "https://hub" || a.deviceID != "id" || a.caFile != `C:\ca.pem` {
+		t.Fatalf("%+v %v", a, err)
+	}
+	if a, err := parseSetHubArgs([]string{"--device-id", "id", "--origin", "https://hub"}); err != nil || a.caFile != "" {
+		t.Fatalf("%+v %v", a, err)
+	}
+	for _, bad := range [][]string{nil, {"--origin", "https://hub"}, {"--device-id", "id"}, {"--origin", "https://hub", "--device-id", "id", "--ca-file"}, {"--origin", "https://hub", "--device-id", "id", "--bogus", "x"}, {"--origin", "a", "--origin", "b", "--device-id", "id"}} {
+		if _, err := parseSetHubArgs(bad); err == nil {
+			t.Fatalf("%q qabul qilindi", bad)
+		}
+	}
+}
+
+func TestHelperKeyAndSetHubUsageExits2(t *testing.T) {
+	for _, args := range [][]string{{"helper-key"}, {"set-hub", "--origin", "https://hub"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 2 {
+			t.Fatalf("%q: exit code = %d, want 2", args, code)
+		}
+	}
+}

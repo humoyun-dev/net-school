@@ -1,0 +1,19 @@
+{
+  "_comment": "TEST-ONLY kalit (device-signature.json bilan bir xil): claim proof vektorlari. apps/companion/test/signature-fixture.test.ts claimProof bilan qayta hisoblaydi, native/helper/internal/hub/claim_test.go (helper-key) o'qiydi.",
+  "vectors": [
+    {
+      "name": "simple",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIE5ldFNjaDBvbC10ZXN0LXZlY3Rvci1rZXktRE8tTk9U\n-----END PRIVATE KEY-----\n",
+      "token": "nse_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expectedPublicKey": "MCowBQYDK2VwAyEAB-6IXQtc1VRsO6gLGRICUpcnFXx8MtuxtI4raReXBBg",
+      "expectedProof": "XXUww21T7W2nDb6l4gLgto4eapAIhJsknAKxXCsL657wjAdRhoJjA4JK4O5gU06azRYzYCUYMetcp5iRWZCiDw"
+    },
+    {
+      "name": "other-token",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIE5ldFNjaDBvbC10ZXN0LXZlY3Rvci1rZXktRE8tTk9U\n-----END PRIVATE KEY-----\n",
+      "token": "nse_TestOnly-claim_token-0123456789abcdefghijklmn",
+      "expectedPublicKey": "MCowBQYDK2VwAyEAB-6IXQtc1VRsO6gLGRICUpcnFXx8MtuxtI4raReXBBg",
+      "expectedProof": "CG4m04y3xgBPq5Mx1jfUWXPsxWyp6ispqnxyHS8brb7cqkp7uDmfQryFH_JEgW00E57YmlLITvO5FYoa6NzBBg"
+    }
+  ]
+}

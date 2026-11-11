@@ -5,139 +5,255 @@ package fsacl
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// Harden dir katalogini (yo'q bo'lsa yaratadi) va uning ichidagi hamma narsani rule bo'yicha qayta o'rnatadi:
-// egasi Administrators, himoyalangan DACL. Ichidagi reparse point'lar (junction, symlink) o'chiriladi: ular
-// orqali ACL boshqa joyga qo'llanmasin va helper begona faylni o'qimasin. dir'ning o'zi reparse point bo'lsa,
-// havola o'chirilib, o'rniga oddiy katalog yaratiladi.
+// Hamma amal handle orqali: har element FILE_FLAG_OPEN_REPARSE_POINT bilan ochiladi (junction/symlink kuzatilmaydi),
+// turi, reparse belgisi va hard link soni ochilgan handle'dan o'qiladi, ega va DACL SetSecurityInfo bilan shu
+// handle'ga qo'yiladi (SetNamedSecurityInfo emas: u yo'lni qayta ochadi va merosni bolalarga o'zi yoyadi).
 //
-// trusted — o'zgartirishdan OLDINGI holat: katalog bor edi, egasi Administrators yoki SYSTEM va DACL himoyalangan
-// edi. Oddiy foydalanuvchi egani Administrators'ga o'zgartira olmaydi, shuning uchun bunday katalogni faqat
-// administrator (yoki oldingi install) yaratgan. trusted=false katalogdagi fayllarga ishonib bo'lmaydi.
+// Ishlov berilayotgan katalog handle'i FILE_SHARE_DELETE'siz ochiq turadi: u ochiq ekan katalogni qayta nomlab
+// yoki o'chirib, o'rniga junction qo'yib bo'lmaydi, shuning uchun bolalar uning yo'li orqali ochiladi.
+
+const (
+	secureAccess  = windows.READ_CONTROL | windows.WRITE_DAC | windows.WRITE_OWNER
+	shareNoDelete = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE
+	openFlags     = windows.FILE_FLAG_OPEN_REPARSE_POINT | windows.FILE_FLAG_BACKUP_SEMANTICS
+)
+
+type entry struct {
+	h    windows.Handle
+	info windows.ByHandleFileInformation
+}
+
+func (e entry) isDir() bool { return e.info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 }
+func (e entry) isReparse() bool {
+	return e.info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+// unsafeToTouch reparse point yoki bir nechta nomli fayl: ACL qo'yilsa u boshqa joydagi obyektga tushardi.
+func (e entry) unsafeToTouch() bool { return e.isReparse() || (!e.isDir() && e.info.NumberOfLinks > 1) }
+
+func (e entry) close() { _ = windows.CloseHandle(e.h) }
+
+// open path'ni o'zini (havolani kuzatmasdan) ochadi. SeBackup/SeRestore yoqilgan bo'lsa begona DACL ham
+// to'smaydi (FILE_FLAG_BACKUP_SEMANTICS).
+func open(path string, access uint32, share uint32) (entry, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return entry{}, err
+	}
+	h, err := windows.CreateFile(p, access, share, nil, windows.OPEN_EXISTING, openFlags, 0)
+	if err != nil {
+		return entry{}, &os.PathError{Op: "open", Path: path, Err: err}
+	}
+	e := entry{h: h}
+	if err := windows.GetFileInformationByHandle(h, &e.info); err != nil {
+		e.close()
+		return entry{}, &os.PathError{Op: "stat", Path: path, Err: err}
+	}
+	return e, nil
+}
+
+// Harden dir katalogini va ichidagi hamma narsani rule bo'yicha himoyalaydi. Ota katalog chaqiruvchi tomonidan
+// oldin himoyalangan bo'lishi kerak.
 //
-// Har element mustaqil: bittasi yiqilsa qolganlari baribir qayta o'rnatiladi, xatolar birlashtiriladi.
+// trusted — o'zgartirishdan OLDINGI holat: katalog bor edi, reparse point emas edi, egasi Administrators yoki SYSTEM
+// va DACL himoyalangan edi (oddiy foydalanuvchi egani Administrators'ga o'zgartira olmaydi).
+//   - trusted: katalog va har bola handle orqali qayta o'rnatiladi; reparse point'lar va hard link'li fayllar
+//     o'chiriladi (havolaning o'zi, nishoni emas);
+//   - aks holda: ichidagilar joyida ACL qilinmaydi — havolalarni kuzatmasdan o'chiriladi, katalog o'chiriladi va
+//     himoyalangan DACL bilan yangidan yaratiladi (eski katalogga ochilgan begona handle'lar ham kuchsiz qoladi).
 func Harden(dir string, rule Rule) (trusted bool, err error) {
-	enablePrivileges()
-	trusted, err = ensureDirTrusted(dir)
-	if err != nil {
-		return false, err
-	}
-	if err := apply(dir, rule.Dir); err != nil {
-		return trusted, err
-	}
-	var errs []error
-	walkErr := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if p == dir {
-			return err
-		}
-		if err != nil {
-			errs = append(errs, err)
-			return nil
-		}
-		info, err := os.Lstat(p)
-		if err != nil {
-			errs = append(errs, err)
-			return nil
-		}
-		if isReparse(info) {
-			if err := os.Remove(p); err != nil {
-				errs = append(errs, fmt.Errorf("%s reparse point, o'chirilmadi: %w", p, err))
-			}
-			if info.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		sddl := rule.File
-		if info.IsDir() {
-			sddl = rule.Dir
-		}
-		// Katalog ichiga kirishdan oldin (WalkDir uni keyin o'qiydi): begona DACL ro'yxatni yopgan bo'lishi mumkin.
-		if err := apply(p, sddl); err != nil {
-			errs = append(errs, err)
-		}
-		return nil
-	})
-	return trusted, errors.Join(append(errs, walkErr)...)
+	defer enablePrivileges()()
+	return secure(dir, rule, true)
 }
 
-// HardenDir faqat dir'ning o'zini (ichidagilarsiz) qayta o'rnatadi; yo'q bo'lsa yaratadi, reparse point bo'lsa
-// havolani o'chirib oddiy katalog yaratadi. Ota katalog uchun (`%ProgramData%\NetSchool`): ichidagi helper
-// katalogiga boshqa qoida qo'llanadi.
-func HardenDir(dir string, rule Rule) error {
-	enablePrivileges()
-	if err := ensureDir(dir); err != nil {
-		return err
-	}
-	return apply(dir, rule.Dir)
+// HardenDir Harden kabi, lekin ishonchli katalogning faqat o'zini qayta o'rnatadi (bolalariga boshqa qoida
+// qo'llanadi). Ishonchsiz katalog baribir tozalanib, yangidan yaratiladi.
+func HardenDir(dir string, rule Rule) (trusted bool, err error) {
+	defer enablePrivileges()()
+	return secure(dir, rule, false)
 }
 
-func ensureDir(dir string) error {
-	_, err := ensureDirTrusted(dir)
-	return err
-}
-
-// ensureDirTrusted dir'ni oddiy katalog qiladi. trusted — oldin bor edi va bizniki edi (isTrusted).
-func ensureDirTrusted(dir string) (trusted bool, err error) {
-	info, err := os.Lstat(dir)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-	case err != nil:
-		return false, err
-	case isReparse(info):
-		if err := os.Remove(dir); err != nil {
-			return false, fmt.Errorf("%s reparse point, o'chirilmadi: %w", dir, err)
-		}
-	case !info.IsDir():
-		return false, fmt.Errorf("%s katalog emas", dir)
-	default:
-		trusted = isTrusted(dir)
-	}
-	return trusted, os.MkdirAll(dir, 0o700)
-}
-
-// HardenHelperData xizmat har ishga tushishda (konfiguratsiyani o'qishdan oldin) va install chaqiradi:
-// dataRoot (`%ProgramData%\NetSchool`, faqat katalogning o'zi; foydalanuvchilar o'qiydi), keyin helperData
-// (ichidagi hamma narsa bilan; faqat SYSTEM/Administrators). Tartib muhim: avval ota katalog — uni oldindan
-// yaratgan o'quvchi helper katalogini almashtira olmasin. trusted — helperData o'zgartirishdan oldin bizniki
-// edimi (Harden).
+// HardenHelperData xizmat har ishga tushishda (konfiguratsiyani o'qishdan oldin), install, helper-key va set-hub
+// chaqiradi: avval dataRoot (`%ProgramData%\NetSchool`, faqat o'zi; foydalanuvchilar o'qiydi), keyin helperData
+// (hamma ichidagisi bilan; faqat SYSTEM/Administrators). Tartib muhim: ota katalog himoyalangach o'quvchi helper
+// katalogini almashtira olmaydi. trusted — helperData'niki (Harden).
 func HardenHelperData(dataRoot, helperData string) (trusted bool, err error) {
-	rootErr := HardenDir(dataRoot, Readable)
-	trusted, dataErr := Harden(helperData, Private)
-	return trusted, errors.Join(rootErr, dataErr)
+	defer enablePrivileges()()
+	if _, err := secure(dataRoot, Readable, false); err != nil {
+		return false, err
+	}
+	return secure(helperData, Private, true)
 }
 
-// Clear dir ichidagi hamma narsani o'chiradi (katalogning o'zi qoladi). Harden'dan keyin chaqiriladi: begona
-// fayllarni o'chirish huquqi shunda bor.
-func Clear(dir string) error {
-	entries, err := os.ReadDir(dir)
+// RemoveTree path'ni havolalarni kuzatmasdan o'chiradi (reparse point'ning o'zi o'chadi, nishoni emas). Yo'q bo'lsa
+// xato emas.
+func RemoveTree(path string) error {
+	defer enablePrivileges()()
+	return removeTree(path)
+}
+
+// FreshDir path'ni (bo'lsa) RemoveTree bilan o'chiradi va rule.Dir DACL'i bilan yangidan yaratadi.
+func FreshDir(path string, rule Rule) error {
+	defer enablePrivileges()()
+	if err := removeTree(path); err != nil {
+		return err
+	}
+	return create(path, rule.Dir)
+}
+
+func secure(dir string, rule Rule, recurse bool) (trusted bool, err error) {
+	e, err := open(dir, secureAccess|windows.DELETE, shareNoDelete)
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+		return false, create(dir, rule.Dir)
+	}
+	if err != nil {
+		return false, err
+	}
+	if e.isReparse() || !e.isDir() {
+		err := deleteHandle(e.h, dir)
+		e.close()
+		if err != nil {
+			return false, err
+		}
+		return false, create(dir, rule.Dir)
+	}
+	if !isTrusted(e.h) {
+		err := removeChildren(dir)
+		if err == nil {
+			err = deleteHandle(e.h, dir)
+		}
+		e.close()
+		if err != nil {
+			return false, fmt.Errorf("ishonchsiz %s tozalanmadi: %w", dir, err)
+		}
+		return false, create(dir, rule.Dir)
+	}
+	defer e.close()
+	if err := apply(e.h, dir, rule.Dir); err != nil {
+		return true, err
+	}
+	if !recurse {
+		return true, nil
+	}
+	return true, secureChildren(dir, rule)
+}
+
+// secureChildren ishonchli katalog bolalarini handle orqali qayta o'rnatadi. Har bola mustaqil: xatolar
+// birlashtiriladi.
+func secureChildren(dir string, rule Rule) error {
+	names, err := readNames(dir)
 	if err != nil {
 		return err
 	}
 	var errs []error
-	for _, e := range entries {
-		errs = append(errs, os.RemoveAll(filepath.Join(dir, e.Name())))
+	for _, name := range names {
+		path := dir + `\` + name
+		e, err := open(path, secureAccess, shareNoDelete)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if e.unsafeToTouch() {
+			e.close()
+			errs = append(errs, removeTree(path))
+			continue
+		}
+		if e.isDir() {
+			errs = append(errs, apply(e.h, path, rule.Dir), secureChildren(path, rule))
+		} else {
+			errs = append(errs, apply(e.h, path, rule.File))
+		}
+		e.close()
 	}
 	return errors.Join(errs...)
 }
 
-func isReparse(info fs.FileInfo) bool {
-	if a, ok := info.Sys().(*syscall.Win32FileAttributeData); ok {
-		return a.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0
+func removeTree(path string) error {
+	e, err := open(path, windows.DELETE|windows.READ_CONTROL, shareNoDelete)
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+		return nil
 	}
-	return info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0
+	if err != nil {
+		return err
+	}
+	defer e.close()
+	if e.isDir() && !e.isReparse() {
+		if err := removeChildren(path); err != nil {
+			return err
+		}
+	}
+	return deleteHandle(e.h, path)
 }
 
-// isTrusted katalogning hozirgi egasi Administrators yoki SYSTEM va DACL'i himoyalanganmi.
-func isTrusted(dir string) bool {
-	sd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
+func removeChildren(dir string) error {
+	names, err := readNames(dir)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, name := range names {
+		errs = append(errs, removeTree(dir+`\`+name))
+	}
+	return errors.Join(errs...)
+}
+
+// readNames katalogdagi nomlar. Go katalogni FILE_FLAG_BACKUP_SEMANTICS bilan ochadi: SeBackup bilan begona DACL
+// ro'yxatni yopa olmaydi. Katalogning o'zi chaqiruvchida FILE_SHARE_DELETE'siz ochiq (almashtirib bo'lmaydi).
+func readNames(dir string) ([]string, error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Readdirnames(-1)
+}
+
+type fileDispositionInfoEx struct{ Flags uint32 }
+
+// deleteHandle handle'dagi obyektni o'chiradi (reparse point'da havolaning o'zi). POSIX semantikasi: nom darhol
+// yo'qoladi va o'sha nom bilan yangi katalog yaratish mumkin. Eski Windows'da oddiy disposition.
+func deleteHandle(h windows.Handle, path string) error {
+	info := fileDispositionInfoEx{Flags: windows.FILE_DISPOSITION_DELETE | windows.FILE_DISPOSITION_POSIX_SEMANTICS |
+		windows.FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE}
+	err := windows.SetFileInformationByHandle(h, windows.FileDispositionInfoEx,
+		(*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)))
+	if err == nil {
+		return nil
+	}
+	del := byte(1)
+	if err2 := windows.SetFileInformationByHandle(h, windows.FileDispositionInfo, &del, 1); err2 != nil {
+		return fmt.Errorf("%s o'chirilmadi: %w", path, errors.Join(err, err2))
+	}
+	return nil
+}
+
+// create katalogni sddl xavfsizlik deskriptori bilan yaratadi (ega va himoyalangan DACL yaratilish paytida).
+func create(path, sddl string) error {
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return fmt.Errorf("SDDL %q: %w", sddl, err)
+	}
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	sa := windows.SecurityAttributes{SecurityDescriptor: sd}
+	sa.Length = uint32(unsafe.Sizeof(sa))
+	if err := windows.CreateDirectory(p, &sa); err != nil {
+		return fmt.Errorf("%s yaratilmadi: %w", path, err)
+	}
+	return nil
+}
+
+// isTrusted handle egasi Administrators yoki SYSTEM va DACL'i himoyalanganmi.
+func isTrusted(h windows.Handle) bool {
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT,
 		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return false
@@ -153,9 +269,9 @@ func isTrusted(dir string) bool {
 	return err == nil && control&windows.SE_DACL_PROTECTED != 0
 }
 
-// apply avval egani (SeTakeOwnership/SeRestore bilan: begona DACL bizga WRITE_DAC bermasa ham), keyin
-// himoyalangan DACL'ni o'rnatadi. Ikki alohida chaqiruv: egasi bo'lgach WRITE_DAC egalik huquqidan keladi.
-func apply(path, sddl string) error {
+// apply ega va himoyalangan DACL'ni handle'ga qo'yadi. SetSecurityInfo merosni bolalarga yoymaydi: har bola
+// alohida tekshirilib, alohida o'rnatiladi.
+func apply(h windows.Handle, path, sddl string) error {
 	sd, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return fmt.Errorf("SDDL %q: %w", sddl, err)
@@ -168,34 +284,46 @@ func apply(path, sddl string) error {
 	if err != nil {
 		return err
 	}
-	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION,
-		owner, nil, nil, nil); err != nil {
-		return fmt.Errorf("%s egasi o'rnatilmadi: %w", path, err)
-	}
-	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil, nil, dacl, nil); err != nil {
-		return fmt.Errorf("%s DACL o'rnatilmadi: %w", path, err)
+	if err := windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		owner, nil, dacl, nil); err != nil {
+		return fmt.Errorf("%s ACL o'rnatilmadi: %w", path, err)
 	}
 	return nil
 }
 
-// enablePrivileges jarayon tokenida SeTakeOwnership va SeRestore'ni yoqadi (administrator va SYSTEM'da bor,
-// lekin odatda o'chiq). Yoqilmasa ham davom etiladi: apply xatosi sababini aytadi.
-func enablePrivileges() {
+var privilegeNames = []string{"SeBackupPrivilege", "SeRestorePrivilege", "SeTakeOwnershipPrivilege"}
+
+// enablePrivileges SeBackup, SeRestore va SeTakeOwnership'ni yoqadi (administrator va SYSTEM tokenida bor, odatda
+// o'chiq) va ularni oldingi holatiga qaytaradigan funksiyani qaytaradi. Yoqilmasa ham davom etiladi: keyingi xato
+// sababini aytadi.
+func enablePrivileges() (restore func()) {
 	var tok windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(),
 		windows.TOKEN_ADJUST_PRIVILEGES|windows.TOKEN_QUERY, &tok); err != nil {
-		return
+		return func() {}
 	}
-	defer tok.Close()
-	for _, name := range []string{"SeTakeOwnershipPrivilege", "SeRestorePrivilege"} {
+	var previous []windows.Tokenprivileges
+	for _, name := range privilegeNames {
 		var luid windows.LUID
 		if err := windows.LookupPrivilegeValue(nil, windows.StringToUTF16Ptr(name), &luid); err != nil {
 			continue
 		}
 		tp := windows.Tokenprivileges{PrivilegeCount: 1}
 		tp.Privileges[0] = windows.LUIDAndAttributes{Luid: luid, Attributes: windows.SE_PRIVILEGE_ENABLED}
-		_ = windows.AdjustTokenPrivileges(tok, false, &tp, 0, nil, nil)
+		var prev windows.Tokenprivileges
+		var n uint32
+		if err := windows.AdjustTokenPrivileges(tok, false, &tp, uint32(unsafe.Sizeof(prev)), &prev, &n); err == nil {
+			previous = append(previous, prev)
+		}
+	}
+	return func() {
+		for i := len(previous) - 1; i >= 0; i-- {
+			// PrivilegeCount 0 — o'zgarmagan edi (allaqachon yoqilgan yoki tokenda yo'q).
+			if previous[i].PrivilegeCount > 0 {
+				_ = windows.AdjustTokenPrivileges(tok, false, &previous[i], 0, nil, nil)
+			}
+		}
+		_ = tok.Close()
 	}
 }

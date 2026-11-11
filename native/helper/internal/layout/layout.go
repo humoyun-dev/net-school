@@ -22,6 +22,9 @@ type Paths struct {
 
 	DataRoot, HelperData                                          string
 	DeviceJSON, HubCA, HelperKey, Lock, PolicyJournal, CADJournal string
+	// HelperKeyPending `helper-key` yangi kalitni shu yerga yozadi; hub claim'ni qabul qilgach `set-hub` uni
+	// helper.key o'rniga qo'yadi (claim yiqilsa ishlayotgan kalit buzilmaydi).
+	HelperKeyPending string
 
 	EnrollDir string
 
@@ -39,20 +42,21 @@ func New(programFiles, programData, windowsDir string) Paths {
 	dataRoot := join(programData, "NetSchool")
 	data := join(dataRoot, "helper")
 	return Paths{
-		InstallRoot:   root,
-		HelperDir:     join(root, "helper"),
-		HelperExe:     join(root, "helper", HelperExe),
-		CompanionDir:  join(root, "companion"),
-		CompanionExe:  join(root, "companion", CompanionExe),
-		DataRoot:      dataRoot,
-		HelperData:    data,
-		DeviceJSON:    join(data, "device.json"),
-		HubCA:         join(data, "hub-ca.pem"),
-		HelperKey:     join(data, "helper.key"),
-		Lock:          join(data, "lock.json"),
-		PolicyJournal: join(data, "policy-journal.json"),
-		CADJournal:    join(data, "cad-journal.json"),
-		EnrollDir:     join(dataRoot, "companion"),
-		Explorer:      join(windowsDir, "explorer.exe"),
+		InstallRoot:      root,
+		HelperDir:        join(root, "helper"),
+		HelperExe:        join(root, "helper", HelperExe),
+		CompanionDir:     join(root, "companion"),
+		CompanionExe:     join(root, "companion", CompanionExe),
+		DataRoot:         dataRoot,
+		HelperData:       data,
+		DeviceJSON:       join(data, "device.json"),
+		HubCA:            join(data, "hub-ca.pem"),
+		HelperKey:        join(data, "helper.key"),
+		HelperKeyPending: join(data, "helper.key.pending"),
+		Lock:             join(data, "lock.json"),
+		PolicyJournal:    join(data, "policy-journal.json"),
+		CADJournal:       join(data, "cad-journal.json"),
+		EnrollDir:        join(dataRoot, "companion"),
+		Explorer:         join(windowsDir, "explorer.exe"),
 	}
 }

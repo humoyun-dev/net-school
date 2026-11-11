@@ -4,6 +4,7 @@ package install
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -33,15 +34,12 @@ import (
 // service.StopTimeout), shundan keyin ham to'xtamasa jarayon majburan tugatiladi.
 const stopTimeout = service.StopTimeout + 30*time.Second
 
-// fileRetry o'chirilgan xizmat jarayoni exe'ni qo'yib yuborishini kutish (nusxa/o'chirish qayta uriniladi).
+// fileRetry to'xtatilgan xizmat jarayoni fayllarni qo'yib yuborishini kutish (rename/o'chirish qayta uriniladi).
 const fileRetry = 10 * time.Second
 
-// Fayl nomlari: Companion `enroll` katalogidagi manba (apps/companion/src/core/machine-store.ts).
-const (
-	srcDeviceJSON = "device.json"
-	srcHubCA      = "hub-ca.pem"
-	srcHelperKey  = "helper.key"
-)
+// ErrRunFromInstallDir uninstall `%ProgramFiles%\NetSchool` ichidagi exe'dan ishga tushirilgan: o'zini o'chira
+// olmaydi.
+var ErrRunFromInstallDir = errors.New("uninstall paket katalogidagi uninstall.cmd (netschool-helper.exe) dan ishga tushirilishi kerak, o'rnatilgan nusxadan emas")
 
 // IsElevated jarayon administrator (UAC elevated) tokeni bilan ishlayaptimi.
 func IsElevated() bool { return windows.GetCurrentProcessToken().IsElevated() }
@@ -63,61 +61,102 @@ func Paths() (layout.Paths, error) {
 	return layout.New(pf, data, win), nil
 }
 
-// sources Companion enroll katalogidan o'qilgan, tekshirilgan helper konfiguratsiyasi.
-type sources struct {
-	deviceJSON []byte
-	hubCA      []byte // nil — hub CA yo'q (tizim root'lari)
-	helperKey  []byte // nil — manbada yo'q, helper katalogidagi (ishonchli) kalit qoladi
-}
-
-// readSources enroll katalogidan device.json, hub-ca.pem va helper.key'ni o'qiydi va tekshiradi. Hech narsa
-// o'zgartirilishidan oldin chaqiriladi: yaroqsiz enrollment bilan xizmat o'rnatilmaydi.
-func readSources(p layout.Paths, trusted bool) (sources, error) {
-	var s sources
-	raw, err := os.ReadFile(filepath.Join(p.EnrollDir, srcDeviceJSON))
+// HelperKey (`helper-key --token`, enroll claim'dan oldin chaqiradi) helper katalogini himoyalaydi va helper
+// kalitini tayyorlaydi: rotate=false va katalogda yaroqli helper.key bo'lsa — o'sha (qayta urinish yoki bir xil
+// kalit bilan qayta ro'yxatdan o'tish), aks holda yangi kalit helper.key.pending'ga yoziladi va set-hub claim
+// muvaffaqiyatidan keyin uni helper.key qiladi. Kalit hech qachon helper katalogidan chiqmaydi.
+func HelperKey(token string, rotate bool) (HelperKeyResult, error) {
+	if err := ValidateToken(token); err != nil {
+		return HelperKeyResult{}, err
+	}
+	p, err := Paths()
 	if err != nil {
-		return s, fmt.Errorf("Companion enrollment topilmadi (avval enroll.cmd): %w", err)
+		return HelperKeyResult{}, err
 	}
-	if s.deviceJSON, err = HelperDeviceJSON(raw); err != nil {
-		return s, err
+	if _, err := fsacl.HardenHelperData(p.DataRoot, p.HelperData); err != nil {
+		return HelperKeyResult{}, fmt.Errorf("helper katalogi himoyalanmadi: %w", err)
 	}
-	s.hubCA, err = os.ReadFile(filepath.Join(p.EnrollDir, srcHubCA))
-	if errors.Is(err, fs.ErrNotExist) {
-		s.hubCA = nil
-	} else if err != nil {
-		return s, fmt.Errorf("hub-ca.pem o'qilmadi: %w", err)
+	var key ed25519.PrivateKey
+	if !rotate {
+		key, _ = hub.LoadKey(p.HelperKey)
 	}
-	keyPath := filepath.Join(p.EnrollDir, srcHelperKey)
-	s.helperKey, err = os.ReadFile(keyPath)
-	switch {
-	case err == nil:
-		if _, err := hub.LoadKey(keyPath); err != nil {
-			return s, err
+	if key == nil {
+		pemBytes, k, err := hub.GenerateKeyPEM()
+		if err != nil {
+			return HelperKeyResult{}, err
 		}
-	case !errors.Is(err, fs.ErrNotExist):
-		return s, fmt.Errorf("helper.key o'qilmadi: %w", err)
-	default:
-		// Qayta o'rnatish (yangilash): kalit avvalgi install'da ko'chirilgan. Faqat helper katalogi bizniki bo'lsa
-		// unga ishoniladi, aks holda kalitni o'quvchi qo'ygan bo'lishi mumkin.
-		s.helperKey = nil
-		if !trusted {
-			return s, errors.New("helper.key yo'q: kompyuterni yangi token bilan qayta ro'yxatdan o'tkazing (enroll.cmd ... --force)")
+		if err := writeAtomic(p.HelperKeyPending, pemBytes); err != nil {
+			return HelperKeyResult{}, err
 		}
-		if _, err := hub.LoadKey(p.HelperKey); err != nil {
-			return s, fmt.Errorf("helper.key yo'q yoki yaroqsiz, qayta ro'yxatdan o'tkazing (enroll.cmd ... --force): %w", err)
-		}
+		key = k
+	} else if err := removeIfExists(p.HelperKeyPending); err != nil {
+		return HelperKeyResult{}, err
 	}
-	return s, nil
+	pub, err := hub.EncodePublicKey(key.Public().(ed25519.PublicKey))
+	if err != nil {
+		return HelperKeyResult{}, err
+	}
+	return HelperKeyResult{HelperPublicKey: pub, HelperProof: hub.ClaimProof(key, token, pub)}, nil
 }
 
-// Install helper'ni o'rnatadi (Task 11):
-//  1. `%ProgramData%\NetSchool`, helper katalogi va Companion enroll katalogi egasi/DACL'i qayta o'rnatiladi;
-//  2. enrollment o'qiladi va tekshiriladi;
-//  3. eski xizmat (bo'lsa) to'xtatiladi;
-//  4. `%ProgramFiles%\NetSchool\{helper,companion}`ga nusxa (SYSTEM/Administrators yozadi, Users o'qiydi);
-//  5. helper katalogiga device.json, hub-ca.pem, helper.key yoziladi; manbadagi helper.key o'chiriladi;
-//  6. Event Log manbasi, xizmat (SDDL, recovery), HKLM Run autostart o'chiriladi, xizmat ishga tushadi.
-func Install(companionSrc string, out io.Writer) error {
+// SetHub (`set-hub`, enroll claim muvaffaqiyatidan keyin chaqiradi) hub konfiguratsiyasini helper katalogiga
+// yozadi: device.json, hub-ca.pem (caFile bo'sh — eski hub-ca.pem o'chiriladi) va kutayotgan kalitni helper.key
+// qiladi. CA faylini shu (elevated) jarayon o'qiydi va tekshiradi.
+func SetHub(origin, deviceID, caFile string) error {
+	var ca []byte
+	if caFile != "" {
+		f, err := os.Open(caFile)
+		if err != nil {
+			return fmt.Errorf("CA fayli o'qilmadi: %w", err)
+		}
+		ca, err = io.ReadAll(io.LimitReader(f, MaxCABytes+1))
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("CA fayli o'qilmadi: %w", err)
+		}
+	}
+	deviceJSON, err := ValidateHub(origin, deviceID, ca)
+	if err != nil {
+		return err
+	}
+	p, err := Paths()
+	if err != nil {
+		return err
+	}
+	if _, err := fsacl.HardenHelperData(p.DataRoot, p.HelperData); err != nil {
+		return fmt.Errorf("helper katalogi himoyalanmadi: %w", err)
+	}
+	if _, err := os.Stat(p.HelperKeyPending); err == nil {
+		if _, err := hub.LoadKey(p.HelperKeyPending); err != nil {
+			return err
+		}
+		if err := os.Rename(p.HelperKeyPending, p.HelperKey); err != nil {
+			return fmt.Errorf("helper kaliti o'rnatilmadi: %w", err)
+		}
+	}
+	if _, err := hub.LoadKey(p.HelperKey); err != nil {
+		return fmt.Errorf("helper.key yo'q (avval helper-key): %w", err)
+	}
+	if err := writeAtomic(p.DeviceJSON, deviceJSON); err != nil {
+		return err
+	}
+	if ca != nil {
+		return writeAtomic(p.HubCA, ca)
+	}
+	return removeIfExists(p.HubCA)
+}
+
+// swap katalogni yangisiga almashtirish qadami (orqaga qaytarish uchun yoziladi).
+type swap struct{ dir, staged, old string }
+
+// Install helper'ni o'rnatadi yoki yangilaydi. Helper konfiguratsiyasi (device.json, helper.key, hub-ca.pem)
+// faqat helper katalogidan: uni enroll `helper-key`/`set-hub` orqali to'ldiradi; yo'q bo'lsa xizmat baribir
+// o'rnatiladi va ogohlantirish chiqadi.
+//
+// Fayllar avval `helper.new`, `companion.new`ga to'liq nusxalanadi, keyin rename bilan almashtiriladi (eskisi
+// `*.old` bo'lib muvaffaqiyatgacha turadi). Eski xizmat to'xtatilgandan keyingi har qanday xatoda rename'lar
+// qaytariladi va eski xizmat qayta ishga tushiriladi: kompyuter boshqaruvsiz qolmasin.
+func Install(companionSrc string, out io.Writer) (err error) {
 	p, err := Paths()
 	if err != nil {
 		return err
@@ -134,80 +173,96 @@ func Install(companionSrc string, out io.Writer) error {
 		return err
 	}
 
-	trusted, err := fsacl.HardenHelperData(p.DataRoot, p.HelperData)
-	if err != nil {
-		return fmt.Errorf("helper katalogi himoyalanmadi: %w", err)
-	}
-	// Enroll katalogini o'quvchi oldindan yaratib, unga o'z hub-ca.pem'ini qo'ygan bo'lishi mumkin: o'qishdan oldin
-	// himoyalanadi (Companion uni oddiy foydalanuvchi sifatida faqat o'qiydi).
-	if _, err := fsacl.Harden(p.EnrollDir, fsacl.Readable); err != nil {
-		return fmt.Errorf("Companion enroll katalogi himoyalanmadi: %w", err)
-	}
-	src, err := readSources(p, trusted)
-	if err != nil {
-		return err
-	}
-
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("xizmatlar boshqaruvchisi: %w", err)
 	}
 	defer m.Disconnect()
-	if s, err := m.OpenService(service.Name); err == nil {
+
+	var swaps []swap
+	oldService, created := false, false
+	defer func() {
+		if err == nil {
+			return
+		}
+		for i := len(swaps) - 1; i >= 0; i-- {
+			if rerr := undoSwap(swaps[i]); rerr != nil {
+				fmt.Fprintf(out, "ogohlantirish: %s qaytarilmadi: %v\n", swaps[i].dir, rerr)
+			}
+		}
+		if created {
+			if s, oerr := m.OpenService(service.Name); oerr == nil {
+				_ = s.Delete()
+				s.Close()
+			}
+		}
+		if oldService {
+			if s, oerr := m.OpenService(service.Name); oerr == nil {
+				if serr := s.Start(); serr != nil && !errors.Is(serr, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+					fmt.Fprintf(out, "ogohlantirish: eski xizmat qayta ishga tushmadi: %v\n", serr)
+				} else {
+					fmt.Fprintln(out, "eski xizmat qayta ishga tushirildi")
+				}
+				s.Close()
+			}
+		}
+	}()
+
+	if s, oerr := m.OpenService(service.Name); oerr == nil {
+		oldService = true
 		fmt.Fprintln(out, "eski NetSchool Helper xizmati to'xtatilmoqda")
-		err := stopAndWait(s, out)
+		terminated, serr := stopAndWait(s, out)
 		s.Close()
-		if err != nil {
-			return err
+		if serr != nil {
+			return serr
+		}
+		// Majburan tugatilgan xizmat siyosat/CAD'ni qaytarmagan: katalog tozalanishidan (ishonchsiz bo'lsa)
+		// OLDIN jurnal bo'yicha qaytariladi. Jurnal faqat bloklash siyosatining qiymatlarini qabul qiladi.
+		if terminated {
+			if rerr := restoreLeftovers(p, out); rerr != nil {
+				fmt.Fprintf(out, "ogohlantirish: %v\n", rerr)
+			}
 		}
 	}
+
+	trusted, err := fsacl.HardenHelperData(p.DataRoot, p.HelperData)
+	if err != nil {
+		return fmt.Errorf("helper katalogi himoyalanmadi: %w", err)
+	}
+	if !trusted {
+		fmt.Fprintf(out, "ogohlantirish: %s ishonchsiz edi (egasi yoki DACL boshqa), tozalandi\n", p.HelperData)
+	}
+	warnIfNotEnrolled(p, out)
 
 	fmt.Fprintf(out, "fayllar: %s\n", p.InstallRoot)
-	if _, err := fsacl.Harden(p.InstallRoot, fsacl.Readable); err != nil {
+	if t, err := fsacl.HardenDir(p.InstallRoot, fsacl.Readable); err != nil {
 		return fmt.Errorf("%s himoyalanmadi: %w", p.InstallRoot, err)
+	} else if !t {
+		fmt.Fprintf(out, "ogohlantirish: %s ishonchsiz edi, tozalandi\n", p.InstallRoot)
 	}
-	if err := os.MkdirAll(p.HelperDir, 0o755); err != nil {
-		return err
+	plan := []swap{
+		{dir: p.HelperDir, staged: p.HelperDir + ".new", old: p.HelperDir + ".old"},
+		{dir: p.CompanionDir, staged: p.CompanionDir + ".new", old: p.CompanionDir + ".old"},
 	}
-	if !samePath(self, p.HelperExe) {
-		if err := retry(func() error { return copyFile(self, p.HelperExe) }); err != nil {
-			return fmt.Errorf("helper nusxalanmadi: %w", err)
-		}
-	}
-	if !samePath(companionSrc, p.CompanionDir) {
-		if err := retry(func() error { return os.RemoveAll(p.CompanionDir) }); err != nil {
-			return fmt.Errorf("eski Companion o'chirilmadi: %w", err)
-		}
-		if err := copyTree(companionSrc, p.CompanionDir); err != nil {
-			return fmt.Errorf("Companion nusxalanmadi: %w", err)
-		}
-	}
-
-	if !trusted {
-		// Katalog bizniki emas edi (o'quvchi yoki meros DACL bilan yaratilgan): undagi lock/jurnal fayllariga
-		// ishonilmaydi.
-		if err := fsacl.Clear(p.HelperData); err != nil {
-			return fmt.Errorf("helper katalogi tozalanmadi: %w", err)
-		}
-	}
-	if err := writeAtomic(p.DeviceJSON, src.deviceJSON); err != nil {
-		return err
-	}
-	if src.hubCA != nil {
-		err = writeAtomic(p.HubCA, src.hubCA)
-	} else {
-		err = removeIfExists(p.HubCA)
-	}
-	if err != nil {
-		return err
-	}
-	if src.helperKey != nil {
-		if err := writeAtomic(p.HelperKey, src.helperKey); err != nil {
+	for _, s := range plan {
+		if err := fsacl.FreshDir(s.staged, fsacl.Readable); err != nil {
 			return err
 		}
-		// Enroll katalogini foydalanuvchilar o'qiydi: kalit u yerda qolmasin.
-		if err := os.Remove(filepath.Join(p.EnrollDir, srcHelperKey)); err != nil {
-			return fmt.Errorf("enroll katalogidagi helper.key o'chirilmadi: %w", err)
+		if err := fsacl.RemoveTree(s.old); err != nil {
+			return fmt.Errorf("eski %s o'chirilmadi: %w", s.old, err)
+		}
+	}
+	if err := copyFile(self, filepath.Join(plan[0].staged, layout.HelperExe)); err != nil {
+		return fmt.Errorf("helper nusxalanmadi: %w", err)
+	}
+	if err := copyTree(companionSrc, plan[1].staged); err != nil {
+		return fmt.Errorf("Companion nusxalanmadi: %w", err)
+	}
+	for _, s := range plan {
+		done, err := applySwap(s)
+		swaps = append(swaps, done...)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -215,27 +270,70 @@ func Install(companionSrc string, out io.Writer) error {
 	if err := eventlog.InstallAsEventCreate(service.EventSource, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
 		fmt.Fprintf(out, "ogohlantirish: Event Log manbasi ro'yxatdan o'tmadi: %v\n", err)
 	}
-
-	s, err := createOrUpdate(m, p.HelperExe)
+	s, isNew, err := createOrUpdate(m, p.HelperExe)
+	created = isNew
 	if err != nil {
 		return err
 	}
 	defer s.Close()
-
 	if err := removeRunValue(); err != nil {
-		return fmt.Errorf("eski autostart (HKLM Run) o'chirilmadi: %w", err)
+		fmt.Fprintf(out, "ogohlantirish: eski autostart (HKLM Run) o'chirilmadi: %v\n", err)
 	}
 	if err := s.Start(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
 		return fmt.Errorf("xizmat ishga tushmadi: %w", err)
+	}
+	for _, sw := range plan {
+		if err := retry(func() error { return fsacl.RemoveTree(sw.old) }); err != nil {
+			fmt.Fprintf(out, "ogohlantirish: %s o'chirilmadi: %v\n", sw.old, err)
+		}
 	}
 	fmt.Fprintln(out, "NetSchool Helper o'rnatildi va ishga tushdi")
 	return nil
 }
 
+// applySwap dir'ni old'ga (bo'lsa), staged'ni dir'ga ko'chiradi. Bajarilgan qadamlar qaytariladi (orqaga
+// qaytarish uchun). Ishlayotgan exe'ni qayta nomlash Windows'da mumkin.
+func applySwap(s swap) ([]swap, error) {
+	var done []swap
+	if _, err := os.Lstat(s.dir); err == nil {
+		if err := retry(func() error { return os.Rename(s.dir, s.old) }); err != nil {
+			return done, fmt.Errorf("%s chetga olinmadi: %w", s.dir, err)
+		}
+		done = append(done, swap{dir: s.dir, old: s.old})
+	}
+	if err := os.Rename(s.staged, s.dir); err != nil {
+		return done, fmt.Errorf("%s o'rnatilmadi: %w", s.dir, err)
+	}
+	return append(done, swap{dir: s.dir, staged: s.staged}), nil
+}
+
+// undoSwap applySwap qadamini qaytaradi: yangi katalog staged'ga, eski katalog joyiga.
+func undoSwap(s swap) error {
+	if s.staged != "" {
+		return os.Rename(s.dir, s.staged)
+	}
+	return os.Rename(s.old, s.dir)
+}
+
+// warnIfNotEnrolled helper katalogida hub konfiguratsiyasi yoki kalit bo'lmasa ogohlantiradi: xizmat ishlaydi,
+// lekin hub'ga ulanmaydi.
+func warnIfNotEnrolled(p layout.Paths, out io.Writer) {
+	raw, err := os.ReadFile(p.DeviceJSON)
+	if err == nil {
+		_, err = service.ParseDeviceConfig(raw)
+	}
+	if err == nil {
+		_, err = hub.LoadKey(p.HelperKey)
+	}
+	if err != nil {
+		fmt.Fprintf(out, "ogohlantirish: helper ro'yxatdan o'tmagan (%v): enroll.cmd ni ishga tushiring\n", err)
+	}
+}
+
 // createOrUpdate xizmatni yaratadi yoki mavjudining konfiguratsiyasini yangilaydi, keyin SDDL va recovery'ni
-// o'rnatadi (ikkala holatda ham: qo'lda o'zgartirilgan bo'lsa qaytadi).
-func createOrUpdate(m *mgr.Mgr, exe string) (*mgr.Service, error) {
-	s, err := m.OpenService(service.Name)
+// o'rnatadi (ikkala holatda ham: qo'lda o'zgartirilgan bo'lsa qaytadi). created — xizmat shu chaqiruvda yaratildi.
+func createOrUpdate(m *mgr.Mgr, exe string) (s *mgr.Service, created bool, err error) {
+	s, err = m.OpenService(service.Name)
 	if err == nil {
 		cfg, err := s.Config()
 		if err == nil {
@@ -250,7 +348,7 @@ func createOrUpdate(m *mgr.Mgr, exe string) (*mgr.Service, error) {
 		}
 		if err != nil {
 			s.Close()
-			return nil, fmt.Errorf("xizmat konfiguratsiyasi yangilanmadi: %w", err)
+			return nil, false, fmt.Errorf("xizmat konfiguratsiyasi yangilanmadi: %w", err)
 		}
 	} else {
 		s, err = m.CreateService(service.Name, exe, mgr.Config{
@@ -261,14 +359,15 @@ func createOrUpdate(m *mgr.Mgr, exe string) (*mgr.Service, error) {
 			Description:      Description,
 		}, "run")
 		if err != nil {
-			return nil, fmt.Errorf("xizmat yaratilmadi: %w", err)
+			return nil, false, fmt.Errorf("xizmat yaratilmadi: %w", err)
 		}
+		created = true
 	}
 	if err := protect(s); err != nil {
 		s.Close()
-		return nil, err
+		return nil, created, err
 	}
-	return s, nil
+	return s, created, nil
 }
 
 var procSetServiceObjectSecurity = windows.NewLazySystemDLL("advapi32.dll").NewProc("SetServiceObjectSecurity")
@@ -299,18 +398,18 @@ func protect(s *mgr.Service) error {
 }
 
 // stopAndWait xizmatni to'xtatadi va to'xtashini kutadi. stopTimeout ichida to'xtamasa jarayon majburan
-// tugatiladi (siyosat va Ctrl+Alt+Del'ni keyin Uninstall jurnaldan qaytaradi; Install'da yangi xizmat Start'i).
-func stopAndWait(s *mgr.Service, out io.Writer) error {
+// tugatiladi (terminated=true: xizmat siyosat va Ctrl+Alt+Del'ni qaytarmagan bo'lishi mumkin).
+func stopAndWait(s *mgr.Service, out io.Writer) (terminated bool, err error) {
 	st, err := s.Query()
 	if err != nil {
-		return fmt.Errorf("xizmat holati: %w", err)
+		return false, fmt.Errorf("xizmat holati: %w", err)
 	}
 	if st.State == svc.Stopped {
-		return nil
+		return false, nil
 	}
 	if st.State != svc.StopPending {
 		if _, err := s.Control(svc.Stop); err != nil && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
-			return fmt.Errorf("xizmat to'xtatilmadi: %w", err)
+			return false, fmt.Errorf("xizmat to'xtatilmadi: %w", err)
 		}
 	}
 	deadline := time.Now().Add(stopTimeout)
@@ -319,17 +418,17 @@ func stopAndWait(s *mgr.Service, out io.Writer) error {
 		time.Sleep(300 * time.Millisecond)
 		st, err = s.Query()
 		if err != nil {
-			return fmt.Errorf("xizmat holati: %w", err)
+			return false, fmt.Errorf("xizmat holati: %w", err)
 		}
 		if st.ProcessId != 0 {
 			pid = st.ProcessId
 		}
 		if st.State == svc.Stopped {
-			return nil
+			return false, nil
 		}
 	}
 	fmt.Fprintf(out, "ogohlantirish: xizmat %s ichida to'xtamadi, jarayon %d tugatiladi\n", stopTimeout, pid)
-	return terminate(pid)
+	return true, terminate(pid)
 }
 
 func terminate(pid uint32) error {
@@ -367,11 +466,18 @@ func removeRunValue() error {
 // Uninstall xizmatni to'xtatadi va o'chiradi. Xizmat Stop'da siyosat va Ctrl+Alt+Del'ni qaytaradi; jurnal
 // qolgan bo'lsa (xizmat qulagan yoki majburan tugatilgan) uninstall o'zi qaytaradi. Qaytarib bo'lmasa helper
 // ma'lumot katalogi (jurnallar) o'chirilmaydi va xato qaytariladi: o'quvchi kompyuteri siyosat bilan qolmasin.
-// Companion enrollment'i (`%ProgramData%\NetSchool\companion`) tegilmaydi.
+// Companion enrollment'i (`%ProgramData%\NetSchool\companion`) tegilmaydi. Paket katalogidan ishga tushiriladi.
 func Uninstall(out io.Writer) error {
 	p, err := Paths()
 	if err != nil {
 		return err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if within(self, p.InstallRoot) {
+		return ErrRunFromInstallDir
 	}
 	m, err := mgr.Connect()
 	if err != nil {
@@ -382,7 +488,7 @@ func Uninstall(out io.Writer) error {
 	var errs []error
 	if s, err := m.OpenService(service.Name); err == nil {
 		fmt.Fprintln(out, "NetSchool Helper xizmati to'xtatilmoqda")
-		if err := stopAndWait(s, out); err != nil {
+		if _, err := stopAndWait(s, out); err != nil {
 			errs = append(errs, err)
 		}
 		if err := s.Delete(); err != nil {
@@ -401,13 +507,13 @@ func Uninstall(out io.Writer) error {
 		fmt.Fprintf(out, "ogohlantirish: Event Log manbasi o'chirilmadi: %v\n", err)
 	}
 	if err := removeRunValue(); err != nil {
-		errs = append(errs, fmt.Errorf("HKLM Run autostart o'chirilmadi: %w", err))
+		fmt.Fprintf(out, "ogohlantirish: HKLM Run autostart o'chirilmadi: %v\n", err)
 	}
-	if err := retry(func() error { return os.RemoveAll(p.InstallRoot) }); err != nil {
+	if err := retry(func() error { return fsacl.RemoveTree(p.InstallRoot) }); err != nil {
 		errs = append(errs, fmt.Errorf("%s o'chirilmadi: %w", p.InstallRoot, err))
 	}
 	if restoreErr == nil {
-		if err := os.RemoveAll(p.HelperData); err != nil {
+		if err := fsacl.RemoveTree(p.HelperData); err != nil {
 			errs = append(errs, fmt.Errorf("%s o'chirilmadi: %w", p.HelperData, err))
 		}
 	} else {
@@ -443,11 +549,13 @@ func restoreLeftovers(p layout.Paths, out io.Writer) error {
 	return errors.Join(errs...)
 }
 
-func samePath(a, b string) bool {
-	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+// within path root ichidami (registrsiz).
+func within(path, root string) bool {
+	path, root = strings.ToLower(filepath.Clean(path)), strings.ToLower(filepath.Clean(root))
+	return path == root || strings.HasPrefix(path, root+`\`)
 }
 
-// retry o'chirilayotgan xizmat jarayoni fayllarni qo'yib yuborguncha (fileRetry) qayta urinadi.
+// retry to'xtatilgan xizmat jarayoni fayllarni qo'yib yuborguncha (fileRetry) qayta urinadi.
 func retry(f func() error) error {
 	deadline := time.Now().Add(fileRetry)
 	for {
@@ -459,8 +567,8 @@ func retry(f func() error) error {
 	}
 }
 
-// writeAtomic vaqtinchalik fayl + rename: yangi fayl katalog DACL'ini meros oladi, eski nom (masalan, o'quvchi
-// qo'ygan hard link) almashtiriladi.
+// writeAtomic himoyalangan katalog ichida vaqtinchalik fayl + rename: yangi fayl katalog DACL'ini meros oladi,
+// eski nom almashtiriladi.
 func writeAtomic(path string, data []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
@@ -481,14 +589,10 @@ func removeIfExists(path string) error {
 }
 
 func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return writeAtomic(dst, data)
+	return copyStream(src, dst)
 }
 
-// copyTree yoyilgan paketni Companion katalogiga nusxalaydi. netschool-helper.exe (u helper katalogida) va reparse
+// copyTree yoyilgan paketni (staged) Companion katalogiga nusxalaydi: SkipInCompanionCopy fayllari va reparse
 // point'lar o'tkazib yuboriladi.
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
@@ -499,17 +603,20 @@ func copyTree(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(dst, rel)
+		if rel == "." {
+			return nil
+		}
 		if d.Type()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
+		target := filepath.Join(dst, rel)
 		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
+			return os.Mkdir(target, 0o755)
 		}
-		if rel == layout.HelperExe {
+		if SkipInCompanionCopy(rel) {
 			return nil
 		}
 		return copyStream(path, target)

@@ -25,3 +25,21 @@ func runUninstall(args []string, _, stderr io.Writer) int {
 	fmt.Fprintln(stderr, "uninstall faqat Windows'da ishlaydi")
 	return 2
 }
+
+func runHelperKey(args []string, _, stderr io.Writer) int {
+	if _, _, err := parseHelperKeyArgs(args); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	fmt.Fprintln(stderr, "helper-key faqat Windows'da ishlaydi")
+	return 2
+}
+
+func runSetHub(args []string, _, stderr io.Writer) int {
+	if _, err := parseSetHubArgs(args); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	fmt.Fprintln(stderr, "set-hub faqat Windows'da ishlaydi")
+	return 2
+}

@@ -106,7 +106,14 @@ func (e journalEntry) validate() error {
 	if e.Key == "" || e.Name == "" {
 		return errors.New("yozuvda key yoki name bo'sh")
 	}
-	return nil
+	// Faqat bloklash siyosatining o'z qiymatlari (lockValues): jurnal faylini kim yozgan bo'lmasin, Restore
+	// ixtiyoriy reyestr qiymatini yoza olmaydi.
+	for _, v := range lockValues {
+		if v.machine == (hive == hiveMachine) && strings.EqualFold(v.key, e.Key) && strings.EqualFold(v.name, e.Name) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s bloklash siyosatining qiymati emas", e)
 }
 
 // Policy bloklash siyosatini yozadi va jurnal bo'yicha qaytaradi. Metodlar bir-biriga nisbatan ketma-ket
