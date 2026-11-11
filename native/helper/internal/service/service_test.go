@@ -57,6 +57,8 @@ type fakeLock struct {
 	deadline time.Duration
 	ticks    int
 	restored bool
+	// restoreLease > 0 bo'lsa Restore saqlangan faol lock'ni tiklaydi.
+	restoreLease time.Duration
 }
 
 func (l *fakeLock) Apply(s hub.LockState) {
@@ -75,8 +77,13 @@ func (l *fakeLock) Tick() {
 	}
 }
 
-func (l *fakeLock) Locked() bool    { return l.locked }
-func (l *fakeLock) Restore()        { l.restored = true }
+func (l *fakeLock) Locked() bool { return l.locked }
+func (l *fakeLock) Restore() {
+	l.restored = true
+	if l.restoreLease > 0 {
+		l.locked, l.deadline = true, l.clock.t+l.restoreLease
+	}
+}
 func (l *fakeLock) StoreErr() error { return nil }
 
 type fakePolicy struct {
@@ -84,6 +91,8 @@ type fakePolicy struct {
 	restores int
 	pending  bool
 	applyErr error
+	// restoreErr bo'lsa Restore yiqiladi va jurnal qoladi (Pending true).
+	restoreErr error
 }
 
 func (p *fakePolicy) Apply(sid string) error {
@@ -94,6 +103,9 @@ func (p *fakePolicy) Apply(sid string) error {
 
 func (p *fakePolicy) Restore() error {
 	p.restores++
+	if p.restoreErr != nil {
+		return p.restoreErr
+	}
 	p.pending = false
 	return nil
 }
@@ -115,18 +127,27 @@ func (g *fakeGuard) Hook() string {
 func (g *fakeGuard) LastError() error { return nil }
 
 type fakeProcGuard struct {
-	running bool
-	starts  []uint32
-	stops   int
+	startErr error
+	failed   bool
+	running  bool
+	starts   []uint32
+	stops    int
 }
 
 func (p *fakeProcGuard) Start(session uint32) error {
-	p.running = true
 	p.starts = append(p.starts, session)
+	if p.startErr != nil {
+		p.failed = true
+		return p.startErr
+	}
+	p.running, p.failed = true, false
 	return nil
 }
-func (p *fakeProcGuard) Stop() { p.running = false; p.stops++ }
+func (p *fakeProcGuard) Stop() { p.running, p.failed = false, false; p.stops++ }
 func (p *fakeProcGuard) State() string {
+	if p.failed {
+		return hub.ComponentFailed
+	}
 	if p.running {
 		return hub.ComponentActive
 	}
@@ -135,31 +156,41 @@ func (p *fakeProcGuard) State() string {
 func (p *fakeProcGuard) Stats() (uint64, uint64, error) { return 0, 0, nil }
 
 type fakeCAD struct {
-	state   string
-	sets    []bool
-	started bool
-	probed  bool
-	pending bool
-	retries int
+	blockFail bool     // Set(true) `failed` qaytaradi
+	calls     []string // Start/Set chaqiruvlari tartibi
+	state     string
+	sets      []bool
+	started   bool
+	probed    bool
+	pending   bool
+	retries   int
 	// setCtxErr Set'ga kelgan ctx'ning holati (to'xtatishda yangi ctx tekshiruvi uchun).
 	setCtxErr []error
 }
 
-func (c *fakeCAD) Start(context.Context) { c.started = true }
+func (c *fakeCAD) Start(context.Context) { c.started = true; c.calls = append(c.calls, "start") }
 func (c *fakeCAD) Probe()                { c.probed = true }
 func (c *fakeCAD) Set(ctx context.Context, locked bool) string {
 	c.sets = append(c.sets, locked)
 	c.setCtxErr = append(c.setCtxErr, ctx.Err())
+	c.calls = append(c.calls, fmt.Sprintf("set:%v", locked))
 	c.state = hub.CADOff
 	if locked {
 		c.state = hub.CADBlocked
+		if c.blockFail {
+			c.state = hub.CADFailed
+		}
 	}
 	return c.state
 }
-func (c *fakeCAD) Pending() bool         { return c.pending }
-func (c *fakeCAD) Retry(context.Context) { c.retries++; c.pending = false }
-func (c *fakeCAD) State() string         { return c.state }
-func (c *fakeCAD) Reason() string        { return "" }
+func (c *fakeCAD) Pending() bool { return c.pending }
+func (c *fakeCAD) Retry(context.Context) {
+	c.retries++
+	c.pending = false
+	c.calls = append(c.calls, "retry")
+}
+func (c *fakeCAD) State() string  { return c.state }
+func (c *fakeCAD) Reason() string { return "" }
 
 // fakeChild Supervisor'lar ko'chirilgan sessiyalarni yozadi.
 type fakeChild struct {
@@ -247,7 +278,10 @@ type harness struct {
 	svc       *Service
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { t.Helper(); return newHarnessWith(t, nil) }
+
+// newHarnessWith setup'ni Start'dan oldin chaqiradi.
+func newHarnessWith(t *testing.T, setup func(*harness)) *harness {
 	t.Helper()
 	clock := &fakeClock{t: time.Hour}
 	h := &harness{
@@ -270,6 +304,9 @@ func newHarness(t *testing.T) *harness {
 		Companion: h.companion, GuardProc: h.guardProc, Mesh: h.mesh, Sessions: h.sessions, Shell: h.shell,
 		Clock: clock, Log: h.logs.log, Version: "test",
 	})
+	if setup != nil {
+		setup(h)
+	}
 	h.svc.Start(h.ctx)
 	return h
 }
@@ -572,5 +609,92 @@ func TestStopReleasesWithFreshContext(t *testing.T) {
 	}
 	if got := h.companion.moves[len(h.companion.moves)-1]; got != "-" {
 		t.Fatalf("Companion to'xtatilmadi: %v", h.companion.moves)
+	}
+}
+
+// Bloklash paytida yiqilgan Ctrl+Alt+Del va process guard har CleanupInterval'da qayta uriniladi.
+func TestFailedLockComponentsAreRetriedDuringLock(t *testing.T) {
+	h := newHarness(t)
+	h.cad.blockFail = true
+	h.procGuard.startErr = errors.New("snapshot olinmadi")
+	h.hub.lock(600)
+	h.steps(1)
+	if h.cad.state != hub.CADFailed || h.procGuard.State() != hub.ComponentFailed {
+		t.Fatalf("cad=%q procguard=%q", h.cad.state, h.procGuard.State())
+	}
+	h.steps(int(CleanupInterval/time.Second) - 2)
+	if len(h.cad.sets) != 1 || len(h.procGuard.starts) != 1 {
+		t.Fatalf("oraliqdan oldin qayta urinildi: CAD.Set=%v ProcGuard.Start=%v", h.cad.sets, h.procGuard.starts)
+	}
+	h.cad.blockFail = false
+	h.procGuard.startErr = nil
+	h.steps(3)
+	if !slices.Equal(h.cad.sets, []bool{true, true}) || h.cad.state != hub.CADBlocked {
+		t.Fatalf("CAD qayta urinilmadi: %v %q", h.cad.sets, h.cad.state)
+	}
+	if !slices.Equal(h.procGuard.starts, []uint32{2, 2}) || !h.procGuard.running {
+		t.Fatalf("ProcGuard qayta urinilmadi: %v", h.procGuard.starts)
+	}
+	if st := h.lastReport(); st.CAD != hub.CADBlocked || st.ProcessGuard != hub.ComponentActive {
+		t.Fatalf("status = %+v", st)
+	}
+	// Ishlayotgan komponentlar qayta chaqirilmaydi.
+	h.steps(int(CleanupInterval / time.Second))
+	if len(h.cad.sets) != 2 || len(h.procGuard.starts) != 2 {
+		t.Fatalf("muvaffaqiyatli komponent qayta chaqirildi: CAD.Set=%v ProcGuard.Start=%v", h.cad.sets, h.procGuard.starts)
+	}
+}
+
+// Tiklangan faol lock: CAD.Start (= qoldiqni ochish) chaqirilmaydi, birinchi Step to'g'ridan-to'g'ri bloklaydi.
+func TestRestoredLockIsNotUnblockedAtStart(t *testing.T) {
+	h := newHarnessWith(t, func(h *harness) {
+		h.lock.restoreLease = time.Minute
+		h.cad.pending = true
+	})
+	h.hub.stateErr = errors.New("hub hali yo'q")
+	h.steps(1)
+	if !slices.Equal(h.cad.calls, []string{"set:true"}) {
+		t.Fatalf("CAD chaqiruvlari = %v, kutilgan faqat set:true", h.cad.calls)
+	}
+	if h.cad.probed {
+		t.Fatal("bloklash paytida Probe chaqirildi")
+	}
+}
+
+// Ochilgach siyosat tiklanmasa (jurnal qoldi) holat `off` emas, `failed`.
+func TestFailedRestoreReportsPolicyFailed(t *testing.T) {
+	h := newHarness(t)
+	h.hub.lock(120)
+	h.steps(1)
+	h.policy.restoreErr = errors.New("hive yuklanmagan")
+	h.hub.unlock()
+	h.steps(6)
+	if st := h.lastReport(); st.Policy != hub.ComponentFailed {
+		t.Fatalf("policy status = %q, kutilgan failed", st.Policy)
+	}
+	h.policy.restoreErr = nil
+	h.steps(int(CleanupInterval/time.Second) + 1)
+	if st := h.lastReport(); st.Policy != hub.ComponentOff {
+		t.Fatalf("tiklangach policy status = %q, kutilgan off", st.Policy)
+	}
+}
+
+// Hub konfiguratsiyasi yo'q: lock yo'q, hisobot yuborilmaydi, xato bir marta yoziladi.
+func TestMissingHubConfigRunsUnlockedAndLogsOnce(t *testing.T) {
+	h := newHarness(t)
+	loads := 0
+	h.svc.d.Hub = NewLazyHub(func() (Hub, error) {
+		loads++
+		return nil, errors.New("helper device.json yo'q")
+	}, h.clock)
+	h.steps(120)
+	if h.lock.locked || len(h.hub.reports) != 0 {
+		t.Fatalf("lock=%v reports=%d", h.lock.locked, len(h.hub.reports))
+	}
+	if n := h.logs.count("device.json yo'q"); n != 1 {
+		t.Fatalf("konfiguratsiya xatosi %d marta yozildi, kutilgan 1", n)
+	}
+	if loads > 5 {
+		t.Fatalf("konfiguratsiya %d marta yuklandi (HubLoadRetry oralig'i buzildi)", loads)
 	}
 }

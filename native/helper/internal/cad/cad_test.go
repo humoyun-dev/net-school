@@ -644,3 +644,18 @@ func TestProbeSkipsWhilePending(t *testing.T) {
 	g.Probe()
 	wantCalls(t, f)
 }
+
+// Qoldiq jurnal bor (oldingi ish bloklash paytida qulagan), lock tiklangan: Set(true) avval ochmasdan bloklaydi.
+func TestBlockOverLeftoverJournalDoesNotUnblockFirst(t *testing.T) {
+	path := journalPath(t)
+	if err := os.WriteFile(path, []byte(`{"state":"blocked"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := ready()
+	g := NewGuard(f, path)
+	wantState(t, g.Set(context.Background(), true), StateBlocked)
+	wantCalls(t, f, "available", "block")
+	if !exists(t, path) {
+		t.Fatal("jurnal yo'qoldi")
+	}
+}

@@ -38,9 +38,15 @@ const stopWaitHint = StopTimeout + 15*time.Second
 
 // paths helper ishlatadigan fayllar. Hammasi Known Folders'dan: muhit o'zgaruvchilariga ishonilmaydi.
 //
-// Hub konfiguratsiyasi Companion `enroll` yozgan mashina katalogidan faqat o'qiladi:
-// `%ProgramData%\NetSchool\companion\device.json` (hubOrigin, deviceId) va `hub-ca.pem` (bo'lmasa tizim root'lari).
-// Helper'ning o'z fayllari `%ProgramData%\NetSchool\helper\`da (ACL: faqat SYSTEM va Administrators, Task 11).
+// Helper hamma faylini faqat o'z katalogidan, `%ProgramData%\NetSchool\helper\`dan oladi (ACL: faqat SYSTEM va
+// Administrators, o'qish ham; Task 11 `install` o'rnatadi):
+//   - `device.json` — hub konfiguratsiyasi (hubOrigin, deviceId; Companion enroll formati, install nusxalaydi);
+//   - `hub-ca.pem` — hub CA'si; yo'q bo'lsa tizim root'lari (install nusxalaydi, agar enroll'da bo'lgan bo'lsa);
+//   - `helper.key`, `lock.json`, `policy-journal.json`, `cad-journal.json`.
+//
+// Companion katalogi (`%ProgramData%\NetSchool\companion\`) umuman o'qilmaydi: unga oddiy foydalanuvchi fayl qo'sha
+// oladi (ProgramData standart ACL'i), masalan soxta `hub-ca.pem` — shunda helper hub'ga ulanolmay, lock hech qachon
+// yoqilmasdi. Fayllar yo'q bo'lsa xizmat ochiq holatda ishlaydi, hisobot yubormaydi va buni bir marta jurnalga yozadi.
 type paths struct {
 	deviceJSON, hubCA                          string
 	helperKey, lock, policyJournal, cadJournal string
@@ -60,12 +66,11 @@ func resolvePaths() (paths, error) {
 	if err != nil {
 		return paths{}, fmt.Errorf("%%SystemRoot%% aniqlanmadi: %w", err)
 	}
-	companionData := filepath.Join(data, "NetSchool", "companion")
 	helperData := filepath.Join(data, "NetSchool", "helper")
 	install := filepath.Join(pf, "NetSchool")
 	return paths{
-		deviceJSON:    filepath.Join(companionData, "device.json"),
-		hubCA:         filepath.Join(companionData, "hub-ca.pem"),
+		deviceJSON:    filepath.Join(helperData, "device.json"),
+		hubCA:         filepath.Join(helperData, "hub-ca.pem"),
 		helperKey:     filepath.Join(helperData, "helper.key"),
 		lock:          filepath.Join(helperData, "lock.json"),
 		policyJournal: filepath.Join(helperData, "policy-journal.json"),
@@ -80,7 +85,7 @@ func resolvePaths() (paths, error) {
 func loadHub(p paths) (Hub, error) {
 	raw, err := os.ReadFile(p.deviceJSON)
 	if err != nil {
-		return nil, fmt.Errorf("device.json o'qilmadi (qurilma ro'yxatdan o'tmagan?): %w", err)
+		return nil, fmt.Errorf("helper device.json o'qilmadi (helper o'rnatilmagan yoki qurilma ro'yxatdan o'tmagan?): %w", err)
 	}
 	cfg, err := ParseDeviceConfig(raw)
 	if err != nil {

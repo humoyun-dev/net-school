@@ -36,7 +36,8 @@ const (
 	// StatusInterval o'zgarish bo'lmasa ham status shu oraliqda yuboriladi.
 	StatusInterval = 30 * time.Second
 	// CleanupInterval bloklash yo'q paytida qoldiq siyosat jurnali va Ctrl+Alt+Del jurnali shu oraliqda qayta
-	// tozalanadi (cad.RetryInterval bilan bir xil).
+	// tozalanadi; bloklash paytida esa yiqilgan Ctrl+Alt+Del va process guard shu oraliqda qayta yoqiladi
+	// (cad.RetryInterval bilan bir xil: har urinish sekin PowerShell bo'lishi mumkin).
 	CleanupInterval = cad.RetryInterval
 	// StopTimeout to'xtatishda Ctrl+Alt+Del'ni qaytarish uchun yangi ctx muddati.
 	StopTimeout = 30 * time.Second
@@ -197,16 +198,21 @@ func (s *Service) NotifySessionChange() { s.notify.Store(true) }
 // Start xizmat ishga tushganda, birinchi Step'dan oldin bir marta: saqlangan lock (shu boot'da) tiklanadi,
 // Ctrl+Alt+Del qoldig'i tozalanadi va bloklash bo'lmasa qoldiq siyosat qaytariladi, Keyboard Filter mavjudligi
 // aniqlanadi (Pro/Home darhol `unavailable`).
+//
+// Tiklangan faol lock bo'lsa CAD.Start (qoldiq filtrni ochish) chaqirilmaydi: aks holda Ctrl+Alt+Del birinchi
+// Step qayta bloklaguncha dars paytida ochiq qolardi. Qoldiq jurnalni birinchi Step'dagi Set(true) o'z zimmasiga
+// oladi (u avval ochmasdan bloklaydi).
 func (s *Service) Start(ctx context.Context) {
 	s.d.Lock.Restore()
 	s.note("lock.json", s.d.Lock.StoreErr())
-	s.d.CAD.Start(ctx)
-	if !s.d.Lock.Locked() {
-		if s.d.Policy.Pending() {
-			s.restorePolicy()
-		}
-		s.d.CAD.Probe()
+	if s.d.Lock.Locked() {
+		return
 	}
+	s.d.CAD.Start(ctx)
+	if s.d.Policy.Pending() {
+		s.restorePolicy()
+	}
+	s.d.CAD.Probe()
 	s.noteCAD()
 }
 
@@ -239,12 +245,17 @@ func (s *Service) Step(ctx context.Context) {
 		s.applyPolicy()
 	}
 
-	if !locked && due(&s.nextCleanup, now, CleanupInterval) {
-		if s.d.Policy.Pending() {
-			s.restorePolicy()
-		}
-		if s.d.CAD.Pending() {
-			s.d.CAD.Retry(ctx)
+	if due(&s.nextCleanup, now, CleanupInterval) {
+		if locked {
+			s.retryFailed(ctx)
+		} else {
+			if s.d.Policy.Pending() {
+				s.restorePolicy()
+			}
+			if s.d.CAD.Pending() {
+				s.d.CAD.Retry(ctx)
+				s.noteCAD()
+			}
 		}
 	}
 
@@ -269,14 +280,14 @@ func (s *Service) Stop() {
 	s.d.Guard.Set(false)
 	s.d.Companion.Move(Session{}, false)
 	s.d.GuardProc.Move(Session{}, false)
+	wasLocked := s.locked
+	s.locked = false
 	s.restorePolicy()
 	s.d.CAD.Set(ctx, false)
 	s.noteCAD()
-	if s.locked && s.hasSession {
+	if wasLocked && s.hasSession {
 		s.note("explorer", s.d.Shell.Ensure(s.session))
 	}
-	s.locked = false
-	s.policyState = hub.ComponentOff
 }
 
 // checkSession faol sessiyani so'raydi va o'zgargan bo'lsa (yoki birinchi marta) hamma narsani ko'chiradi.
@@ -322,6 +333,7 @@ func (s *Service) engage(ctx context.Context, now time.Duration) {
 		s.note("process guard", s.d.ProcGuard.Start(s.session.ID))
 	}
 	s.nextDrift = now + DriftInterval
+	s.nextCleanup = now + CleanupInterval
 	s.d.CAD.Set(ctx, true)
 	s.noteCAD()
 }
@@ -331,7 +343,6 @@ func (s *Service) release(ctx context.Context) {
 	s.locked = false
 	s.d.Guard.Set(false)
 	s.d.ProcGuard.Stop()
-	s.policyState = hub.ComponentOff
 	s.restorePolicy()
 	s.d.CAD.Set(ctx, false)
 	s.noteCAD()
@@ -353,7 +364,31 @@ func (s *Service) applyPolicy() {
 	s.policyState = hub.ComponentActive
 }
 
-func (s *Service) restorePolicy() { s.note("siyosatni tiklash", s.d.Policy.Restore()) }
+// restorePolicy jurnal bo'yicha siyosatni qaytaradi. Bloklash yo'q paytida holat shu yerda aniqlanadi: jurnalda
+// tiklanmagan yozuv qolsa `failed` (o'quvchi hali cheklangan bo'lishi mumkin), aks holda `off`.
+func (s *Service) restorePolicy() {
+	s.note("siyosatni tiklash", s.d.Policy.Restore())
+	if s.locked {
+		return
+	}
+	s.policyState = hub.ComponentOff
+	if s.d.Policy.Pending() {
+		s.policyState = hub.ComponentFailed
+	}
+}
+
+// retryFailed bloklash paytida yiqilgan komponentlarni qayta yoqadi ("Set faqat o'zgarishda" har soniyani
+// taqiqlaydi, yiqilganini qayta urinishni emas): Ctrl+Alt+Del `failed` bo'lsa Set(true), sessiya bor va process
+// guard `failed` bo'lsa Start.
+func (s *Service) retryFailed(ctx context.Context) {
+	if s.d.CAD.State() == hub.CADFailed {
+		s.d.CAD.Set(ctx, true)
+		s.noteCAD()
+	}
+	if s.hasSession && s.d.ProcGuard.State() == hub.ComponentFailed {
+		s.note("process guard", s.d.ProcGuard.Start(s.session.ID))
+	}
+}
 
 func (s *Service) noteCAD() {
 	var err error
@@ -418,7 +453,10 @@ func (s *Service) report(ctx context.Context, now time.Duration) {
 		return
 	}
 	err := s.d.Hub.ReportStatus(ctx, st)
-	s.note("hub status", err)
+	// Konfiguratsiya yo'qligi lock-state so'rovida allaqachon yozilgan: bir xil sabab ikki marta yozilmasin.
+	if !errors.As(err, new(*HubUnavailableError)) {
+		s.note("hub status", err)
+	}
 	if err != nil {
 		s.sent = false
 		s.reportRetryAt = now + HubPollInterval
