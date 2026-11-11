@@ -23,3 +23,18 @@ var Readable = Rule{
 	Dir:  "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)",
 	File: "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)",
 }
+
+// DataResult HardenHelperData natijasi.
+type DataResult struct {
+	// RootReplaced `%ProgramData%\NetSchool` bor edi, lekin ishonchsiz edi (masalan, P0c paketi yoki o'quvchi
+	// yaratgan, meros DACL'li) va butunlay o'chirib yangidan yaratildi: ichidagi Companion enrollment'i
+	// (`companion\device.json`, `device.key`) ham yo'qoldi — kompyuter yangi token bilan qayta ro'yxatdan o'tkaziladi.
+	RootReplaced bool
+	// HelperTrusted helper katalogi oldin ham ishonchli edi (Harden'dagi trusted).
+	HelperTrusted bool
+}
+
+// RootReplacedWarning RootReplaced bo'lganda helper-key va install chiqaradigan ogohlantirish.
+const RootReplacedWarning = "ogohlantirish: %ProgramData%\\NetSchool ishonchsiz edi (eski P0c paketi yoki begona katalog) va " +
+	"butunlay o'chirib qayta yaratildi; undagi Companion ro'yxatdan o'tishi ham o'chdi. Kompyuterni yangi token bilan " +
+	"`enroll.cmd --force` orqali qayta ro'yxatdan o'tkazing (faqat install.cmd yetmaydi)"

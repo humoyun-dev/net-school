@@ -73,8 +73,9 @@ func HelperKey(token string, rotate bool) (HelperKeyResult, error) {
 	if err != nil {
 		return HelperKeyResult{}, err
 	}
-	if _, err := fsacl.HardenHelperData(p.DataRoot, p.HelperData); err != nil {
-		return HelperKeyResult{}, fmt.Errorf("helper katalogi himoyalanmadi: %w", err)
+	data, err := fsacl.HardenHelperData(p.DataRoot, p.HelperData)
+	if err != nil {
+		return HelperKeyResult{DataRootReplaced: data.RootReplaced}, fmt.Errorf("helper katalogi himoyalanmadi: %w", err)
 	}
 	var key ed25519.PrivateKey
 	if !rotate {
@@ -96,7 +97,7 @@ func HelperKey(token string, rotate bool) (HelperKeyResult, error) {
 	if err != nil {
 		return HelperKeyResult{}, err
 	}
-	return HelperKeyResult{HelperPublicKey: pub, HelperProof: hub.ClaimProof(key, token, pub)}, nil
+	return HelperKeyResult{HelperPublicKey: pub, HelperProof: hub.ClaimProof(key, token, pub), DataRootReplaced: data.RootReplaced}, nil
 }
 
 // SetHub (`set-hub`, enroll claim muvaffaqiyatidan keyin chaqiradi) hub konfiguratsiyasini helper katalogiga
@@ -213,11 +214,14 @@ func Install(companionSrc string, out io.Writer) (err error) {
 		}
 	}
 
-	trusted, err := fsacl.HardenHelperData(p.DataRoot, p.HelperData)
+	data, err := fsacl.HardenHelperData(p.DataRoot, p.HelperData)
+	if data.RootReplaced {
+		fmt.Fprintln(out, fsacl.RootReplacedWarning)
+	}
 	if err != nil {
 		return fmt.Errorf("helper katalogi himoyalanmadi: %w", err)
 	}
-	if !trusted {
+	if !data.HelperTrusted {
 		fmt.Fprintf(out, "ogohlantirish: %s ishonchsiz edi (egasi yoki DACL boshqa), tozalandi\n", p.HelperData)
 	}
 	warnIfNotEnrolled(p, out)

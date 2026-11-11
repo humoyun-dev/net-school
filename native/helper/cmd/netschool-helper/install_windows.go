@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/humoyun-dev/net-school/native/helper/internal/fsacl"
 	"github.com/humoyun-dev/net-school/native/helper/internal/install"
 )
 
@@ -68,6 +69,10 @@ func runHelperKey(args []string, stdout, stderr io.Writer) int {
 		return install.ExitUsage
 	}
 	res, err := install.HelperKey(token, rotate)
+	if res.DataRootReplaced {
+		// stdout faqat JSON: ogohlantirish stderr'ga (enroll uni JSON'dagi dataRootReplaced bo'yicha o'zi ham chiqaradi).
+		fmt.Fprintln(stderr, fsacl.RootReplacedWarning)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "helper-key: %v\n", err)
 		return install.ExitFailed

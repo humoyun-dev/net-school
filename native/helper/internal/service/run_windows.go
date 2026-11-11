@@ -231,7 +231,7 @@ loop:
 func dataDirVerifier(p paths, log *eventLogger) func() bool {
 	failedLogged := false
 	return func() bool {
-		trusted, err := fsacl.HardenHelperData(p.dataRoot, p.helperData)
+		res, err := fsacl.HardenHelperData(p.dataRoot, p.helperData)
 		if err == nil {
 			var ok bool
 			ok, err = fsacl.IsTrustedDir(p.helperData)
@@ -246,7 +246,10 @@ func dataDirVerifier(p paths, log *eventLogger) func() bool {
 			}
 			return false
 		}
-		if !trusted {
+		if res.RootReplaced {
+			log.Warn("%s", fsacl.RootReplacedWarning)
+		}
+		if !res.HelperTrusted {
 			log.Warn("helper katalogining egasi yoki DACL'i begona edi: katalog yangidan yaratildi (%s)", p.helperData)
 		}
 		if failedLogged {

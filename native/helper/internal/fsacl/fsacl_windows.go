@@ -167,30 +167,38 @@ func listNames(dir windows.Handle) ([]string, error) {
 //     himoyalangan DACL bilan yangidan yaratiladi (eski katalogga ochilgan begona handle'lar ham kuchsiz qoladi).
 func Harden(dir string, rule Rule) (trusted bool, err error) {
 	defer enablePrivileges()()
-	return secure(dir, rule, true)
+	st, err := secure(dir, rule, true)
+	return st == stateTrusted, err
 }
 
 // HardenDir Harden kabi, lekin ishonchli katalogning faqat o'zini qayta o'rnatadi (bolalariga boshqa qoida
 // qo'llanadi). Ishonchsiz katalog baribir tozalanib, yangidan yaratiladi.
 func HardenDir(dir string, rule Rule) (trusted bool, err error) {
 	defer enablePrivileges()()
-	return secure(dir, rule, false)
+	st, err := secure(dir, rule, false)
+	return st == stateTrusted, err
 }
 
 // HardenHelperData xizmat (ishga tushishda va tekshirilmagan bo'lsa davriy), install, helper-key va set-hub
 // chaqiradi: avval dataRoot (`%ProgramData%\NetSchool`, faqat o'zi; foydalanuvchilar o'qiydi), keyin helperData
 // (hamma ichidagisi bilan; faqat SYSTEM/Administrators). dataRoot himoyalanmasa yoki undan keyin ham ishonchli
 // bo'lmasa helperData'ga umuman tegilmaydi va xato qaytariladi: o'quvchi egalik qilayotgan ota katalogda u helper
-// katalogini aylanib chiqish paytida almashtirishi mumkin edi. trusted — helperData'niki (Harden).
-func HardenHelperData(dataRoot, helperData string) (trusted bool, err error) {
+// katalogini aylanib chiqish paytida almashtirishi mumkin edi. RootReplaced xato bo'lsa ham to'g'ri (o'chirish
+// bo'lib o'tgan bo'lishi mumkin).
+func HardenHelperData(dataRoot, helperData string) (DataResult, error) {
 	defer enablePrivileges()()
-	if _, err := secure(dataRoot, Readable, false); err != nil {
-		return false, fmt.Errorf("%s himoyalanmadi: %w", dataRoot, err)
+	var res DataResult
+	st, err := secure(dataRoot, Readable, false)
+	res.RootReplaced = st == stateReplaced
+	if err != nil {
+		return res, fmt.Errorf("%s himoyalanmadi: %w", dataRoot, err)
 	}
 	if ok, err := isTrustedDir(dataRoot); err != nil || !ok {
-		return false, fmt.Errorf("%s himoyalangandan keyin ham ishonchli emas (%v)", dataRoot, err)
+		return res, fmt.Errorf("%s himoyalangandan keyin ham ishonchli emas (%v)", dataRoot, err)
 	}
-	return secure(helperData, Private, true)
+	st, err = secure(helperData, Private, true)
+	res.HelperTrusted = st == stateTrusted
+	return res, err
 }
 
 // RemoveTree path'ni havolalarni kuzatmasdan o'chiradi (reparse point'ning o'zi o'chadi, nishoni emas). Yo'q bo'lsa
@@ -233,20 +241,29 @@ func isTrustedDir(dir string) (bool, error) {
 	return e.isDir() && !e.isReparse() && isTrusted(e.h), nil
 }
 
-func secure(dir string, rule Rule, recurse bool) (trusted bool, err error) {
+// dirState secure'dan OLDINGI holat.
+type dirState int
+
+const (
+	stateCreated  dirState = iota // katalog yo'q edi (yoki tekshiruv yiqildi), yangidan yaratildi
+	stateReplaced                 // bor edi, ishonchsiz edi: ichidagilari bilan o'chirib yangidan yaratildi
+	stateTrusted                  // bor edi va ishonchli edi: joyida qayta o'rnatildi
+)
+
+func secure(dir string, rule Rule, recurse bool) (dirState, error) {
 	// Tekshiruv: DELETE'siz, hamma share bayroqlari bilan (o'quvchi o'z katalogiga ochiq handle tutib turib uni
 	// to'sa olmasin).
 	e, err := open(dir, windows.READ_CONTROL, shareAll)
 	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
-		return false, create(dir, rule.Dir)
+		return stateCreated, create(dir, rule.Dir)
 	}
 	if err != nil {
-		return false, err
+		return stateCreated, err
 	}
 	id, ok := e.id(), e.isDir() && !e.isReparse() && isTrusted(e.h)
 	e.close()
 	if !ok {
-		return false, replace(dir, rule, id)
+		return stateReplaced, replace(dir, rule, id)
 	}
 	if !recurse {
 		// Faqat katalogning o'zi (dataRoot): bolalarni aylanib chiqmaymiz, shuning uchun qadash shart emas.
@@ -257,28 +274,28 @@ func secure(dir string, rule Rule, recurse bool) (trusted bool, err error) {
 		// to'xtaydi: install buni administratorga ko'rsatadi.
 		e, err := open(dir, secureAccess, shareAll)
 		if err != nil {
-			return true, err
+			return stateTrusted, err
 		}
 		defer e.close()
 		if e.id() != id {
-			return true, fmt.Errorf("%s tekshiruv paytida almashtirildi", dir)
+			return stateTrusted, fmt.Errorf("%s tekshiruv paytida almashtirildi", dir)
 		}
-		return true, apply(e.h, dir, rule.Dir)
+		return stateTrusted, apply(e.h, dir, rule.Dir)
 	}
 	// Ishonchli: FILE_SHARE_DELETE'siz qadaladi (oddiy foydalanuvchida bu katalogga DELETE yo'q, shuning uchun bu
 	// ochish begona handle tufayli yiqilmaydi) va aylanib chiqish shu handle orqali.
 	p, err := open(dir, secureAccess|listAccess, shareNoDelete)
 	if err != nil {
-		return true, err
+		return stateTrusted, err
 	}
 	defer p.close()
 	if p.id() != id {
-		return true, fmt.Errorf("%s tekshiruv paytida almashtirildi", dir)
+		return stateTrusted, fmt.Errorf("%s tekshiruv paytida almashtirildi", dir)
 	}
 	if err := apply(p.h, dir, rule.Dir); err != nil {
-		return true, err
+		return stateTrusted, err
 	}
-	return true, secureChildren(p.h, dir, rule)
+	return stateTrusted, secureChildren(p.h, dir, rule)
 }
 
 // replace ishonchsiz katalogni (yoki uning o'rnidagi havola/faylni) o'chiradi va yangidan yaratadi. DELETE bilan

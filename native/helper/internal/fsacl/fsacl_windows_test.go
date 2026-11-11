@@ -170,13 +170,31 @@ func TestHardenHelperDataHardensRootThenHelper(t *testing.T) {
 	for i := 0; i < 600; i++ {
 		write(t, filepath.Join(helper, "f"+strings.Repeat("x", 100)+strconv.Itoa(i)))
 	}
-	trusted, err := HardenHelperData(root, helper)
-	if err != nil || !trusted {
-		t.Fatalf("trusted=%v err=%v", trusted, err)
+	res, err := HardenHelperData(root, helper)
+	if err != nil || !res.HelperTrusted || res.RootReplaced {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	if ok, err := IsTrustedDir(root); err != nil || !ok {
 		t.Fatalf("root: %v %v", ok, err)
 	}
 	assertHardened(t, helper)
 	assertHardened(t, filepath.Join(helper, "f"+strings.Repeat("x", 100)+"599"))
+}
+
+// Ishonchsiz (meros DACL'li, P0c kabi) dataRoot: o'chirib qayta yaratiladi va RootReplaced; yo'q root — RootReplaced emas.
+func TestHardenHelperDataReportsReplacedRoot(t *testing.T) {
+	requireElevated(t)
+	root := filepath.Join(t.TempDir(), "NetSchool")
+	write(t, filepath.Join(root, "companion", "device.json"))
+	res, err := HardenHelperData(root, filepath.Join(root, "helper"))
+	if err != nil || !res.RootReplaced {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "companion", "device.json")); !os.IsNotExist(err) {
+		t.Fatalf("eski enrollment qoldi: %v", err)
+	}
+	fresh := filepath.Join(t.TempDir(), "NetSchool")
+	if res, err := HardenHelperData(fresh, filepath.Join(fresh, "helper")); err != nil || res.RootReplaced {
+		t.Fatalf("yangi root: res=%+v err=%v", res, err)
+	}
 }

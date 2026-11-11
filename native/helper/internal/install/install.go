@@ -122,6 +122,9 @@ func ValidateToken(token string) error {
 type HelperKeyResult struct {
 	HelperPublicKey string `json:"helperPublicKey"`
 	HelperProof     string `json:"helperProof"`
+	// DataRootReplaced `%ProgramData%\NetSchool` ishonchsiz edi va qayta yaratildi (fsacl.DataResult): enroll
+	// ogohlantirish chiqaradi. Claim'ga yuborilmaydi.
+	DataRootReplaced bool `json:"dataRootReplaced"`
 }
 
 // SkipInCompanionCopy paket katalogidan Companion katalogiga nusxalanmaydigan fayllar (rel — paket ildiziga

@@ -217,3 +217,14 @@ func TestCompanionCopySkipsScriptsAndHelper(t *testing.T) {
 		}
 	}
 }
+
+// helper-key stdout'i: enroll dataRootReplaced'ni o'qiydi (claim'ga qo'shmaydi).
+func TestHelperKeyResultJSON(t *testing.T) {
+	raw, err := json.Marshal(HelperKeyResult{HelperPublicKey: "A", HelperProof: "B", DataRootReplaced: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"helperPublicKey":"A","helperProof":"B","dataRootReplaced":true}` {
+		t.Fatalf("JSON = %s", raw)
+	}
+}
