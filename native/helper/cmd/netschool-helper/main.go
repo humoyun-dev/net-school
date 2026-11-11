@@ -13,8 +13,10 @@ import (
 // command — bitta subbuyruq. args subbuyruq nomidan keyingi argumentlar.
 type command func(args []string, stdout, stderr io.Writer) int
 
-// commands — subbuyruqlar jadvali. Qolganlari (run, install, uninstall, ...) keyingi vazifalarda ulanadi.
+// commands — subbuyruqlar jadvali. Qolganlari (run, install, uninstall) keyingi vazifalarda ulanadi. guard faqat
+// Windows'da ishlaydi (guard_windows.go), boshqa OS'da u xato bilan chiqadi (guard_other.go).
 var commands = map[string]command{
+	"guard":   runGuard,
 	"version": runVersion,
 }
 
