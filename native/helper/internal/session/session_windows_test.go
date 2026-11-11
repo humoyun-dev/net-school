@@ -122,3 +122,31 @@ func TestProcessKillStopsRunningProcess(t *testing.T) {
 		t.Fatalf("ikkinchi Kill: %v", err)
 	}
 }
+
+// Job yopilganda ichidagi jarayon o'ladi (xizmat qulasa Companion va guard yetim qolmaydi).
+func TestJobCloseKillsMembers(t *testing.T) {
+	job, err := NewJob()
+	if err != nil {
+		t.Fatalf("NewJob: %v", err)
+	}
+	p := startHelper(t, "sleep")
+	if err := windows.AssignProcessToJobObject(job.h, p.h); err != nil {
+		_ = p.Kill()
+		_ = p.Wait()
+		t.Fatalf("AssignProcessToJobObject: %v", err)
+	}
+	waited := make(chan error, 1)
+	go func() { waited <- p.Wait() }()
+	if err := job.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case err := <-waited:
+		if err == nil {
+			t.Fatal("jarayon 0 kodi bilan tugadi, kutilgan: Job o'ldirgan")
+		}
+	case <-time.After(10 * time.Second):
+		_ = p.Kill()
+		t.Fatal("Job yopilgach jarayon tugamadi")
+	}
+}

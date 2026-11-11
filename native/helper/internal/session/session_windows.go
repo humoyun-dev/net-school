@@ -138,6 +138,10 @@ func sessionString(id uint32, class uint32) (string, error) {
 // (Companion). CREATE_NO_WINDOW qo'yilmaydi: Companion GUI ilova, bayroq uning oynalariga ta'sir qilmasa ham bu
 // yerda keraksiz. Token egasi s.UserSID bo'lmasa ErrSessionChanged.
 func StartAsUser(s Session, exe string, args []string) (supervise.Proc, error) {
+	return startAsUser(s, exe, args, 0)
+}
+
+func startAsUser(s Session, exe string, args []string, job windows.Handle) (supervise.Proc, error) {
 	if err := checkExe(exe); err != nil {
 		return nil, err
 	}
@@ -153,7 +157,7 @@ func StartAsUser(s Session, exe string, args []string) (supervise.Proc, error) {
 	if sid != s.UserSID {
 		return nil, fmt.Errorf("%w: kutilgan %s, sessiyada %s", ErrSessionChanged, s.UserSID, sid)
 	}
-	return createProcess(tok, exe, args, 0)
+	return createProcess(tok, exe, args, 0, job)
 }
 
 // StartAsSystemInSession exe'ni SYSTEM sifatida s sessiyasining interaktiv ish stolida ishga tushiradi (guard: past
@@ -162,6 +166,10 @@ func StartAsUser(s Session, exe string, args []string) (supervise.Proc, error) {
 // talab qiladi — LocalSystem'da u yoqilgan). CREATE_NO_WINDOW qo'yiladi: helper konsol ilovasi, o'quvchi ish stolida
 // konsol oynasi ochilmasin.
 func StartAsSystemInSession(s Session, exe string, args []string) (supervise.Proc, error) {
+	return startAsSystemInSession(s, exe, args, 0)
+}
+
+func startAsSystemInSession(s Session, exe string, args []string, job windows.Handle) (supervise.Proc, error) {
 	if err := checkExe(exe); err != nil {
 		return nil, err
 	}
@@ -183,7 +191,7 @@ func StartAsSystemInSession(s Session, exe string, args []string) (supervise.Pro
 	if err := windows.SetTokenInformation(tok, windows.TokenSessionId, (*byte)(unsafe.Pointer(&id)), uint32(unsafe.Sizeof(id))); err != nil {
 		return nil, fmt.Errorf("tokenga sessiya %d yozilmadi: %w", s.ID, err)
 	}
-	return createProcess(tok, exe, args, windows.CREATE_NO_WINDOW)
+	return createProcess(tok, exe, args, windows.CREATE_NO_WINDOW, job)
 }
 
 // checkExe faqat mutlaq yo'lni qabul qiladi: nisbiy nom PATH yoki joriy katalogdan qidirilmasin.
@@ -197,7 +205,11 @@ func checkExe(exe string) error {
 // createProcess tok nomidan jarayon yaratadi. Muhit bloki token egasiniki (CreateEnvironmentBlock, meros olinmaydi),
 // joriy katalog — exe katalogi, dastaklar meros qilinmaydi. Ip dastagi darhol yopiladi, jarayon dastagi process'ga
 // o'tadi (uni Wait yopadi).
-func createProcess(tok windows.Token, exe string, args []string, flags uint32) (supervise.Proc, error) {
+//
+// job nol bo'lmasa jarayon CREATE_SUSPENDED bilan yaratiladi, Job'ga qo'shiladi va shundan keyingina ishga
+// tushiriladi: jarayon Job'dan tashqarida bitta ham bola jarayon ochib ulgurmaydi. Job'ga qo'shilmasa jarayon
+// o'ldiriladi (Job'siz bola xizmat qulasa yetim qolardi).
+func createProcess(tok windows.Token, exe string, args []string, flags uint32, job windows.Handle) (supervise.Proc, error) {
 	exe16, err := windows.UTF16PtrFromString(exe)
 	if err != nil {
 		return nil, fmt.Errorf("exe yo'li yaroqsiz: %w", err)
@@ -223,15 +235,64 @@ func createProcess(tok windows.Token, exe string, args []string, flags uint32) (
 
 	si := windows.StartupInfo{Desktop: desk16}
 	si.Cb = uint32(unsafe.Sizeof(si))
+	if job != 0 {
+		flags |= windows.CREATE_SUSPENDED
+	}
 	var pi windows.ProcessInformation
 	err = windows.CreateProcessAsUser(tok, exe16, cmd16, nil, nil, false,
 		flags|windows.CREATE_UNICODE_ENVIRONMENT, env, dir16, &si, &pi)
 	if err != nil {
 		return nil, fmt.Errorf("%s ishga tushmadi: %w", exe, err)
 	}
-	_ = windows.CloseHandle(pi.Thread)
+	defer windows.CloseHandle(pi.Thread)
+	if job != 0 {
+		if err := windows.AssignProcessToJobObject(job, pi.Process); err != nil {
+			_ = windows.TerminateProcess(pi.Process, killExitCode)
+			_ = windows.CloseHandle(pi.Process)
+			return nil, fmt.Errorf("%s Job'ga qo'shilmadi: %w", exe, err)
+		}
+		if _, err := windows.ResumeThread(pi.Thread); err != nil {
+			_ = windows.TerminateProcess(pi.Process, killExitCode)
+			_ = windows.CloseHandle(pi.Process)
+			return nil, fmt.Errorf("%s davom ettirilmadi: %w", exe, err)
+		}
+	}
 	return newProcess(pi.Process), nil
 }
+
+// Job JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE bilan Job obyekti: xizmat jarayoni tugaganda (to'xtatilganda yoki
+// qulaganda) kernel oxirgi dastakni yopadi va Job'dagi hamma jarayon (Companion, uning Electron bolalari, guard)
+// o'ladi. Shuning uchun yangi xizmat nusxasi oldingi nusxaning yetim jarayonlarini qidirmaydi: ular bo'lmaydi.
+// Dastak meros qilinmaydi.
+type Job struct{ h windows.Handle }
+
+func NewJob() (*Job, error) {
+	h, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Job obyekti yaratilmadi: %w", err)
+	}
+	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(h, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		_ = windows.CloseHandle(h)
+		return nil, fmt.Errorf("Job cheklovi o'rnatilmadi: %w", err)
+	}
+	return &Job{h: h}, nil
+}
+
+// StartAsUser — session.StartAsUser, jarayon Job ichida.
+func (j *Job) StartAsUser(s Session, exe string, args []string) (supervise.Proc, error) {
+	return startAsUser(s, exe, args, j.h)
+}
+
+// StartAsSystemInSession — session.StartAsSystemInSession, jarayon Job ichida.
+func (j *Job) StartAsSystemInSession(s Session, exe string, args []string) (supervise.Proc, error) {
+	return startAsSystemInSession(s, exe, args, j.h)
+}
+
+// Close Job dastagini yopadi: Job'dagi hamma jarayon o'ldiriladi.
+func (j *Job) Close() error { return windows.CloseHandle(j.h) }
 
 // ExitError jarayon nol bo'lmagan kod bilan tugadi.
 type ExitError struct{ Code uint32 }
