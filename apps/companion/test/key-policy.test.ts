@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { KeyPolicy, LLKHF_ALTDOWN, LLKHF_INJECTED, VK } from '../src/core/key-policy.ts';
 
@@ -85,4 +87,48 @@ describe('key policy', () => {
     expect(policy.handle(down(VK.TAB))).toBe('pass');
     expect(policy.handle(up(VK.LWIN))).toBe('pass');
   });
+});
+
+// TS ↔ Go vektorlari. Fixture'ni Go helper (native/helper/internal/keys/policy_test.go) ham o'qiydi:
+// qoida o'zgarsa bu test yiqiladi va Go porti jim ajralib ketmaydi.
+type FixtureEvent = { kind: 'down' | 'up'; vk: number; flags: number } | { kind: 'reset' };
+interface FixtureSequence {
+  name: string;
+  events: FixtureEvent[];
+  block: (boolean | null)[];
+}
+
+const fixture = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, '..', '..', '..', 'packages', 'contracts', 'fixtures', 'key-policy.json'),
+    'utf8',
+  ),
+) as { sequences: FixtureSequence[] };
+
+describe('key policy fixture (shared with the Go helper)', () => {
+  test('has at least 8 sequences with both blocked and passed outcomes and a reset', () => {
+    const sequences = fixture.sequences;
+    expect(sequences.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(sequences.map((s) => s.name)).size).toBe(sequences.length);
+    const verdicts = sequences.flatMap((s) => s.block);
+    expect(verdicts).toContain(true);
+    expect(verdicts).toContain(false);
+    expect(sequences.some((s) => s.events.some((e) => e.kind === 'reset'))).toBe(true);
+  });
+
+  test.each(fixture.sequences.map((s) => [s.name, s] as const))(
+    '%s: block[] matches the TS policy',
+    (_name, sequence) => {
+      const policy = new KeyPolicy();
+      expect(sequence.block).toHaveLength(sequence.events.length);
+      const actual = sequence.events.map((event) => {
+        if (event.kind === 'reset') {
+          policy.reset();
+          return null;
+        }
+        return policy.handle({ vkCode: event.vk, flags: event.flags, kind: event.kind }) === 'block';
+      });
+      expect(actual).toEqual(sequence.block);
+    },
+  );
 });

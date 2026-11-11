@@ -1,0 +1,253 @@
+{
+  "_comment": "TS <-> Go tugma bloklash vektorlari. Companion KeyPolicy (apps/companion/src/core/key-policy.ts) va Go helper Policy (native/helper/internal/keys/policy.go) bir xil ketma-ketlikda bir xil block[] berishi shart: apps/companion/test/key-policy.test.ts va native/helper/internal/keys/policy_test.go shu faylni o'qiydi. Har ketma-ketlik yangi policy bilan boshlanadi; block[] har hodisaga bitta qiymat (true = to'siladi), 'reset' hodisasi uchun null. VK kodlari o'nlik: 9 Tab, 17 Ctrl, 18 Alt (Menu), 27 Esc, 32 Space, 65 A, 67 C, 91 LWin, 92 RWin, 115 F4, 160 LShift, 162 LCtrl, 163 RCtrl, 164 LAlt, 165 RAlt. flags: 16 = LLKHF_INJECTED, 32 = LLKHF_ALTDOWN, 128 = LLKHF_UP, 1 = LLKHF_EXTENDED.",
+  "sequences": [
+    {
+      "name": "win-left",
+      "events": [{ "kind": "down", "vk": 91, "flags": 0 }],
+      "block": [true]
+    },
+    {
+      "name": "win-right",
+      "events": [{ "kind": "down", "vk": 92, "flags": 0 }],
+      "block": [true]
+    },
+    {
+      "name": "alt-tab",
+      "events": [{ "kind": "down", "vk": 164, "flags": 0 }, { "kind": "down", "vk": 9, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "alt-esc",
+      "events": [{ "kind": "down", "vk": 164, "flags": 0 }, { "kind": "down", "vk": 27, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "alt-f4",
+      "events": [{ "kind": "down", "vk": 164, "flags": 0 }, { "kind": "down", "vk": 115, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "alt-space",
+      "events": [{ "kind": "down", "vk": 164, "flags": 0 }, { "kind": "down", "vk": 32, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "ctrl-esc",
+      "events": [{ "kind": "down", "vk": 162, "flags": 0 }, { "kind": "down", "vk": 27, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "ctrl-shift-esc",
+      "events": [
+        { "kind": "down", "vk": 162, "flags": 0 },
+        { "kind": "down", "vk": 160, "flags": 0 },
+        { "kind": "down", "vk": 27, "flags": 0 }
+      ],
+      "block": [false, false, true]
+    },
+    {
+      "name": "ctrl-alt-esc",
+      "events": [
+        { "kind": "down", "vk": 162, "flags": 0 },
+        { "kind": "down", "vk": 164, "flags": 0 },
+        { "kind": "down", "vk": 27, "flags": 0 }
+      ],
+      "block": [false, false, true]
+    },
+    {
+      "name": "alt-flag-on-the-event-itself",
+      "events": [{ "kind": "down", "vk": 9, "flags": 32 }],
+      "block": [true]
+    },
+    {
+      "name": "generic-menu-vk-then-tab",
+      "events": [{ "kind": "down", "vk": 18, "flags": 0 }, { "kind": "down", "vk": 9, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "right-alt-then-tab",
+      "events": [{ "kind": "down", "vk": 165, "flags": 1 }, { "kind": "down", "vk": 9, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "generic-control-vk-then-esc",
+      "events": [{ "kind": "down", "vk": 17, "flags": 0 }, { "kind": "down", "vk": 27, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "right-ctrl-then-esc",
+      "events": [{ "kind": "down", "vk": 163, "flags": 1 }, { "kind": "down", "vk": 27, "flags": 0 }],
+      "block": [false, true]
+    },
+    {
+      "name": "plain-letter",
+      "events": [{ "kind": "down", "vk": 65, "flags": 0 }],
+      "block": [false]
+    },
+    {
+      "name": "shift-letter",
+      "events": [{ "kind": "down", "vk": 160, "flags": 0 }, { "kind": "down", "vk": 65, "flags": 0 }],
+      "block": [false, false]
+    },
+    {
+      "name": "ctrl-c",
+      "events": [{ "kind": "down", "vk": 162, "flags": 0 }, { "kind": "down", "vk": 67, "flags": 0 }],
+      "block": [false, false]
+    },
+    {
+      "name": "alt-letter",
+      "events": [{ "kind": "down", "vk": 164, "flags": 0 }, { "kind": "down", "vk": 65, "flags": 0 }],
+      "block": [false, false]
+    },
+    {
+      "name": "tab-alone",
+      "events": [{ "kind": "down", "vk": 9, "flags": 0 }],
+      "block": [false]
+    },
+    {
+      "name": "esc-alone",
+      "events": [{ "kind": "down", "vk": 27, "flags": 0 }],
+      "block": [false]
+    },
+    {
+      "name": "ctrl-shift-alone",
+      "events": [{ "kind": "down", "vk": 162, "flags": 0 }, { "kind": "down", "vk": 160, "flags": 0 }],
+      "block": [false, false]
+    },
+    {
+      "name": "f4-alone",
+      "events": [{ "kind": "down", "vk": 115, "flags": 0 }],
+      "block": [false]
+    },
+    {
+      "name": "space-alone",
+      "events": [{ "kind": "down", "vk": 32, "flags": 0 }],
+      "block": [false]
+    },
+    {
+      "name": "alt-flag-on-a-non-target-key",
+      "events": [{ "kind": "down", "vk": 65, "flags": 32 }],
+      "block": [false]
+    },
+    {
+      "name": "vk-code-beyond-a-byte",
+      "events": [{ "kind": "down", "vk": 4096, "flags": 32 }, { "kind": "up", "vk": 4096, "flags": 128 }],
+      "block": [false, false]
+    },
+    {
+      "name": "releasing-alt-stops-blocking",
+      "events": [
+        { "kind": "down", "vk": 164, "flags": 0 },
+        { "kind": "down", "vk": 9, "flags": 0 },
+        { "kind": "up", "vk": 9, "flags": 128 },
+        { "kind": "up", "vk": 164, "flags": 128 },
+        { "kind": "down", "vk": 9, "flags": 0 }
+      ],
+      "block": [false, true, true, false, false]
+    },
+    {
+      "name": "alt-stays-held-after-an-unrelated-key-up",
+      "events": [
+        { "kind": "down", "vk": 164, "flags": 0 },
+        { "kind": "down", "vk": 65, "flags": 0 },
+        { "kind": "up", "vk": 65, "flags": 128 },
+        { "kind": "down", "vk": 9, "flags": 0 }
+      ],
+      "block": [false, false, false, true]
+    },
+    {
+      "name": "the-other-ctrl-key-keeps-ctrl-held",
+      "events": [
+        { "kind": "down", "vk": 17, "flags": 0 },
+        { "kind": "down", "vk": 162, "flags": 0 },
+        { "kind": "up", "vk": 162, "flags": 128 },
+        { "kind": "down", "vk": 27, "flags": 0 }
+      ],
+      "block": [false, false, false, true]
+    },
+    {
+      "name": "win-up-is-swallowed-once",
+      "events": [
+        { "kind": "down", "vk": 91, "flags": 0 },
+        { "kind": "up", "vk": 91, "flags": 128 },
+        { "kind": "up", "vk": 91, "flags": 128 }
+      ],
+      "block": [true, true, false]
+    },
+    {
+      "name": "blocked-key-up-is-swallowed-after-alt-release",
+      "events": [
+        { "kind": "down", "vk": 164, "flags": 0 },
+        { "kind": "down", "vk": 9, "flags": 0 },
+        { "kind": "up", "vk": 164, "flags": 128 },
+        { "kind": "up", "vk": 9, "flags": 128 }
+      ],
+      "block": [false, true, false, true]
+    },
+    {
+      "name": "key-repeat-of-a-blocked-key",
+      "events": [
+        { "kind": "down", "vk": 164, "flags": 0 },
+        { "kind": "down", "vk": 9, "flags": 0 },
+        { "kind": "down", "vk": 9, "flags": 0 },
+        { "kind": "up", "vk": 9, "flags": 128 },
+        { "kind": "up", "vk": 9, "flags": 128 }
+      ],
+      "block": [false, true, true, true, false]
+    },
+    {
+      "name": "key-up-of-an-unblocked-key-passes",
+      "events": [{ "kind": "down", "vk": 65, "flags": 0 }, { "kind": "up", "vk": 65, "flags": 128 }],
+      "block": [false, false]
+    },
+    {
+      "name": "key-up-without-a-down-passes",
+      "events": [{ "kind": "up", "vk": 9, "flags": 128 }],
+      "block": [false]
+    },
+    {
+      "name": "injected-win-passes",
+      "events": [{ "kind": "down", "vk": 91, "flags": 16 }, { "kind": "up", "vk": 91, "flags": 144 }],
+      "block": [false, false]
+    },
+    {
+      "name": "injected-alt-does-not-make-a-modifier",
+      "events": [{ "kind": "down", "vk": 164, "flags": 16 }, { "kind": "down", "vk": 9, "flags": 0 }],
+      "block": [false, false]
+    },
+    {
+      "name": "injected-alt-up-does-not-release-a-physical-alt",
+      "events": [
+        { "kind": "down", "vk": 164, "flags": 0 },
+        { "kind": "up", "vk": 164, "flags": 144 },
+        { "kind": "down", "vk": 9, "flags": 0 }
+      ],
+      "block": [false, false, true]
+    },
+    {
+      "name": "injected-win-up-does-not-consume-the-swallow",
+      "events": [
+        { "kind": "down", "vk": 91, "flags": 0 },
+        { "kind": "up", "vk": 91, "flags": 144 },
+        { "kind": "up", "vk": 91, "flags": 128 }
+      ],
+      "block": [true, false, true]
+    },
+    {
+      "name": "injected-flag-wins-over-alt-flag",
+      "events": [{ "kind": "down", "vk": 9, "flags": 48 }],
+      "block": [false]
+    },
+    {
+      "name": "reset-forgets-held-modifiers-and-swallowed-keys",
+      "events": [
+        { "kind": "down", "vk": 164, "flags": 0 },
+        { "kind": "down", "vk": 91, "flags": 0 },
+        { "kind": "reset" },
+        { "kind": "down", "vk": 9, "flags": 0 },
+        { "kind": "up", "vk": 91, "flags": 128 }
+      ],
+      "block": [false, true, null, false, false]
+    }
+  ]
+}
