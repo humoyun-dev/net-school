@@ -120,6 +120,39 @@ describe('enroll', () => {
     expect(res.status).toBe(200);
   });
 
+  // P0c'dan yangilash: helper ishonchsiz `%ProgramData%\NetSchool`ni (eski enrollment bilan) o'chirib qayta yaratadi.
+  // enroll buni ogohlantiradi va dataRootReplaced claim'ga ketmaydi.
+  test('a replaced data root is reported as a warning and not sent to the hub', async () => {
+    const { port } = fakeHelper();
+    const replacing: HelperPort = {
+      helperKey: async (token) => ({ ...(await port.helperKey(token)), dataRootReplaced: true }),
+      setHub: port.setHub,
+    };
+    const warnings: string[] = [];
+    const token = await newToken();
+    const config = await enroll({ ...input(token, tempDir(), { helper: replacing }), warn: (w) => warnings.push(w) });
+    expect(config.deviceId).toBeTruthy();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/ogohlantirish/);
+    expect(warnings[0]).toMatch(/--force/);
+
+    const runs: string[] = [];
+    const cli = helperCli({
+      exe: 'C:\\pkg\\netschool-helper.exe',
+      ca: null,
+      rotate: false,
+      run: async (_f, args) => {
+        runs.push(args[0] ?? '');
+        return {
+          code: 0,
+          stdout: '{"helperPublicKey":"AAA","helperProof":"BBB","dataRootReplaced":true}\n',
+          stderr: '',
+        };
+      },
+    });
+    expect(await cli.helperKey('t')).toEqual({ helperPublicKey: 'AAA', helperProof: 'BBB', dataRootReplaced: true });
+  });
+
   test('a helper-key failure spends no token and writes nothing', async () => {
     const dir = tempDir();
     const token = await newToken();

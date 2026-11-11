@@ -13,9 +13,15 @@ export interface HelperClaim {
   helperProof: string;
 }
 
+// `helper-key` javobi: claim maydonlari + dataRootReplaced (helper ishonchsiz `%ProgramData%\NetSchool`ni, masalan P0c
+// paketinikini, eski enrollment bilan birga o'chirib qayta yaratdi). dataRootReplaced claim'ga yuborilmaydi.
+export interface HelperKeyAnswer extends HelperClaim {
+  dataRootReplaced?: boolean;
+}
+
 export interface HelperPort {
   // claim'dan oldin: kalitni tayyorlaydi va `NSCLAIM1\n<token>\n<helperPublicKey>` proof'ini qaytaradi.
-  helperKey(token: string): Promise<HelperClaim>;
+  helperKey(token: string): Promise<HelperKeyAnswer>;
   // claim'dan keyin: device.json va hub CA'ni helper katalogiga yozdiradi, kutayotgan kalitni faollashtiradi.
   setHub(hubOrigin: string, deviceId: string): Promise<void>;
 }
@@ -36,7 +42,11 @@ const base64url = z
   .string()
   .regex(/^[A-Za-z0-9_-]+$/)
   .max(128);
-const helperClaimSchema = z.strictObject({ helperPublicKey: base64url, helperProof: base64url });
+const helperClaimSchema = z.strictObject({
+  helperPublicKey: base64url,
+  helperProof: base64url,
+  dataRootReplaced: z.boolean().optional(),
+});
 
 // Bajarilgan jarayon natijasi. Maxfiy qiymatlar (token, CA) faqat stdin orqali: argv jarayonlar ro'yxatida ko'rinadi.
 // Xato matnida buyruq satri bo'lmasligi kerak: faqat chiqish kodi va stderr.

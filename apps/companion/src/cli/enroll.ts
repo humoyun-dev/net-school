@@ -115,8 +115,10 @@ export async function runEnrollCli(
       ca,
       hostname: hostname(),
       facts: platformFacts(env),
-      dir: machineDir(process.platform, env),
+      // enroll'ni administrator ishga tushiradi (uning muhiti): katalogni almashtirish testlar va maxsus o'rnatish uchun.
+      dir: machineDir(process.platform, env, { allowOverride: true }),
       force: parsed.force,
+      warn: (line) => io.err(line),
     });
     io.out(`enrolled: device ${config.deviceId}`);
     return 0;
