@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -161,6 +162,8 @@ func TestValidateHubChecksTheCA(t *testing.T) {
 		"kalit":         []byte("-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIA==\n-----END PRIVATE KEY-----\n"),
 		"ortiqcha matn": append(append([]byte{}, ca...), []byte("junk")...),
 		"oldida matn":   append([]byte("junk\n"), ca...),
+		"END qatorsiz":  []byte(strings.Replace(string(ca), "\n-----END CERTIFICATE-----", "-----END CERTIFICATE-----", 1)),
+		"yopishgan":     append(bytes.TrimRight(append([]byte{}, ca...), "\n"), ca...),
 		"sarlavhali":    []byte(strings.Replace(string(ca), "-----\n", "-----\nProc-Type: 4,ENCRYPTED\n\n", 1)),
 		"juda katta":    make([]byte, MaxCABytes+1),
 	} {

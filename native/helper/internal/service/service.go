@@ -147,7 +147,13 @@ type Deps struct {
 	Clock     Clock
 	Log       Logger
 	Version   string
+	// DataDir helper katalogi tekshirilganmi (DirGate). nil — doim tekshirilgan (testlar). Tekshirilmagan paytda
+	// lock.json o'qilmaydi; katalog keyin tekshiruvdan o'tsa saqlangan bloklash bir marta tiklanadi.
+	DataDir DirVerifier
 }
+
+// DirVerifier DirGate porti.
+type DirVerifier interface{ Verified() bool }
 
 // Service bloklash orkestri.
 type Service struct {
@@ -177,6 +183,9 @@ type Service struct {
 	reportRetryAt time.Duration
 
 	notes map[string]string // jurnalga yozilgan oxirgi xato (kalit bo'yicha): faqat o'zgarganda yoziladi
+
+	// dirVerified helper katalogi tekshirilgan (Start'da yoki keyinroq Step'da) — lock.json o'qilgan.
+	dirVerified bool
 }
 
 func New(d Deps) *Service {
@@ -207,6 +216,7 @@ func (s *Service) NotifySessionChange() { s.notify.Store(true) }
 // Step qayta bloklaguncha dars paytida ochiq qolardi. Qoldiq jurnalni birinchi Step'dagi Set(true) o'z zimmasiga
 // oladi (u avval ochmasdan bloklaydi).
 func (s *Service) Start(ctx context.Context) {
+	s.dirVerified = s.d.DataDir == nil || s.d.DataDir.Verified()
 	s.d.Lock.Restore()
 	s.note("lock.json", s.d.Lock.StoreErr())
 	if s.d.Lock.Locked() {
@@ -223,6 +233,17 @@ func (s *Service) Start(ctx context.Context) {
 // Step har StepInterval'da chaqiriladi.
 func (s *Service) Step(ctx context.Context) {
 	now := s.d.Clock.Uptime()
+
+	// Katalog Start'dan keyin tekshiruvdan o'tdi: Start'dagi Restore lock.json'ni o'qimagan edi, shu boot'dagi
+	// saqlangan bloklash endi bir marta tiklanadi (BootID va muddatni Restore o'zi tekshiradi). Hub poll'idan
+	// OLDIN: hub allaqachon holat bergan bo'lsa (Locked) Restore uni bosib ketmaydi.
+	if !s.dirVerified && s.d.DataDir.Verified() {
+		s.dirVerified = true
+		if !s.d.Lock.Locked() {
+			s.d.Lock.Restore()
+			s.note("lock.json", s.d.Lock.StoreErr())
+		}
+	}
 
 	if due(&s.nextPoll, now, HubPollInterval) {
 		state, err := s.d.Hub.LockState(ctx)

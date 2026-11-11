@@ -170,6 +170,7 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 		Clock:    clock,
 		Log:      log.Warn,
 		Version:  version.Version,
+		DataDir:  gate,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())

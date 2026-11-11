@@ -33,6 +33,10 @@ const (
 	shareNoDelete = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE
 	shareAll      = shareNoDelete | windows.FILE_SHARE_DELETE
 	openFlags     = windows.FILE_FLAG_OPEN_REPARSE_POINT | windows.FILE_FLAG_BACKUP_SEMANTICS
+	// metaAccess har handle'ga qo'shiladi: GetFileInformationByHandle FILE_READ_ATTRIBUTES talab qiladi, sinxron
+	// so'rovlar (FILE_SYNCHRONOUS_IO_NONALERT, ro'yxat) SYNCHRONIZE. CreateFileW ularni o'zi qo'shadi, xom
+	// NtCreateFile esa yo'q. Ular ma'lumotga kirish emas: share rejimi ularni to'smaydi.
+	metaAccess = windows.FILE_READ_ATTRIBUTES | windows.SYNCHRONIZE
 )
 
 type entry struct {
@@ -73,7 +77,7 @@ func open(path string, access uint32, share uint32) (entry, error) {
 	if err != nil {
 		return entry{}, err
 	}
-	h, err := windows.CreateFile(p, access, share, nil, windows.OPEN_EXISTING, openFlags, 0)
+	h, err := windows.CreateFile(p, access|metaAccess, share, nil, windows.OPEN_EXISTING, openFlags, 0)
 	if err != nil {
 		return entry{}, fmt.Errorf("%s ochilmadi: %w", path, err)
 	}
@@ -97,7 +101,7 @@ func openAt(dir windows.Handle, name string, access, share uint32) (entry, error
 	oa.Length = uint32(unsafe.Sizeof(oa))
 	var h windows.Handle
 	var iosb windows.IO_STATUS_BLOCK
-	err = windows.NtCreateFile(&h, access|windows.SYNCHRONIZE, &oa, &iosb, nil, 0, share, windows.FILE_OPEN,
+	err = windows.NtCreateFile(&h, access|metaAccess, &oa, &iosb, nil, 0, share, windows.FILE_OPEN,
 		windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT|windows.FILE_SYNCHRONOUS_IO_NONALERT, 0, 0)
 	if errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) {
 		return entry{}, errGone
@@ -244,6 +248,23 @@ func secure(dir string, rule Rule, recurse bool) (trusted bool, err error) {
 	if !ok {
 		return false, replace(dir, rule, id)
 	}
+	if !recurse {
+		// Faqat katalogning o'zi (dataRoot): bolalarni aylanib chiqmaymiz, shuning uchun qadash shart emas.
+		// Faqat metadata huquqlari (ma'lumotga kirish yo'q) va hamma share bayroqlari: o'quvchi o'qiy oladigan
+		// `%ProgramData%\NetSchool`ga share 0 bilan handle tutib turib uni to'sa olmaydi (aks holda helper tekshirilmay,
+		// hub'siz va ochiq qolardi). Ishonchli root'da oddiy foydalanuvchida DELETE/FILE_DELETE_CHILD yo'q, ya'ni uni
+		// almashtira olmaydi. Ishonchsiz root esa (yuqorida) DELETE bilan almashtiriladi va to'silsa xato bilan
+		// to'xtaydi: install buni administratorga ko'rsatadi.
+		e, err := open(dir, secureAccess, shareAll)
+		if err != nil {
+			return true, err
+		}
+		defer e.close()
+		if e.id() != id {
+			return true, fmt.Errorf("%s tekshiruv paytida almashtirildi", dir)
+		}
+		return true, apply(e.h, dir, rule.Dir)
+	}
 	// Ishonchli: FILE_SHARE_DELETE'siz qadaladi (oddiy foydalanuvchida bu katalogga DELETE yo'q, shuning uchun bu
 	// ochish begona handle tufayli yiqilmaydi) va aylanib chiqish shu handle orqali.
 	p, err := open(dir, secureAccess|listAccess, shareNoDelete)
@@ -256,9 +277,6 @@ func secure(dir string, rule Rule, recurse bool) (trusted bool, err error) {
 	}
 	if err := apply(p.h, dir, rule.Dir); err != nil {
 		return true, err
-	}
-	if !recurse {
-		return true, nil
 	}
 	return true, secureChildren(p.h, dir, rule)
 }
@@ -332,17 +350,35 @@ func secureChildren(dir windows.Handle, path string, rule Rule) error {
 	return errors.Join(errs...)
 }
 
-// removeAt dir ichidagi name'ni (havolani kuzatmasdan) o'chiradi.
+// removeAt dir ichidagi name'ni (havolani kuzatmasdan) o'chiradi. Avval ma'lumotga kirishsiz ochiladi (fayl band
+// bo'lsa ham share to'smasin); oddiy katalog bo'lsa ro'yxat uchun FILE_LIST_DIRECTORY bilan qayta ochiladi va
+// file ID solishtiriladi.
 func removeAt(dir windows.Handle, name, path string) error {
-	e, err := openAt(dir, name, windows.DELETE|windows.READ_CONTROL|listAccess, shareNoDelete)
+	e, err := openAt(dir, name, windows.DELETE|windows.READ_CONTROL, shareNoDelete)
 	if errors.Is(err, errGone) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	defer e.close()
-	return removeEntry(e, path)
+	if !e.isDir() || e.isReparse() {
+		defer e.close()
+		return deleteHandle(e.h, path)
+	}
+	id := e.id()
+	e.close()
+	d, err := openAt(dir, name, windows.DELETE|windows.READ_CONTROL|listAccess, shareNoDelete)
+	if errors.Is(err, errGone) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer d.close()
+	if d.id() != id || !d.isDir() || d.isReparse() {
+		return fmt.Errorf("%s o'chirish paytida almashtirildi", path)
+	}
+	return removeEntry(d, path)
 }
 
 // removeEntry ochilgan obyektni o'chiradi: oddiy katalog bo'lsa avval bolalarini (shu handle orqali), reparse point

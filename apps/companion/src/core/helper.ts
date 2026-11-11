@@ -64,7 +64,10 @@ const runFile: RunFile = (file, args, stdin) =>
 // Hub CA PEM qoidasi Go helper'dagi bilan bir xil (native/helper/internal/install `checkCA`): 1 MiB gacha, faqat
 // sarlavhasiz CERTIFICATE bloklari, har biri X.509 sifatida o'qiladi, bloklar orasida va atrofida faqat bo'sh joy.
 export const MAX_CA_BYTES = 1 << 20;
-const CERT_BLOCK = /^-----BEGIN CERTIFICATE-----\r?\n([A-Za-z0-9+/=\r\n]+?)\r?\n?-----END CERTIFICATE-----/;
+// Go `pem.Decode` kabi: BEGIN va END har biri o'z qatorida (END'dan oldin yangi qator majburiy), END qatoridan keyin
+// shu qatorda faqat bo'sh joy; bloklar orasida faqat bo'sh joy (checkCaPem `trim`).
+const CERT_BLOCK =
+  /^-----BEGIN CERTIFICATE-----\r?\n([A-Za-z0-9+/=\r\n]+?)\r?\n-----END CERTIFICATE-----[ \t]*(?:\r?\n|$)/;
 
 export function checkCaPem(pem: string): void {
   if (Buffer.byteLength(pem) > MAX_CA_BYTES) throw new Error('the CA file is too large');

@@ -214,6 +214,10 @@ describe('enroll', () => {
       notX509: '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n',
       tooLarge: 'x'.repeat(MAX_CA_BYTES + 1),
       bom: `\uFEFF${app.ca}`,
+      // END o'z qatorida bo'lishi kerak (Go pem.Decode buni rad etadi).
+      noNewlineBeforeEnd: app.ca.replace(/\r?\n-----END CERTIFICATE-----/, '-----END CERTIFICATE-----'),
+      // Ikki blok yangi qatorsiz yopishtirilgan.
+      glued: `${app.ca.trimEnd()}${app.ca}`,
       nbsp: `${app.ca}\u00a0`,
     };
     for (const pem of Object.values(bad)) expect(() => checkCaPem(pem)).toThrow();
