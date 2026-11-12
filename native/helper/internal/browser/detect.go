@@ -17,12 +17,18 @@ var unmanagedImages = map[string]bool{
 	"iexplore.exe": true,
 }
 
-// Unmanaged image yo'llaridan boshqarilmaydigan brauzer nomlari (takrorsiz, saralangan).
-func Unmanaged(images []string) []string {
+// managedImages siyosat qo'llanadigan brauzerlar — faqat o'rnatilgan joydan (trustedDirs) ishlasa. Boshqa joydagi
+// chrome.exe (masalan portable Chromium, u Google Chrome siyosatlarini o'qimaydi) boshqarilmaydigan hisoblanadi.
+var managedImages = map[string]bool{"chrome.exe": true, "msedge.exe": true}
+
+// Unmanaged image yo'llaridan boshqarilmaydigan brauzer nomlari (takrorsiz, saralangan). Nom bo'yicha aniqlash:
+// boshqa nomga o'zgartirilgan brauzerni P2c ko'rmaydi (qoldiq risk, P2h ilova allowlist'i yopadi).
+func Unmanaged(trustedDirs []string, images []string) []string {
 	seen := map[string]bool{}
 	for _, img := range images {
-		base := strings.ToLower(filepath.Base(strings.ReplaceAll(img, `\`, "/")))
-		if unmanagedImages[base] {
+		lower := strings.ToLower(img)
+		base := filepath.Base(strings.ReplaceAll(lower, `\`, "/"))
+		if unmanagedImages[base] || (managedImages[base] && !under(lower, trustedDirs)) {
 			seen[base] = true
 		}
 	}
@@ -32,4 +38,14 @@ func Unmanaged(images []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func under(path string, dirs []string) bool {
+	for _, d := range dirs {
+		d = strings.TrimRight(strings.ToLower(d), `\`) + `\`
+		if strings.HasPrefix(path, d) {
+			return true
+		}
+	}
+	return false
 }

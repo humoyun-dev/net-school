@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/sys/windows"
+
 	"github.com/humoyun-dev/net-school/native/helper/internal/fsacl"
 	"github.com/humoyun-dev/net-school/native/helper/internal/procguard"
 )
@@ -32,8 +34,14 @@ func WriteHostManifest(dir string, data []byte) (string, error) {
 	return path, err
 }
 
-// UnmanagedRunning sessiyadagi boshqarilmaydigan brauzerlar.
+// UnmanagedRunning sessiyadagi boshqarilmaydigan brauzerlar (Program Files'dan tashqaridagi chrome/msedge ham).
 func UnmanagedRunning(session uint32) ([]string, error) {
+	var trusted []string
+	for _, id := range []*windows.KNOWNFOLDERID{windows.FOLDERID_ProgramFiles, windows.FOLDERID_ProgramFilesX86} {
+		if dir, err := windows.KnownFolderPath(id, 0); err == nil {
+			trusted = append(trusted, dir)
+		}
+	}
 	procs, err := procguard.Snapshot()
 	if err != nil {
 		return nil, err
@@ -44,5 +52,5 @@ func UnmanagedRunning(session uint32) ([]string, error) {
 			images = append(images, p.Image)
 		}
 	}
-	return Unmanaged(images), nil
+	return Unmanaged(trusted, images), nil
 }

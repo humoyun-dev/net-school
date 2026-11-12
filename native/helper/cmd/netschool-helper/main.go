@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/humoyun-dev/net-school/native/helper/internal/install"
+	"github.com/humoyun-dev/net-school/native/helper/internal/nativehost"
 	"github.com/humoyun-dev/net-school/native/helper/internal/version"
 )
 
@@ -29,6 +31,13 @@ var commands = map[string]command{
 }
 
 func main() {
+	// Chrome/Edge native messaging: brauzer host'ni `chrome-extension://<id>/` argumenti bilan ishga tushiradi.
+	if nativehost.IsHostInvocation(os.Args[1:]) {
+		if err := nativehost.Run(context.Background(), os.Stdin, os.Stdout, nativehost.Dial, nativehost.RetryInterval); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
