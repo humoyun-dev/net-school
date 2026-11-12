@@ -3,6 +3,7 @@ import { Access } from '../../common/access.ts';
 import { CLOCK, type Clock } from '../../common/clock.ts';
 import { HelpRequestsModule } from '../help-requests/help-requests.module.ts';
 import { LoginThrottle } from '../identity/login-throttle.ts';
+import { PolicyModule } from '../policy/policy.module.ts';
 import { DeviceAuthGuard, HelperAuthGuard } from './device-auth.guard.ts';
 import { DeviceChannelController } from './device-channel.controller.ts';
 import { DevicesController } from './devices.controller.ts';
@@ -15,7 +16,7 @@ import { MeshBindingService } from './mesh-binding.service.ts';
 import { PresenceService } from './presence.service.ts';
 
 @Module({
-  imports: [HelpRequestsModule],
+  imports: [HelpRequestsModule, PolicyModule],
   controllers: [
     EnrollmentsController,
     DeviceChannelController,

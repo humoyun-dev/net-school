@@ -8,6 +8,7 @@ import { SessionProvider, useSession } from './auth/session.tsx';
 import { ClassroomRoute } from './classroom/classroom-route.tsx';
 import { LocaleProvider, useT } from './i18n/i18n.tsx';
 import { Shell } from './layout/shell.tsx';
+import { PoliciesPage } from './policies/policies-page.tsx';
 import { PowerPage } from './power/power-page.tsx';
 import { RoomsPage } from './rooms/rooms-page.tsx';
 
@@ -39,6 +40,7 @@ function Pages() {
                 { path: '/rooms', element: <RoomsPage /> },
                 { path: '/rooms/:roomId', element: <ClassroomRoute /> },
                 { path: '/power', element: <PowerPage /> },
+                { path: '/policies', element: <PoliciesPage /> },
                 { path: '*', element: <Navigate to="/rooms" replace /> },
               ],
             },

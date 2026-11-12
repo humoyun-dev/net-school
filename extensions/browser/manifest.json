@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "NetSchool",
+  "description": "NetSchool web policy (managed by your school).",
+  "version": "0.1.0",
+  "minimum_chrome_version": "120",
+  "incognito": "not_allowed",
+  "background": { "service_worker": "background.js" },
+  "permissions": ["declarativeNetRequest", "nativeMessaging", "storage", "alarms", "webNavigation"],
+  "host_permissions": ["http://*/*", "https://*/*"]
+}

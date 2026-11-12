@@ -11,12 +11,14 @@ import { RequestSigner } from '../core/identity.ts';
 import { LockPolicy } from '../core/lock-policy.ts';
 import { loadEnrollment, machineDir } from '../core/machine-store.ts';
 import { OverlayController } from '../core/overlay.ts';
+import { hubPolicyDeps, PolicySync, type WebPolicyPush } from '../core/policy-sync.ts';
 import { ThumbnailUploader } from '../core/thumbnails.ts';
 import { ElectronFrameSource } from './capture.ts';
 import { dismissArgSchema, isTrustedSender } from './ipc.ts';
-import { platformFacts } from './platform.ts';
+import { currentSessionId, platformFacts } from './platform.ts';
 import { hardenSession } from './security.ts';
 import { createTray } from './tray.ts';
+import { startWebPipe, webPipeName } from './web-pipe.ts';
 import { keyboardHookAvailable, WindowsKeyboardHook } from './win-keyboard-hook.ts';
 import { Windows } from './windows.ts';
 import { WindowsRegistry } from './windows-registry.ts';
@@ -111,13 +113,24 @@ async function main(): Promise<void> {
       windows.update(status);
       tray.update(status);
     };
+    // P2c: siyosat; web qoidalari brauzer extension'iga web pipe orqali beriladi (faqat Windows).
+    const webListeners = new Set<(push: WebPolicyPush) => void>();
+    const policy = new PolicySync(
+      hubPolicyDeps(hub, cache, systemClock, (push) => {
+        for (const fn of webListeners) fn(push);
+      }),
+    );
     const agent = new CompanionAgent({
       hub,
       cache,
       overlay,
       commands,
       thumbnails,
-      facts: () => platformFacts(hardLockFacts),
+      policy,
+      facts: async () => ({
+        ...(await platformFacts(hardLockFacts)),
+        ...(process.platform === 'win32' ? { webFilter: policy.webFilterState() } : {}),
+      }),
       enforcement: () => (hookReady && overlay.view().locked && hardLock.facts().enforced ? 'hard' : 'soft'),
       onStatus,
     });
@@ -136,6 +149,18 @@ async function main(): Promise<void> {
     const restoreTimer = hardLock ? setInterval(() => void hardLock.reconcile(), 30_000) : null; // yo'qolgan hook va qolib ketgan siyosat
     restoreTimer?.unref();
     await agent.start();
+    // Web pipe: ochilmasa (koffi yo'q, nom band) extension ulanmaydi va panelda `extension_missing` ko'rinadi.
+    const sessionId = currentSessionId();
+    const webPipe =
+      sessionId === null
+        ? null
+        : await startWebPipe(webPipeName(sessionId), policy, (fn) => {
+            webListeners.add(fn);
+            return () => webListeners.delete(fn);
+          }).catch((err: unknown) => {
+            console.error('web pipe', err);
+            return null;
+          });
     if (process.env.NETSCHOOL_COMPANION_SHOW_STATUS === '1') windows.showStatus();
     // Avval agent to'xtaydi (sikllar keshga yozishni tugatadi), keyin kesh yopiladi va chiqish davom etadi.
     let shuttingDown = false;
@@ -146,6 +171,7 @@ async function main(): Promise<void> {
       windows.allowClose();
       void agent.stop().finally(async () => {
         if (restoreTimer) clearInterval(restoreTimer);
+        await webPipe?.close();
         await hardLock?.dispose();
         cache.close();
         app.quit();

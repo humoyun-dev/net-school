@@ -9,6 +9,8 @@ export interface PlatformFacts {
   screenAccess: 'granted' | 'denied' | 'not-determined' | 'unknown';
   // Faqat Windows: kuchli bloklash (klaviatura hook + siyosat) holati. Berilmasa overlay yumshoq hisoblanadi.
   hardLock?: HardLockFacts;
+  // P2c: NetSchool brauzer extension'i so'nggi 60 s ichida ulanganmi. Berilmasa `web.filter` hisobotda yo'q.
+  webFilter?: 'available' | 'requires_setup';
 }
 
 type Capabilities = CapabilityReport['capabilities'];
@@ -59,6 +61,15 @@ export function capabilityReport(f: PlatformFacts): CapabilityReport {
       'classroom.overlay': overlay(f),
       'classroom.help': { state: 'available' },
       'classroom.thumbnails': thumbnails(f),
+      ...(f.webFilter
+        ? {
+            'web.filter': {
+              state: f.webFilter,
+              provider: 'managed_extension',
+              ...(f.webFilter === 'requires_setup' ? { reason: 'extension_missing' } : {}),
+            },
+          }
+        : {}),
     },
   };
 }

@@ -13,10 +13,31 @@ const status = {
 
 describe('helper contracts', () => {
   test('lock state accepts the idle and locked shapes', () => {
-    expect(helperLockStateSchema.safeParse({ locked: false, sequence: null, leaseSeconds: 120 }).success).toBe(true);
-    expect(helperLockStateSchema.safeParse({ locked: true, sequence: '42', leaseSeconds: 120 }).success).toBe(true);
-    expect(helperLockStateSchema.safeParse({ locked: true, sequence: 42, leaseSeconds: 120 }).success).toBe(false);
-    expect(helperLockStateSchema.safeParse({ locked: true, sequence: '42', leaseSeconds: 0 }).success).toBe(false);
+    expect(
+      helperLockStateSchema.safeParse({
+        locked: false,
+        sequence: null,
+        leaseSeconds: 120,
+        baseline: { org: 0, site: 0 },
+      }).success,
+    ).toBe(true);
+    expect(
+      helperLockStateSchema.safeParse({
+        locked: true,
+        sequence: '42',
+        leaseSeconds: 120,
+        baseline: { org: 0, site: 0 },
+      }).success,
+    ).toBe(true);
+    expect(
+      helperLockStateSchema.safeParse({ locked: true, sequence: 42, leaseSeconds: 120, baseline: { org: 0, site: 0 } })
+        .success,
+    ).toBe(false);
+    expect(
+      helperLockStateSchema.safeParse({ locked: true, sequence: '42', leaseSeconds: 0, baseline: { org: 0, site: 0 } })
+        .success,
+    ).toBe(false);
+    expect(helperLockStateSchema.safeParse({ locked: false, sequence: null, leaseSeconds: 120 }).success).toBe(false);
   });
 
   test('status accepts only the documented values', () => {

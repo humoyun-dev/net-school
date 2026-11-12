@@ -154,6 +154,7 @@ describe('device command channel', () => {
         thumbnails: { intervalMs: 1000, maxWidth: 480 },
         helpRequest: null,
       },
+      policy: { baseline: { org: 0, site: 0 }, lesson: null },
     });
   });
 
@@ -161,6 +162,10 @@ describe('device command channel', () => {
     await issue({ type: 'overlay.lock', payload: {} });
     await endLesson(app, teacher, lessonId);
     const res = await signed(a, 'POST', '/api/v1/device/heartbeat', {});
-    expect(res.json).toEqual({ heartbeatIntervalSeconds: 10, lesson: null });
+    expect(res.json).toEqual({
+      heartbeatIntervalSeconds: 10,
+      lesson: null,
+      policy: { baseline: { org: 0, site: 0 }, lesson: null },
+    });
   });
 });

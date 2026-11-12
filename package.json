@@ -16,6 +16,7 @@
     "build:api": "pnpm --filter @netschool/api build",
     "build:web": "pnpm --filter @netschool/web build",
     "build:helper": "node scripts/build-helper.mjs",
+    "build:extension": "pnpm --filter @netschool/browser-extension build",
     "test:helper": "cd native/helper && go vet ./... && go test ./...",
     "test:e2e:companion": "NETSCHOOL_COMPANION_TEST_BUILD=1 pnpm --filter @netschool/companion build && vitest run --project companion-e2e",
     "test:e2e:web": "pnpm --filter @netschool/web build && vitest run --project web-e2e"

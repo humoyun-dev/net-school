@@ -5,6 +5,8 @@ export * from './access/roles.ts';
 export * from './commands.ts';
 export * from './devices.ts';
 export * from './help-requests.ts';
+export * from './policy/merge.ts';
+export * from './policy/url-pattern.ts';
 export * from './ports/device-management.ts';
 export * from './power.ts';
 export * from './presence.ts';

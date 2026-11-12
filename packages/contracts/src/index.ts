@@ -7,6 +7,7 @@ export * from './api/v1/help-requests.ts';
 export * from './api/v1/helper.ts';
 export * from './api/v1/lessons.ts';
 export * from './api/v1/organization.ts';
+export * from './api/v1/policy.ts';
 export * from './api/v1/power.ts';
 export * from './api/v1/remote-sessions.ts';
 export * from './api/v1/users.ts';

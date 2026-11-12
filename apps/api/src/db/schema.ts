@@ -756,3 +756,103 @@ export const powerActionTargets = pgTable(
     index('power_action_targets_open').on(t.actionId).where(sql`${t.status} in ('pending', 'sent')`),
   ],
 );
+
+// P2c: siyosat versiyalari immutable (UPDATE/DELETE 0015 triggeri bilan rad etiladi). site_id null — tashkilot
+// bazaviy qatlami; lesson qatlami doim dars va uning site'iga bog'liq.
+export const policyVersions = pgTable(
+  'policy_versions',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id'),
+    layer: text('layer').notNull(),
+    lessonId: uuid('lesson_id'),
+    version: integer('version').notNull(),
+    document: jsonb('document').notNull(),
+    contentHash: text('content_hash').notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+    restoredFrom: uuid('restored_from'),
+  },
+  (t) => [
+    foreignKey({
+      name: 'policy_versions_org_fk',
+      columns: [t.organizationId],
+      foreignColumns: [organizations.id],
+    }),
+    foreignKey({
+      name: 'policy_versions_site_fk',
+      columns: [t.organizationId, t.siteId],
+      foreignColumns: [sites.organizationId, sites.id],
+    }),
+    foreignKey({
+      name: 'policy_versions_lesson_fk',
+      columns: [t.siteId, t.lessonId],
+      foreignColumns: [lessons.siteId, lessons.id],
+    }),
+    foreignKey({
+      name: 'policy_versions_creator_fk',
+      columns: [t.organizationId, t.createdBy],
+      foreignColumns: [users.organizationId, users.id],
+    }),
+    foreignKey({ name: 'policy_versions_restored_fk', columns: [t.restoredFrom], foreignColumns: [t.id] }),
+    check('policy_versions_layer', sql`${t.layer} in ('baseline', 'lesson')`),
+    check(
+      'policy_versions_scope',
+      sql`(${t.layer} = 'baseline' and ${t.lessonId} is null) or (${t.layer} = 'lesson' and ${t.lessonId} is not null and ${t.siteId} is not null)`,
+    ),
+    check('policy_versions_version', sql`${t.version} > 0`),
+  ],
+);
+
+// Ko'lamning joriy versiyasi (tashkilot/site bazaviy yoki dars). Ko'lam bo'yicha unique — 0015 (partial indekslar).
+export const policyAssignments = pgTable(
+  'policy_assignments',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id'),
+    layer: text('layer').notNull(),
+    lessonId: uuid('lesson_id'),
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => policyVersions.id),
+    version: integer('version').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    check('policy_assignments_layer', sql`${t.layer} in ('baseline', 'lesson')`),
+    check(
+      'policy_assignments_scope',
+      sql`(${t.layer} = 'baseline' and ${t.lessonId} is null) or (${t.layer} = 'lesson' and ${t.lessonId} is not null)`,
+    ),
+  ],
+);
+
+// Qurilma natijasi: har qatlam va xabar beruvchi (Companion / Helper) alohida, bir-birini bosmaydi.
+export const policyReceipts = pgTable(
+  'policy_receipts',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    siteId: uuid('site_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    layer: text('layer').notNull(),
+    reporter: text('reporter').notNull(),
+    // baseline: {org, site}; lesson: {lessonId, version}.
+    applied: jsonb('applied').notNull(),
+    contentHash: text('content_hash').notNull(),
+    rules: jsonb('rules').notNull(),
+    repaired: jsonb('repaired').notNull().default([]),
+    reportedAt: timestamp('reported_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'policy_receipts_pk', columns: [t.deviceId, t.layer, t.reporter] }),
+    foreignKey({
+      name: 'policy_receipts_device_fk',
+      columns: [t.siteId, t.deviceId],
+      foreignColumns: [devices.siteId, devices.id],
+    }).onDelete('cascade'),
+    check('policy_receipts_layer', sql`${t.layer} in ('baseline', 'lesson')`),
+    check('policy_receipts_reporter', sql`${t.reporter} in ('companion', 'helper')`),
+  ],
+);

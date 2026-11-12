@@ -58,6 +58,7 @@ export async function startTestApp(
     workers?: boolean;
     // Panel fayllari katalogi (WEB_DIST_DIR); berilmasa SPA berilmaydi.
     webDistDir?: string;
+    extensionIds?: { chrome: string | null; edge: string | null };
     // Gateway public origin'i (CSP frame-src); remote berilmasa ham config'ga yoziladi.
     gatewayOrigin?: string;
   } = {},
@@ -85,6 +86,7 @@ export async function startTestApp(
           ? { port: 0, publicOrigin: opts.gatewayOrigin }
           : null,
       webDistDir: opts.webDistDir ?? null,
+      extensionIds: opts.extensionIds ?? { chrome: null, edge: null },
     },
     {
       db: db.db,

@@ -34,6 +34,8 @@ export function DeviceTile(props: {
   onToggle: () => void;
   onClearHelp: (helpId: string) => void;
   actions?: React.ReactNode;
+  // Siyosat holati (applied bo'lsa ko'rsatilmaydi); reasons — qo'llanmagan qoidalar kodlari.
+  policy?: { status: 'pending' | 'partial' | 'failed'; reasons: string[] } | null;
 }) {
   const t = useT();
   const { device, help, result } = props;
@@ -104,6 +106,14 @@ export function DeviceTile(props: {
           <ul className="badges flex flex-wrap gap-x-2 text-[11px] text-stage-muted">
             <li className="sr-only">{t(`presence.${device.companion.presence}`)}</li>
             <li>{t(`agent.${device.agent}`)}</li>
+            {props.policy && (
+              <li
+                className={props.policy.status === 'pending' ? 'text-stage-muted' : 'text-warning'}
+                title={props.policy.reasons.join(', ')}
+              >
+                {t(`policy.status.${props.policy.status}`)}
+              </li>
+            )}
           </ul>
           {result && (
             <p className={cn('result text-[11px]', RESULT_TONE[result.status] ?? 'text-stage-muted')}>

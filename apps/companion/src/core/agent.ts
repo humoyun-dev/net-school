@@ -5,6 +5,7 @@ import { capabilityReport, type PlatformFacts } from './capabilities.ts';
 import type { CommandProcessor } from './commands.ts';
 import { type HubClient, HubError } from './hub-client.ts';
 import type { OverlayController, OverlayView } from './overlay.ts';
+import type { PolicySync } from './policy-sync.ts';
 import type { ThumbnailUploader } from './thumbnails.ts';
 
 export type HubState = 'connecting' | 'online' | 'offline' | 'tls_error' | 'rejected';
@@ -50,6 +51,8 @@ export interface AgentDeps {
   facts: () => Promise<PlatformFacts>;
   // Berilmasa overlay yumshoq.
   enforcement?: () => 'soft' | 'hard';
+  // P2c siyosati (berilmasa siyosat ishorasi e'tiborsiz).
+  policy?: PolicySync;
   onStatus: (status: AgentStatus) => void;
 }
 
@@ -140,6 +143,8 @@ export class CompanionAgent {
         backoff = this.#opts.backoffMinMs;
         // Overlay hub javobi bilan bir vaqtda yangilanadi: 'online' paytida eskirgan lock ko'rinmaydi.
         this.#deps.overlay.applyHeartbeat(hb.lesson);
+        // Siyosatni olish xatosi heartbeat'ni buzmaydi: keyingi ishorada qayta urinadi, kesh qoladi.
+        await this.#deps.policy?.onHint(hb.policy).catch(() => undefined);
         this.#directive = hb.lesson?.thumbnails ?? null;
         this.#status = {
           ...this.#status,
@@ -232,6 +237,7 @@ export class CompanionAgent {
       await this.#sleep(this.#opts.overlayTickMs);
       if (!this.#running) return;
       this.#deps.overlay.tick();
+      await this.#deps.policy?.tick().catch(() => undefined);
       this.#emit();
     }
   }

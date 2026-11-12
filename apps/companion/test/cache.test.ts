@@ -89,4 +89,23 @@ describe('state cache', () => {
     expect(cache.loadOverlay()).toBeNull();
     cache.close();
   });
+
+  test('policy baseline round-trips and a corrupt row reads as null', () => {
+    const cache = StateCache.open(':memory:');
+    expect(cache.loadBaseline()).toBeNull();
+    const baseline = {
+      revision: { org: 2, site: 1 },
+      hash: 'f'.repeat(64),
+      document: {
+        web: { blocked: ['bad.com'] },
+        browser: { managed: true, incognito: 'disabled' as const, devTools: 'allowed' as const },
+        os: { standardUser: false, blockAppInstall: false, lockWallpaper: false },
+      },
+    };
+    cache.saveBaseline(baseline);
+    expect(cache.loadBaseline()).toEqual(baseline);
+    cache.saveBaseline({ ...baseline, hash: 'not-a-hash' });
+    expect(cache.loadBaseline()).toBeNull();
+    cache.close();
+  });
 });

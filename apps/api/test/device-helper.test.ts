@@ -146,22 +146,37 @@ describe('helper lock state', () => {
   test('without a lesson nothing is locked', async () => {
     const res = await asHelper('GET', LOCK_STATE);
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ locked: false, sequence: null, leaseSeconds: 120 });
+    expect(res.json).toEqual({ locked: false, sequence: null, leaseSeconds: 120, baseline: { org: 0, site: 0 } });
   });
 
   test('lock-state mirrors the active lesson overlay', async () => {
     const lessonId = (await startLesson(app, teacher, roomId)).json.id;
-    expect((await asHelper('GET', LOCK_STATE)).json).toEqual({ locked: false, sequence: null, leaseSeconds: 120 });
+    expect((await asHelper('GET', LOCK_STATE)).json).toEqual({
+      locked: false,
+      sequence: null,
+      leaseSeconds: 120,
+      baseline: { org: 0, site: 0 },
+    });
     const lock = (await issueCommand(app, teacher, lessonId, { type: 'overlay.lock', payload: {} })).json;
     expect(lock.sequence).toEqual(expect.any(String));
     const locked = await asHelper('GET', LOCK_STATE);
     expect(locked.status).toBe(200);
-    expect(locked.json).toEqual({ locked: true, sequence: lock.sequence, leaseSeconds: 120 });
+    expect(locked.json).toEqual({
+      locked: true,
+      sequence: lock.sequence,
+      leaseSeconds: 120,
+      baseline: { org: 0, site: 0 },
+    });
     // Heartbeat bilan bir manba: overlay holati mos.
     const beat = await asCompanion('POST', HEARTBEAT, {});
     expect(beat.json.lesson.overlay).toMatchObject({ locked: true, sequence: lock.sequence, leaseSeconds: 120 });
     await endLesson(app, teacher, lessonId);
-    expect((await asHelper('GET', LOCK_STATE)).json).toEqual({ locked: false, sequence: null, leaseSeconds: 120 });
+    expect((await asHelper('GET', LOCK_STATE)).json).toEqual({
+      locked: false,
+      sequence: null,
+      leaseSeconds: 120,
+      baseline: { org: 0, site: 0 },
+    });
   });
 
   test('lock-state has no presence side effect', async () => {

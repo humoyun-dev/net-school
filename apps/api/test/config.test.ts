@@ -85,4 +85,12 @@ describe('secret files', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  test('extension ids are optional and validated', () => {
+    expect(loadConfig(base).extensionIds).toEqual({ chrome: null, edge: null });
+    const id = 'b'.repeat(32);
+    expect(loadConfig({ ...base, NETSCHOOL_EXTENSION_ID_EDGE: id }).extensionIds).toEqual({ chrome: null, edge: id });
+    expect(problemsOf({ ...base, NETSCHOOL_EXTENSION_ID_CHROME: 'xyz' })).toContain(
+      'NETSCHOOL_EXTENSION_ID_CHROME must be a 32-letter extension id',
+    );
+  });
 });

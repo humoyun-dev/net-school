@@ -103,6 +103,36 @@ func (l *lazyHub) ReportStatus(ctx context.Context, s hub.Status) error {
 	return h.ReportStatus(ctx, s)
 }
 
+// PolicyHub P2c bazaviy siyosat yo'llari (hub.Client va lazyHub).
+type PolicyHub interface {
+	BaselinePolicyRaw(ctx context.Context) (hub.BaselinePolicy, []byte, error)
+	ReportPolicyReceipt(ctx context.Context, r hub.Receipt) error
+}
+
+func (l *lazyHub) BaselinePolicyRaw(ctx context.Context) (hub.BaselinePolicy, []byte, error) {
+	h, err := l.get()
+	if err != nil {
+		return hub.BaselinePolicy{}, nil, err
+	}
+	ph, ok := h.(PolicyHub)
+	if !ok {
+		return hub.BaselinePolicy{}, nil, errors.New("hub mijozi siyosatni qo'llab-quvvatlamaydi")
+	}
+	return ph.BaselinePolicyRaw(ctx)
+}
+
+func (l *lazyHub) ReportPolicyReceipt(ctx context.Context, r hub.Receipt) error {
+	h, err := l.get()
+	if err != nil {
+		return err
+	}
+	ph, ok := h.(PolicyHub)
+	if !ok {
+		return errors.New("hub mijozi siyosatni qo'llab-quvvatlamaydi")
+	}
+	return ph.ReportPolicyReceipt(ctx, r)
+}
+
 // ErrUntrustedConfigDir helper katalogi himoyalanmadi yoki tekshiruvdan o'tmadi (egasi Administrators/SYSTEM va
 // himoyalangan DACL emas). Bunday katalogdagi device.json, hub-ca.pem, helper.key va lock.json'ga ishonilmaydi:
 // xizmat hub'siz va ochiq holatda ishlaydi, DirGate esa VerifyRetry oralig'ida qayta uradi.
