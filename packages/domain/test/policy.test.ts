@@ -51,10 +51,10 @@ describe('url patterns', () => {
   });
 
   test('wildcard matches the domain and its subdomains only', () => {
-    expect(matchesUrl('*.example.com', new URL('https://a.example.com/x'))).toBe(true);
-    expect(matchesUrl('*.example.com', new URL('https://example.com/'))).toBe(true);
-    expect(matchesUrl('*.example.com', new URL('https://badexample.com/'))).toBe(false);
-    expect(matchesUrl('example.com', new URL('https://a.example.com/'))).toBe(false);
+    expect(matchesUrl('*.example.com', new URL('https://a.example.com/x'), 'block')).toBe(true);
+    expect(matchesUrl('*.example.com', new URL('https://example.com/'), 'block')).toBe(true);
+    expect(matchesUrl('*.example.com', new URL('https://badexample.com/'), 'block')).toBe(false);
+    expect(matchesUrl('example.com', new URL('https://a.example.com/'), 'block')).toBe(false);
   });
 
   test('path matching resists case, encoding and slash tricks', () => {
@@ -68,14 +68,34 @@ describe('url patterns', () => {
       'https://example.com/x/../docs',
       'https://example.com/docs;x=1/a',
     ]) {
-      expect(matchesUrl('example.com/docs', new URL(url)), url).toBe(true);
+      for (const purpose of ['block', 'allow'] as const) {
+        expect(matchesUrl('example.com/docs', new URL(url), purpose), `${purpose} ${url}`).toBe(true);
+      }
     }
   });
 
+  test('encoded separators fail closed: they widen blocks but never widen an allowlist', () => {
+    for (const url of ['https://example.com/secret%2f..%2fdocs', 'https://example.com/secret%2F..%2Fdocs/a']) {
+      expect(matchesUrl('example.com/docs', new URL(url), 'allow'), url).toBe(false);
+      expect(matchesUrl('example.com/docs', new URL(url), 'block'), url).toBe(true);
+    }
+    expect(matchesUrl('example.com/admin', new URL('https://example.com/admin%2fx'), 'block')).toBe(true);
+    expect(matchesUrl('example.com/docs', new URL('https://example.com/docs%3bx/a'), 'allow')).toBe(false);
+    for (const url of ['https://example.com/DOCS/a', 'https://example.com/%64ocs/a', 'https://example.com//docs/a']) {
+      expect(matchesUrl('example.com/docs', new URL(url), 'allow'), url).toBe(true);
+    }
+  });
+
+  test('dot segments are rejected in patterns', () => {
+    expect(normalizePattern('example.com/a/../b')).toBeNull();
+    expect(normalizePattern('example.com/./a')).toBeNull();
+    expect(normalizePattern('example.com/a.b/c')).toBe('example.com/a.b/c');
+  });
+
   test('path prefix matches by segment prefix', () => {
-    expect(matchesUrl('example.com/docs', new URL('https://example.com/docs/a'))).toBe(true);
-    expect(matchesUrl('example.com/docs', new URL('https://example.com/doc'))).toBe(false);
-    expect(matchesUrl('example.com', new URL('http://EXAMPLE.com./any'))).toBe(true);
+    expect(matchesUrl('example.com/docs', new URL('https://example.com/docs/a'), 'block')).toBe(true);
+    expect(matchesUrl('example.com/docs', new URL('https://example.com/doc'), 'block')).toBe(false);
+    expect(matchesUrl('example.com', new URL('http://EXAMPLE.com./any'), 'block')).toBe(true);
   });
 });
 

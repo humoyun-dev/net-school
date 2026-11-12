@@ -90,6 +90,12 @@ describe('navigation backstop', () => {
     expect(isBlocked(web, 'https://example.com/other')).toBe(false);
   });
 
+  test('encoded separators cannot widen a lesson allowlist', () => {
+    const web = { block: [], allowOnly: ['example.com/docs'] };
+    expect(isBlocked(web, 'https://example.com/secret%2f..%2fdocs')).toBe(true);
+    expect(isBlocked(web, 'https://example.com/docs/a')).toBe(false);
+  });
+
   test('allowOnly blocks other http(s) pages and ignores browser pages', () => {
     const web = { block: ['bad.com'], allowOnly: ['bad.com', 'docs.com'] };
     expect(isBlocked(web, 'https://docs.com/a')).toBe(false);

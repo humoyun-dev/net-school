@@ -102,6 +102,6 @@ export function isBlocked(web: EffectiveWeb, raw: string): boolean {
     return false;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  if (web.block.some((p) => matchesUrl(p, url))) return true;
-  return web.allowOnly !== null && !web.allowOnly.some((p) => matchesUrl(p, url));
+  if (web.block.some((p) => matchesUrl(p, url, 'block'))) return true;
+  return web.allowOnly !== null && !web.allowOnly.some((p) => matchesUrl(p, url, 'allow'));
 }

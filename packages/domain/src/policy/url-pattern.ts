@@ -47,14 +47,17 @@ export function normalizePattern(input: string): UrlPattern | null {
   const host = asciiHost(hostPart);
   if (!host) return null;
   if (path !== '' && !PATH.test(path)) return null;
+  // `.`/`..` segmentlari rad etiladi: pattern yozilgandek ma'noda bo'lsin, hal qilinib boshqa yo'lga aylanmasin.
+  if (path.split('/').some((seg) => seg === '.' || seg === '..')) return null;
   path = canonicalPath(path);
   if (path === '/') path = '';
   const out = `${wildcard ? '*.' : ''}${host}${path}`;
   return out.length > MAX_PATTERN_LENGTH ? null : out;
 }
 
-// Kanonik yo'l: %-kodlash ochiladi, `;param` tashlanadi, `//` birlashadi, `.`/`..` hal qilinadi, kichik harf.
-// Pattern va brauzer URL'i bir xil kanonlashtiriladi, aks holda `/%64ocs`, `//docs`, `/DOCS` blokdan o'tadi.
+// Kanonik yo'l (keng shakl): %-kodlash to'liq ochiladi (`%2f` ham `/` bo'ladi), `;param` tashlanadi, `//` birlashadi,
+// `.`/`..` hal qilinadi, kichik harf. Blokni kengaytiradi: `/%64ocs`, `//docs`, `/DOCS`, `/admin%2fx` blokdan o'tmaydi.
+// Allowlist uchun yolg'iz o'zi ishlatilmaydi (matchesUrl): `/secret%2f..%2fdocs` bu shaklda `/docs` bo'lib qoladi.
 export function canonicalPath(path: string): string {
   let decoded = path;
   try {
@@ -73,6 +76,25 @@ export function canonicalPath(path: string): string {
   return `/${out.join('/')}${trailing}`;
 }
 
+// Qat'iy shakl: faqat unreserved belgilar (`A-Za-z0-9-._~`) ochiladi — `%2f`, `%3b`, `%5c` kodlangan qoladi va yo'lni
+// bo'lmaydi; brauzer pathname'i allaqachon dot-normallashgan. Literal `;param` va bo'sh segmentlar tashlanadi.
+// `..` qolsa (bo'lmasligi kerak) null — allowlist mos kelmaydi.
+function strictPath(path: string): string | null {
+  const unreserved = path.replace(/%([0-9a-f]{2})/gi, (m, hex: string) => {
+    const ch = String.fromCharCode(Number.parseInt(hex, 16));
+    return /[A-Za-z0-9\-._~]/.test(ch) ? ch : m;
+  });
+  const out: string[] = [];
+  for (const raw of unreserved.toLowerCase().split('/')) {
+    const seg = raw.split(';')[0] ?? '';
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') return null;
+    out.push(seg);
+  }
+  const trailing = unreserved.endsWith('/') && out.length > 0 ? '/' : '';
+  return `/${out.join('/')}${trailing}`;
+}
+
 function split(pattern: UrlPattern): { wildcard: boolean; host: string; path: string } {
   const wildcard = pattern.startsWith('*.');
   const body = wildcard ? pattern.slice(2) : pattern;
@@ -85,13 +107,17 @@ function split(pattern: UrlPattern): { wildcard: boolean; host: string; path: st
 }
 
 // Pattern URL'ga mosmi: host teng (yoki `*.` uchun subdomen), yo'l prefiksi segment chegarasida.
-export function matchesUrl(pattern: UrlPattern, url: URL): boolean {
+// Xavfsiz tomonga yopiq: `block` — keng yoki qat'iy shakldan biri mos kelsa; `allow` — ikkalasi ham mos kelsa.
+export function matchesUrl(pattern: UrlPattern, url: URL, purpose: 'block' | 'allow'): boolean {
   const p = split(pattern);
   let host = url.hostname.toLowerCase();
   if (host.endsWith('.')) host = host.slice(0, -1);
   const hostOk = host === p.host || (p.wildcard && host.endsWith(`.${p.host}`));
   if (!hostOk) return false;
   if (p.path === '') return true;
-  const path = canonicalPath(url.pathname);
-  return path === p.path || path.startsWith(p.path.endsWith('/') ? p.path : `${p.path}/`);
+  const prefix = p.path.endsWith('/') ? p.path : `${p.path}/`;
+  const under = (path: string | null) => path !== null && (path === p.path || path.startsWith(prefix));
+  const loose = under(canonicalPath(url.pathname));
+  const strict = under(strictPath(url.pathname));
+  return purpose === 'block' ? loose || strict : loose && strict;
 }
