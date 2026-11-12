@@ -4,9 +4,11 @@ import { type AgentStatus, CompanionAgent } from '../core/agent.ts';
 import { StateCache } from '../core/cache.ts';
 import { systemClock } from '../core/clock.ts';
 import { CommandProcessor } from '../core/commands.ts';
+import { HardLock } from '../core/hard-lock.ts';
 import { HubClient } from '../core/hub-client.ts';
 import { pickLocale, strings } from '../core/i18n.ts';
 import { RequestSigner } from '../core/identity.ts';
+import { LockPolicy } from '../core/lock-policy.ts';
 import { loadEnrollment, machineDir } from '../core/machine-store.ts';
 import { OverlayController } from '../core/overlay.ts';
 import { ThumbnailUploader } from '../core/thumbnails.ts';
@@ -15,7 +17,9 @@ import { dismissArgSchema, isTrustedSender } from './ipc.ts';
 import { platformFacts } from './platform.ts';
 import { hardenSession } from './security.ts';
 import { createTray } from './tray.ts';
+import { keyboardHookAvailable, WindowsKeyboardHook } from './win-keyboard-hook.ts';
 import { Windows } from './windows.ts';
+import { WindowsRegistry } from './windows-registry.ts';
 
 // Asosiy jarayon CommonJS bundle sifatida yig'iladi (Playwright ESM entry'ni ulay olmaydi), shuning uchun __dirname.
 const here = __dirname;
@@ -57,7 +61,8 @@ async function main(): Promise<void> {
   let cache: StateCache | null = null;
   let broken = false;
   try {
-    enrollment = loadEnrollment(machineDir(process.platform, process.env));
+    // Katalogni muhit orqali almashtirish faqat e2e test build'ida (oddiy build'da o'quvchi uni `setx` bilan bera olardi).
+    enrollment = loadEnrollment(machineDir(process.platform, process.env, { allowOverride: __NETSCHOOL_TEST_BUILD__ }));
     if (enrollment) cache = StateCache.open(join(app.getPath('userData'), 'state.sqlite'));
   } catch (err) {
     broken = true;
@@ -81,14 +86,41 @@ async function main(): Promise<void> {
   } else {
     const signer = new RequestSigner(enrollment.identity);
     const hub = new HubClient({ origin: enrollment.config.hubOrigin, ca: enrollment.ca, signer });
-    const overlay = new OverlayController(systemClock, cache, () => {});
+    // Kuchli bloklash faqat Windows'da (ADR 0012). Hook yuklanmasa (koffi yo'q) yoki o'rnatilmasa, overlay yumshoq qoladi
+    // va capability sababini aytadi; yolg'on «bloklangan» da'vo qilinmaydi.
+    const hardLock =
+      process.platform === 'win32'
+        ? new HardLock({
+            policy: new LockPolicy(new WindowsRegistry(), {
+              load: () => cache.loadPolicyJournal(),
+              save: (entries) => cache.savePolicyJournal(entries),
+            }),
+            hook: new WindowsKeyboardHook(),
+            onError: (reason, err) => console.error(`hard lock: ${reason}`, err),
+          })
+        : null;
+    const hookReady = hardLock !== null && keyboardHookAvailable();
+    const hardLockFacts = () =>
+      hookReady ? hardLock.facts() : { enforced: false, reason: 'hook_unavailable' as const };
+    const overlay = new OverlayController(systemClock, cache, (view) => {
+      void hardLock?.set(view.locked);
+    });
     const commands = new CommandProcessor({ hub, cache, overlay, ui: { showMessage: (t) => windows.showMessage(t) } });
     const thumbnails = new ThumbnailUploader({ hub, signer, source: new ElectronFrameSource() });
     const onStatus = (status: AgentStatus) => {
       windows.update(status);
       tray.update(status);
     };
-    const agent = new CompanionAgent({ hub, cache, overlay, commands, thumbnails, facts: platformFacts, onStatus });
+    const agent = new CompanionAgent({
+      hub,
+      cache,
+      overlay,
+      commands,
+      thumbnails,
+      facts: () => platformFacts(hardLockFacts),
+      enforcement: () => (hookReady && overlay.view().locked && hardLock.facts().enforced ? 'hard' : 'soft'),
+      onStatus,
+    });
 
     ipcMain.handle('help:raise', async (event) => {
       if (!trusted(event.senderFrame?.url)) throw new Error('forbidden');
@@ -99,6 +131,10 @@ async function main(): Promise<void> {
       await agent.withdrawHelp();
     });
 
+    // Oldingi ishga tushishdan qolgan siyosat qaytariladi; lock bo'lsa overlay tiklanishi uni qayta qo'llaydi.
+    await hardLock?.start();
+    const restoreTimer = hardLock ? setInterval(() => void hardLock.reconcile(), 30_000) : null; // yo'qolgan hook va qolib ketgan siyosat
+    restoreTimer?.unref();
     await agent.start();
     if (process.env.NETSCHOOL_COMPANION_SHOW_STATUS === '1') windows.showStatus();
     // Avval agent to'xtaydi (sikllar keshga yozishni tugatadi), keyin kesh yopiladi va chiqish davom etadi.
@@ -108,7 +144,9 @@ async function main(): Promise<void> {
       shuttingDown = true;
       event.preventDefault();
       windows.allowClose();
-      void agent.stop().finally(() => {
+      void agent.stop().finally(async () => {
+        if (restoreTimer) clearInterval(restoreTimer);
+        await hardLock?.dispose();
         cache.close();
         app.quit();
       });

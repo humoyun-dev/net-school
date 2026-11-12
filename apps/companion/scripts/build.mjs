@@ -11,7 +11,8 @@ const dist = process.env.NETSCHOOL_COMPANION_OUT || join(root, 'dist');
 const testBuild = process.env.NETSCHOOL_COMPANION_TEST_BUILD === '1';
 const tsconfig = join(root, 'tsconfig.json');
 const common = { bundle: true, sourcemap: true, tsconfig, logLevel: 'warning' };
-const external = ['electron', 'bufferutil', 'utf-8-validate'];
+// koffi — native paket (Windows kuchli bloklash hook'i), bundle'ga kirmaydi; yo'q bo'lsa hook `hook_unavailable` bo'ladi.
+const external = ['electron', 'bufferutil', 'utf-8-validate', 'koffi'];
 
 // enroll CLI: Node 24, ESM.
 await build({
@@ -30,7 +31,11 @@ await build({
 // Asosiy jarayon CommonJS: Playwright (e2e) ESM entry'li Electron'ni ulay olmaydi.
 await build({
   ...common,
-  entryPoints: { main: join(root, 'src/main/main.ts') },
+  // Klaviatura hook'i alohida worker oqimida (main/keyboard-hook-thread.ts): asosiy oqim bandligi uni o'ldirmasin.
+  entryPoints: {
+    main: join(root, 'src/main/main.ts'),
+    'keyboard-hook-thread': join(root, 'src/main/keyboard-hook-thread.ts'),
+  },
   outdir: dist,
   outExtension: { '.js': '.cjs' },
   platform: 'node',

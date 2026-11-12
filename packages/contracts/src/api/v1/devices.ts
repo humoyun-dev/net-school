@@ -26,17 +26,25 @@ export type Enrollment = z.infer<typeof enrollmentSchema>;
 export const createEnrollmentResponseSchema = enrollmentSchema.extend({ token: z.string() });
 export type CreateEnrollmentResponse = z.infer<typeof createEnrollmentResponseSchema>;
 
-export const claimRequestSchema = z.strictObject({
-  token: z.string().regex(/^nse_[A-Za-z0-9_-]{43}$/),
-  publicKey: base64url.max(128),
-  proof: base64url.max(128),
-  hostname: z
-    .string()
-    .min(1)
-    .max(253)
-    .regex(/^[\x21-\x7e]+$/),
-  capabilities: capabilityReportSchema,
-});
+export const claimRequestSchema = z
+  .strictObject({
+    token: z.string().regex(/^nse_[A-Za-z0-9_-]{43}$/),
+    publicKey: base64url.max(128),
+    proof: base64url.max(128),
+    hostname: z
+      .string()
+      .min(1)
+      .max(253)
+      .regex(/^[\x21-\x7e]+$/),
+    capabilities: capabilityReportSchema,
+    // OS helper'ning alohida kaliti (ixtiyoriy): helperProof = imzo(`NSCLAIM1\n<token>\n<helperPublicKey>`) helper kaliti bilan.
+    helperPublicKey: base64url.max(128).optional(),
+    helperProof: base64url.max(128).optional(),
+  })
+  .refine((c) => (c.helperPublicKey === undefined) === (c.helperProof === undefined), {
+    message: 'helperPublicKey and helperProof must be sent together',
+    path: ['helperProof'],
+  });
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
 export const claimResponseSchema = z.object({

@@ -13,6 +13,7 @@ pnpm --filter @netschool/companion build               # dist/main.cjs, preload.
 ## Windows uchun portable paket (P0c, installer'siz)
 
 ```bash
+pnpm build:helper                                          # native/helper/dist/netschool-helper-windows-*.exe
 pnpm --filter @netschool/companion pack:win --arch x64     # yoki arm64 (Apple Silicon'dagi Windows VM)
 # → apps/companion/out/netschool-companion-win32-<arch>.zip
 ```
@@ -21,9 +22,19 @@ Zip tarkibi:
 - Electron 45.2.1 (`@electron/get`, SHASUMS bilan tekshiriladi);
 - `NetSchool Companion.exe`;
 - oddiy (test emas) build `resources/app/` ichida;
-- `enroll.cmd` (Electron'ni Node sifatida ishlatadi) va `start.cmd`.
+- `netschool-helper.exe` (arch'ga mos OS helper; yo'q bo'lsa paket yig'ilmaydi);
+- `enroll.cmd`: ro'yxatdan o'tkazadi (Electron'ni Node sifatida ishlatadi), keyin
+  `netschool-helper.exe install` — helper SYSTEM xizmati sifatida `%ProgramFiles%\NetSchool\` ga o'rnatiladi va
+  Companion'ni har kirishda o'zi ishga tushiradi (HKLM Run autostart endi yo'q, install eskisini o'chiradi);
+- `install.cmd` (yangilash, qayta ro'yxatdan o'tkazmasdan), `uninstall.cmd` (xizmat, fayllar, siyosatlar) va `start.cmd`.
+  `.cmd` fayllar faqat yoyilgan paket katalogidan ishga tushiriladi (Program Files'ga nusxalanmaydi).
 
-Test build'ni paketlash rad etiladi.
+Helper kaliti va hub sozlamalari faqat `%ProgramData%\NetSchool\helper\` da (faqat SYSTEM/Administrators):
+Windows'da `enroll` ularni paket yonidagi `netschool-helper.exe helper-key` (claim'dan oldin) va `set-hub`
+(claim'dan keyin) orqali yozdiradi, o'zi kalitni ko'rmaydi.
+
+Test build'ni paketlash rad etiladi. P2d1'dan oldin ro'yxatdan o'tgan kompyuterda helper kaliti yo'q: yangi token
+bilan `enroll.cmd ... --force` ishga tushiriladi.
 
 ## Ro'yxatdan o'tkazish (IT admin, har kompyuterda bir marta)
 

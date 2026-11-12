@@ -1,0 +1,7 @@
+# GitGuardian sozlamasi. Fixture'lardagi Ed25519 kalitlari TEST-ONLY imzo vektorlari: hech qanday tizimni
+# himoya qilmaydi, TS va Go testlari ular bilan bir xil imzoni qayta hisoblaydi (izoh fixture ichida).
+version: 2
+secret:
+  ignored_paths:
+    - packages/contracts/fixtures/device-signature.json
+    - packages/contracts/fixtures/claim-proof.json

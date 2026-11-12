@@ -129,6 +129,21 @@ export class EnrollmentsService {
       return this.#claimFailed(tokenHash, 'invalid_proof', correlationId);
     }
     const der = Buffer.from(input.publicKey, 'base64url');
+    // OS helper kaliti (ixtiyoriy): u ham tokenni sarflashdan oldin tekshiriladi.
+    let helperKey: string | null = null;
+    if (input.helperPublicKey !== undefined && input.helperProof !== undefined) {
+      const parsed = parseDevicePublicKey(input.helperPublicKey);
+      const helperDer = parsed?.export({ type: 'spki', format: 'der' });
+      // Companion kaliti bilan bir xil kalit ikki imzolovchini ajratib bo'lmas qilardi.
+      if (!parsed || !helperDer || helperDer.equals(der)) {
+        return this.#claimFailed(tokenHash, 'invalid_helper_key', correlationId);
+      }
+      if (!verifyClaimProof(parsed, input.token, input.helperPublicKey, input.helperProof)) {
+        return this.#claimFailed(tokenHash, 'invalid_helper_proof', correlationId);
+      }
+      // Kanonik ko'rinishda saqlanadi: unique cheklov bir kalitning turli yozuvlarini ham ushlaydi.
+      helperKey = helperDer.toString('base64url');
+    }
     const now = new Date(this.now());
     try {
       const result = await this.db.transaction(async (tx) => {
@@ -154,6 +169,7 @@ export class EnrollmentsService {
             hostname: input.hostname,
             publicKey: der,
             keyFingerprint: keyFingerprint(der),
+            helperPublicKey: helperKey,
             enrolledAt: now,
           })
           .returning();
@@ -189,7 +205,12 @@ export class EnrollmentsService {
     }
   }
 
-  async #claimFailed(tokenHash: Buffer, reason: 'invalid_token' | 'invalid_proof', correlationId: string) {
+  // Companion xatosi — 401; helper kaliti yoki proof'i noto'g'ri bo'lsa — 400 (so'rov tuzilishi xato, token sarflanmaydi).
+  async #claimFailed(
+    tokenHash: Buffer,
+    reason: 'invalid_token' | 'invalid_proof' | 'invalid_helper_key' | 'invalid_helper_proof',
+    correlationId: string,
+  ): Promise<never> {
     const [known] = await this.db
       .select({ organizationId: enrollments.organizationId, siteId: enrollments.siteId, id: enrollments.id })
       .from(enrollments)
@@ -208,7 +229,7 @@ export class EnrollmentsService {
       },
       correlationId,
     );
-    throw new ApiError('unauthenticated');
+    throw new ApiError(reason.startsWith('invalid_helper') ? 'validation_failed' : 'unauthenticated');
   }
 
   #view(row: EnrollmentRow): Enrollment {

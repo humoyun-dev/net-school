@@ -12,6 +12,14 @@ export interface PersistedOverlay {
   deadlineUptimeMs: number;
 }
 
+// Bloklash siyosati o'zgartirgan reestr qiymatlarining oldingi holati (null — qiymat yo'q edi). Qayta ishga tushganda
+// bloklash faol bo'lmasa shu jurnal bo'yicha hammasi qaytariladi.
+export interface PersistedPolicyEntry {
+  key: string;
+  name: string;
+  previous: number | null;
+}
+
 export type CommandOutcome =
   | { status: 'succeeded' }
   | { status: 'failed'; reason: 'unsupported' | 'permission_required' | 'error' };
@@ -27,6 +35,10 @@ const overlaySchema = z.strictObject({
   bootTimeMs: z.number(),
   deadlineUptimeMs: z.number(),
 });
+
+const policyJournalSchema = z.array(
+  z.strictObject({ key: z.string(), name: z.string(), previous: z.number().int().nullable() }),
+);
 
 const outcomeSchema = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('succeeded') }),
@@ -52,6 +64,10 @@ export class StateCache {
       );
       CREATE INDEX IF NOT EXISTS outcomes_by_time ON outcomes (at);
       CREATE TABLE IF NOT EXISTS overlay (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS policy_journal (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         json TEXT NOT NULL
       );
@@ -94,6 +110,19 @@ export class StateCache {
     } catch {
       return null;
     }
+  }
+
+  savePolicyJournal(entries: readonly PersistedPolicyEntry[] | null): void {
+    if (entries === null) this.#db.exec('DELETE FROM policy_journal');
+    else
+      this.#db.prepare('INSERT OR REPLACE INTO policy_journal (id, json) VALUES (1, ?)').run(JSON.stringify(entries));
+  }
+
+  // Buzilgan jurnal "yo'q" deb o'qilmaydi: qaytarish mumkin bo'lmagan holatni jimgina yo'qotmaslik uchun xato beradi.
+  loadPolicyJournal(): PersistedPolicyEntry[] | null {
+    const row = this.#db.prepare('SELECT json FROM policy_journal WHERE id = 1').get();
+    if (!row) return null;
+    return policyJournalSchema.parse(JSON.parse(String(row.json)));
   }
 
   close(): void {

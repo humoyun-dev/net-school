@@ -1,0 +1,75 @@
+# Windows x64 — NetSchool Helper qo'lda qabul sinovi (P2d1 Task 12, runbook)
+
+**Natija: hali o'tkazilmagan.** Bu fayl qabul sinovining tartibi va bo'sh natija jadvali. Sinovni egasi Windows x64 kompyuterida o'tkazadi va har qatorni to'ldiradi. To'ldirilmaguncha matrix'da hech narsa `passed` deb belgilanmaydi ([ADR 0014](../../adr/0014-windows-helper.md), 9-band).
+
+Sana: — · Kompyuter: — · Windows nashri va versiyasi (`winver`, Education/Pro/Home): — · Hub: — · Paket: Companion `pack-win` zip + `netschool-helper.exe` (commit: —)
+
+## Shartlar
+
+- Sinov **standart (admin emas) o'quvchi hisobida** o'tkaziladi (risk #17). Admin amallari (o'rnatish, majburan o'ldirish, `uninstall`) alohida admin hisobidan yoki "Запуск от имени администратора" bilan; har qatorda kim bajargani yoziladi.
+- Paket katalogi o'quvchi yoza olmaydigan joyda bo'lsin (masalan, admin yaratgan `C:\Users\<admin>\Downloads\netschool`); `uninstall.cmd` shu katalogdan ishga tushiriladi.
+- Vaqt o'lchovlari telefon soati bilan (laptop soati hub'dan farq qilishi mumkin, 2026-11-09 natijasi).
+- Bloklash panelda `overlay.lock` bilan yuboriladi. Panel daraja va `sas_block`ni ko'rsatmaydi, ularni API javobidan o'qing (quyidagi «Daraja so'rovi»). Kerakli bandlarda `classroom.overlay` (`enforcement`, `reason`) va `classroom.sas_block` (`state`, `reason`) yoziladi.
+- **Daraja so'rovi.** Hub `GET /api/v1/rooms/<roomId>/devices` javobida, qurilmaning `capabilities.capabilities["classroom.overlay"]` va `["classroom.sas_block"]` maydonlari. Eng oson yo'l: panelga kirilgan brauzerda DevTools → Console:
+  ```js
+  const r = await fetch('/api/v1/rooms/<roomId>/devices').then((x) => x.json());
+  r.devices.filter((d) => d.hostname === '<hostname>').map((d) => ({ overlay: d.capabilities?.capabilities['classroom.overlay'], sas: d.capabilities?.capabilities['classroom.sas_block'] }));
+  ```
+  `<roomId>` panel manzilidan yoki DevTools → Network'dagi `.../rooms/<id>/devices` so'rovidan olinadi. curl bilan: DevTools → Application → Cookies'dan `__Host-ns_sid` qiymatini olib, `curl --cacert hub-ca.pem -H "Cookie: __Host-ns_sid=<qiymat>" https://<hub>/api/v1/rooms/<roomId>/devices` (javobdagi o'sha maydonlar). Helper hisoboti 90 s dan eski bo'lsa daraja `soft` + `helper_missing` bo'ladi; o'zgarishdan keyin ~10 s kutib so'rang.
+- Holat tekshiruvlari (admin cmd): `sc query NetSchoolHelper`, `sc qc NetSchoolHelper`, `sc sdshow NetSchoolHelper`, `sc qfailure NetSchoolHelper`, `icacls`, `reg query`, Event Viewer → Application → manba `NetSchoolHelper`.
+
+## Tayyorgarlik (bajarilsa ✓)
+
+1. Hub'da enrollment token yaratish (site admin yoki IT).
+2. **Ishonchsiz katalog sinovi uchun:** o'rnatishdan oldin o'quvchi hisobida `mkdir %ProgramData%\NetSchool` va ichiga istalgan fayl (o'quvchi egasi bo'lgan katalog). 11-qatorda tekshiriladi.
+3. O'quvchi hisobida bloklashdan oldin ochib qo'yiladi: brauzer (2–3 tab), `cmd.exe`, Vazifalar menejeri (`System32\taskmgr.exe`).
+
+## Natijalar
+
+Holat ustuni: `pending` | `ha` | `yo'q` | `qisman`. Hozir hammasi `pending`.
+
+| # | Band | Kutilgan natija | Holat | Izoh / dalil |
+|---|---|---|---|---|
+| 1 | O'rnatish: admin `enroll.cmd --hub https://<hub> --ca <hub-ca.pem>` (token `NETSCHOOL_ENROLL_TOKEN` orqali) | enroll helper kalitini `netschool-helper helper-key` bilan yaratadi (token stdin orqali), claim'dan keyin `set-hub` (CA stdin orqali), so'ng `install`; chiqish kodi 0; panelda qurilma ko'rinadi; daraja so'rovida `classroom.overlay` (bloklashsiz: `hard`) va `classroom.sas_block` bor | pending | |
+| 2 | Xizmat parametrlari: `sc qc`, `sc qfailure`, `sc sdshow NetSchoolHelper` | `NetSchoolHelper`, `NetSchool Helper`, `AUTO_START`, `LocalSystem`; recovery 1 s / 1 s / 5 s, reset 86400; SDDL ADR 0014'dagi bilan aynan | pending | |
+| 3 | Katalog ACL'i: `icacls "%ProgramData%\NetSchool\helper"` va `icacls "%ProgramFiles%\NetSchool"` | helper katalogi: faqat `NT AUTHORITY\SYSTEM` va `BUILTIN\Administrators` (meros yo'q, Users o'qiy olmaydi); `%ProgramFiles%\NetSchool`: Users faqat o'qish/bajarish (`RX`), yozish faqat SYSTEM/Administrators | pending | |
+| 4 | O'quvchi `sc stop NetSchoolHelper` | «Отказано в доступе» (5); xizmat ishlayveradi | pending | |
+| 5 | O'quvchi Vazifalar menejerida `netschool-helper.exe` (xizmat va guard) ni yopishga urinadi | «Отказано в доступе»; ikkalasi ham yashaydi | pending | |
+| 6 | O'quvchi Companion'ni Vazifalar menejeridan yopadi (bloklashsiz) | ≤ 3 s da qaytadi (telefon soati) | pending | |
+| 7 | O'quvchi `HKCU\Software\Microsoft\Windows\CurrentVersion\Policies` ga yozishga urinadi (`reg add ...\Policies\System /v DisableTaskMgr /t REG_SZ /d x`) | rad etiladi. Agar yozilsa — topilma: REG_SZ qiymat siyosat `Apply`ni yiqitadi (`policy_failed`) | pending | |
+| 8 | Bloklash: daraja so'rovi (API) | `classroom.overlay`: `hard`; Education/Enterprise'da `classroom.sas_block`: `available`, Pro/Home'da `unsupported` (`edition`) | pending | |
+| 9 | Bloklashda o'quvchi klaviaturasi: Win, Alt+Tab, Ctrl+Esc, Ctrl+Shift+Esc, Alt+F4, Alt+Space (ko'p marta ketma-ket) | hammasi to'siladi | pending | |
+| 10 | Bloklashda Ctrl+Alt+Del ekrani (Pro/Home) | ekran ochiladi, lekin Vazifalar menejeri, Qulflash, Chiqish, Parolni o'zgartirish, foydalanuvchini almashtirish, quvvat tugmasi yo'q; faqat «Отмена» | pending | |
+| 11 | Ishonchsiz katalog (tayyorgarlik 2) | install o'quvchi yaratgan `%ProgramData%\NetSchool` ni o'chirib qayta yaratdi; helper katalogi tekshiruvdan o'tdi: Event Viewer → Application → manba `NetSchoolHelper`da "helper katalogi tekshiruvdan o'tmadi" yozuvi yo'q; daraja so'rovida (~10 s dan keyin) `classroom.overlay` `helper_missing` emas (helper hisoboti keladi); install chiqishida `%ProgramData%\NetSchool` qayta yaratilgani haqida ogohlantirish bor | pending | |
+| 12 | Bloklashda o'quvchi jarayonidan `SendInput(Win)` (medium IL, masalan, PowerShell skripti yoki AutoHotkey) | to'siladi (`LLKHF_LOWER_IL_INJECTED`) | pending | |
+| 13 | Bloklashda o'qituvchining masofaviy boshqaruvi (MeshAgent): sichqoncha, matn, Win tugmasi | ishlaydi (injected, lekin LOWER_IL emas) | pending | |
+| 14 | Process guard: bloklashdan oldin ochilgan brauzer va tablari | yashaydi; brauzerda yangi tab ochiladi | pending | |
+| 15 | Process guard: oldin ochilgan `cmd` dan `notepad` | notepad ≤ 1 s da o'ldiriladi; cmd yashaydi | pending | |
+| 16 | Process guard: oldin ochilgan Vazifalar menejeri | bloklash boshlanishi bilan yopiladi | pending | |
+| 17 | Process guard: yangi dastur (Win+R yo'q, shuning uchun brauzerdan yuklangan `.exe` yoki ish stolidagi yorliq) | ochilmaydi (o'ldiriladi) | pending | |
+| 18 | Process guard: qaysi shell/UWP jarayonlari o'ldirildi (RuntimeBroker, SearchHost, TextInputHost, StartMenuExperienceHost, dllhost, boshqalar) | ro'yxat yoziladi (Event Viewer / Process Explorer). Baseline'dan keyin ochilgan shell xostlari ataylab o'ldiriladi (session 0 ota istisno emas, ADR 0014, 4-band); ish stoli buzilsa topilma sifatida yoziladi | pending | |
+| 19 | Ochish | hammasi qaytadi: tugmalar, Ctrl+Alt+Del bandlari, siyosatlar (`reg query HKU\<SID>\...\Policies`), explorer (o'ldirilgan bo'lsa qayta ishga tushirilgan), yangi dasturlar ochiladi; daraja so'rovida `classroom.overlay`: `hard` (bloklash yo'q va hech bir komponent yiqilmagan) | pending | |
+| 20 | Bloklangan holda hub to'xtatiladi (`docker compose stop api`) | ~120 s da hammasi qaytadi (telefon soati bilan vaqt, lease); hub qaytgach bloklash qayta qo'llanadi | pending | |
+| 21 | Bloklangan holda admin helper xizmatini majburan o'ldiradi (`taskkill /f /pid <xizmat PID>`) | xizmat 1 s da qaytadi; bloklash shu boot ichida tiklanadi (`lock.json`), siyosat to'g'ri (ortiqcha yoki yo'qolgan qiymat yo'q) | pending | |
+| 22 | Bloklangan holda reboot | boot'dan keyin saqlangan bloklash **tiklanmaydi** (boot ID boshqa); hub hali bloklangan bo'lsa, hub so'rovidan keyin qayta qo'llanadi; Companion va guard o'quvchi kirgach ishga tushadi | pending | |
+| 23 | Admin `sc stop "Mesh Agent"` | ≤ 15 s da qayta ishga tushadi: `sc query "Mesh Agent"` → `RUNNING` (telefon soati bilan vaqt); Event Viewer → System'da Service Control Manager to'xtash/ishga tushish yozuvlari, Application'da manba `NetSchoolHelper` dan `MeshAgent:` xatosi yo'q | pending | |
+| 24 | `CreateProcessAsUser` xatosi | Companion yoki guard 1314 (`ERROR_PRIVILEGE_NOT_HELD`) bilan ishga tushmasa — yoziladi (`SeAssignPrimaryTokenPrivilege`/`SeIncreaseQuotaPrivilege` yoqish kerak) | pending | |
+| 25 | Keyboard Filter (faqat Education/Enterprise): bloklashda Ctrl+Alt+Del va Win+L | ikkalasi umuman ishlamaydi; ochishda qaytadi | pending | |
+| 26 | Keyboard Filter: bloklangan holda kompyuterni tok/tugma bilan majburan o'chirish, keyin yoqish | boot'dan keyin filtr tozalangan (Ctrl+Alt+Del ishlaydi), `cad-journal.json` bo'yicha | pending | |
+| 27 | `uninstall.cmd` (admin, paket katalogidan) | xizmat, Event Log manbasi, `%ProgramFiles%\NetSchool`, `%ProgramData%\NetSchool\helper` yo'q; siyosatlar va CAD filtri qaytarilgan; Companion autostart yo'q | pending | |
+| 28 | Muhit orqali chetlab o'tish: o'quvchi `setx ELECTRON_RUN_AS_NODE 1`, `setx NODE_OPTIONS "--require C:\Users\<o'quvchi>\x.js"` va `setx NETSCHOOL_COMPANION_DIR C:\Users\<o'quvchi>\fake`, tizimdan chiqib qayta kiradi; o'qituvchi bloklaydi | overlay baribir chiqadi (Companion oddiy Electron ilovasi, `x.js` ishlamagan); daraja so'rovida `hard`. Tekshiruvdan keyin `reg delete HKCU\Environment /v ...` bilan tozalanadi | pending | |
+| 29 | Bloklash paytida o'quvchi (oddiy PowerShell) `while(1){Stop-Process -Name 'NetSchool Companion' -Force}` | har urinishda «Отказано в доступе»; overlay ekranda qoladi; daraja so'rovida `hard`. (Renderer jarayonini o'ldirsa overlay oynasi qayta yuklanadi va yopilmaydi.) | pending | |
+| 30 | Bloklash paytida o'quvchi paket yoki `%ProgramFiles%\NetSchool\companion` dagi `NetSchool Companion.exe`ni o'zi ishga tushiradi (ish stoli yorlig'i yoki `ELECTRON_RUN_AS_NODE=1` bilan PowerShell'dan) | ≤ 1 s da o'ldiriladi; helper ishga tushirgan Companion va uning Electron bolalari yashaydi | pending | |
+| 31 | Dars paytida reboot va bloklangan holda kirish; alohida: bloklash yoqilgandan keyin boshqa o'quvchi (kech) kiradi | ish stoli yuklanadi (explorer, vazifalar paneli), overlay chiqadi; Event Viewer'da "process guard" xatosi yo'q; ~60 s ichida daraja so'rovida `hard` (explorer chiqquncha `soft` + `process_guard_failed` bo'lishi mumkin) | pending | |
+| 32 | P0c paketidan yangilash: P0c bilan ro'yxatdan o'tgan kompyuterda admin yangi paketdan `enroll.cmd --force` (yangi token bilan) | enroll chiqishida `%ProgramData%\NetSchool` qayta yaratilgani haqida ogohlantirish; Companion yangi qurilma sifatida ro'yxatdan o'tadi va ishlaydi. Faqat `install.cmd` ishlatilsa: ogohlantirish chiqadi va Companion "ro'yxatdan o'tmagan" deydi (kutilgan, hujjatlangan) | pending | |
+| 33 | Bloklash paytida explorer o'ldirilgan, ochishdan keyin helper uni qayta ishga tushirgan (19-qator davomi). O'quvchi oldin `setx PATH "C:\Users\<o'quvchi>\bin"` (foydalanuvchi Path'i, tizim Path'iga qo'shiladi) va `setx NODE_ENV test` qilgan | yangi `cmd`da `echo %PATH%` o'quvchining o'z yozuvini (`...\bin`) tizim Path'i bilan birga, `echo %NODE_ENV%` `test`ni ko'rsatadi (explorer to'liq foydalanuvchi muhiti bilan, tozalanmagan); Task Manager'da explorer'ni "Restart" qilish ishlaydi (kirish rad etilmaydi); Companion esa avvalgidek himoyalangan (o'quvchi uni Task Manager'dan to'xtata olmaydi) | pending | |
+
+## Sinovda topilgan muammolar
+
+| # | Topilma | Dalil | Holat |
+|---|---|---|---|
+| — | — | — | — |
+
+## Xulosa
+
+Hali o'tkazilmagan. Sinovdan keyin: natija bu faylga yoziladi, [capability matrix](../capability-matrix.md) (`classroom.overlay`, `classroom.sas_block`) va [risklar](../risks.md) (#4, #12, #16, #17) yangilanadi, [ADR 0014](../../adr/0014-windows-helper.md) "Ochiq qolganlar" bo'limi to'ldiriladi.

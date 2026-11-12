@@ -1,0 +1,295 @@
+// Package cad bloklash vaqtida Ctrl+Alt+Del (Windows Security ekrani) va Win+L'ni Windows Keyboard Filter orqali
+// to'sadi, u bor nashrlarda (Education, Enterprise, IoT Enterprise). Qolgan nashrlarda (Pro, Home) `unavailable`
+// qaytadi, sababi `edition`: to'liq to'sish u yerda bu rejaga kirmaydi (reja: "Ochiq qaror").
+//
+// Backend (Windows realizatsiyasi `kbfilter_windows.go`) tashqi jarayon (powershell.exe) ishga tushiradi, Guard esa
+// toza mantiq: har OS'da soxta Backend bilan test qilinadi.
+//
+// Qulash xavfsizligi: Keyboard Filter sozlamasi reyestr kabi doimiy (reboot'dan keyin ham saqlanadi), ya'ni helper
+// bloklash paytida qulasa yoki kompyuter o'chib qolsa, Ctrl+Alt+Del bloklangan holda qolib ketadi. Shuning uchun
+// Block'dan OLDIN jurnal (`cad-journal.json`, `%ProgramData%\NetSchool\helper\`) atomik yoziladi, Unblock
+// muvaffaqiyatli bo'lgachgina o'chiriladi, helper keyingi ishga tushishda (Start) jurnalda qoldiq bo'lsa filtrni
+// o'chiradi. Start boot'ning boshida yiqilishi mumkin (WMI hali tayyor emas), bloklash holati esa o'zgarmasligi
+// mumkin (reboot'dan keyin lock tiklanmaydi), shuning uchun chaqiruvchi bloklash yo'q va Pending true bo'lganda
+// Retry'ni RetryInterval oralig'ida chaqiradi, jurnal tozalanguncha.
+package cad
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// Guard holatlari (contracts'dagi helperStatusSchema `cad` maydoni bilan bir xil).
+const (
+	StateBlocked     = "blocked"     // filtr yoqilgan, Ctrl+Alt+Del to'silgan
+	StateUnavailable = "unavailable" // bu Windows nashrida Keyboard Filter yo'q (sabab: edition)
+	StateFailed      = "failed"      // Block/Unblock yoki jurnal yozish yiqilgan, yoki mavjudlik aniqlanmagan
+	StateOff         = "off"         // filtr bizning tomonimizdan yoqilmagan
+)
+
+// ReasonEdition Backend.Available shu sababni qaytarsa, nashrda Keyboard Filter yo'q (Guard `unavailable` deydi).
+// Boshqa har qanday sabab (probe xatosi) `failed`: nashr cheklovi emas, qayta urinish mumkin.
+const ReasonEdition = "edition"
+
+// Backend Keyboard Filter'ni boshqaradi. Block va Unblock idempotent bo'lishi kerak (yoqilgan filtrni yana yoqish
+// yoki o'chirilganni yana o'chirish xato emas).
+type Backend interface {
+	// Available filtr shu kompyuterda ishlashi mumkinmi. false bo'lsa ikkinchi qiymat sabab: ReasonEdition yoki
+	// probe xatosi matni.
+	Available() (bool, string)
+	Block(ctx context.Context) error
+	Unblock(ctx context.Context) error
+}
+
+// journalBlocked jurnal faylidagi holat. Mazmuni faqat diagnostika uchun (administrator fayl ichida nima
+// borligini ko'radi): "qaytarish kerak" degan qaror fayl borligining o'ziga tayanadi (journalPending).
+const journalBlocked = "blocked"
+
+type journal struct {
+	State string `json:"state"`
+}
+
+// Guard bloklash holatiga qarab Backend'ni boshqaradi va qulashga bardoshli jurnal yuritadi.
+//
+// Set/Start bir-biriga nisbatan ketma-ket bajariladi (sekin PowerShell chaqiruvi paytida ham). State va Reason
+// esa shu qulfni kutmaydi: xizmat holatni har soniyada hisobot qilishi mumkin.
+type Guard struct {
+	b           Backend
+	journalPath string
+
+	opMu      sync.Mutex // Set/Start ketma-ketligi; quyidagi uchta maydon shu qulf bilan himoyalangan
+	blocked   bool       // Block muvaffaqiyatli bo'lgan va undan keyin Unblock urinilmagan
+	probed    bool       // Available javobi aniq (mavjud yoki edition) va keshlangan
+	available bool       // probed bo'lsa: filtr mavjudmi
+
+	stMu   sync.RWMutex
+	state  string
+	reason string
+}
+
+// NewGuard jurnalni journalPath'da saqlaydi. Katalogni yaratish va uning ACL'i (faqat SYSTEM va Administrators)
+// xizmatning ishi: Guard katalog yaratmaydi (policy.NewPolicy va lock.FileStore kabi).
+func NewGuard(b Backend, journalPath string) *Guard {
+	return &Guard{b: b, journalPath: journalPath, state: StateOff}
+}
+
+// State oxirgi Set/Start natijasi. Boshida `off`.
+func (g *Guard) State() string {
+	g.stMu.RLock()
+	defer g.stMu.RUnlock()
+	return g.state
+}
+
+// Reason State `unavailable` (backend sababi, `edition`) yoki `failed` (xato matni) bo'lganda sababni qaytaradi,
+// aks holda bo'sh. Faqat jurnalga yozish uchun: hubga yuborilmaydi.
+func (g *Guard) Reason() string {
+	g.stMu.RLock()
+	defer g.stMu.RUnlock()
+	return g.reason
+}
+
+func (g *Guard) set(state, reason string) string {
+	g.stMu.Lock()
+	defer g.stMu.Unlock()
+	g.state, g.reason = state, reason
+	return state
+}
+
+// RetryInterval chaqiruvchi Retry'ni (bloklash yo'q, Pending true bo'lganda) shuncha oraliqda chaqirishi kerak.
+// Har soniya emas: har urinish sekin PowerShell chaqiruvi (30 s gacha).
+const RetryInterval = 30 * time.Second
+
+// Pending jurnal borligini bildiradi, ya'ni filtr bizning tomonimizdan yoqilgan va hali tasdiqlangan holda
+// o'chirilmagan bo'lishi mumkin. Jurnal buzilgan yoki o'qilmasa ham true: "bloklash yo'q" deb o'ylamaymiz
+// (policy.Pending kabi). Sekin backend chaqiruvini kutmaydi.
+//
+// Shartnoma: bloklash YO'Q (Set(false) holati) paytida Pending true bo'lsa, chaqiruvchi Retry'ni (yoki Set(ctx,
+// false)'ni) RetryInterval oralig'ida qayta chaqirishi kerak, to'xtamaguncha. Aks holda Start boot'da yiqilsa
+// (masalan, WMI hali tayyor emas) va reboot'dan keyin bloklash tiklanmasa (lock.json faqat shu boot ichida
+// tiklanadi), holat hech o'zgarmaydi, Set chaqirilmaydi va Ctrl+Alt+Del keyingi darsgacha to'silgan qoladi.
+func (g *Guard) Pending() bool { return g.journalPending() }
+
+// Start helper ishga tushganda, birinchi Set'dan oldin, bir marta chaqiriladi: jurnal qolgan bo'lsa (oldingi ish
+// bloklash paytida qulagan yoki kompyuter o'chgan), filtr o'chiriladi (Retry'ning o'zi). Jurnal yo'q bo'lsa hech
+// narsa qilmaydi (PowerShell ishga tushmaydi, holat `off`).
+//
+// Unblock yiqilsa jurnal qoladi, holat `failed` (sabab Reason'da). Start'dan keyin ham Pending true bo'lsa va
+// bloklash yo'q bo'lsa, chaqiruvchi tozalanmaguncha Retry'ni RetryInterval oralig'ida chaqiradi (Pending'ga qarang).
+func (g *Guard) Start(ctx context.Context) { g.Retry(ctx) }
+
+// Probe xizmat ishga tushganda (Start'dan keyin, bloklash yo'q paytida) bir marta chaqiriladi: Keyboard Filter yo'q
+// nashrda (Pro, Home) holat birinchi bloklashni kutmasdan darhol `unavailable` bo'ladi. Aniq javob keshlanadi
+// (keyingi Set backend'dan qayta so'ramaydi). Probe xatosi (masalan, boot'da WMI hali tayyor emas) bloklash yo'q
+// paytida `failed` demaydi, chunki hech narsa to'silmagan: holat o'zgarmaydi, keyingi Set(true) qayta so'raydi.
+// Joriy bloklash yoki qoldiq jurnal bo'lsa hech narsa qilmaydi (bu Set/Retry ishi).
+func (g *Guard) Probe() {
+	g.opMu.Lock()
+	defer g.opMu.Unlock()
+	if g.blocked || g.journalPending() {
+		return
+	}
+	if state, reason := g.probe(); state == StateUnavailable {
+		g.set(state, reason)
+	}
+}
+
+// Retry bloklash YO'Q paytida qoldiq jurnalni tozalashga urinadi: filtrni o'chiradi va jurnalni o'chiradi. Jurnal
+// yo'q bo'lsa hech narsa qilmaydi (PowerShell ishga tushmaydi). Bu jarayonda allaqachon bloklangan bo'lsa
+// (Set(true) muvaffaqiyatli bo'lgan) tegilmaydi. Bloklash BOR paytida chaqirilmaydi: u Set(true) ishi (u `failed`ni
+// qayta urinadi), bu yerda esa qisman yoqilgan filtr o'chirilib qo'yilardi.
+//
+// Qoldiq "bloklash yo'q" hukmiga tayanadi, shuning uchun nashr cheklovi aniq bo'lsa (Available `edition`: funksiya
+// yoki xizmat yo'q) filtr yoqilgan bo'lishi mumkin emas: jurnal PowerShell'siz o'chiriladi va holat `unavailable`
+// bo'ladi (aks holda Unblock har 30 s da abadiy yiqilardi). Mavjudlik so'rovi xato bersa, Unblock baribir uriniladi.
+func (g *Guard) Retry(ctx context.Context) {
+	g.opMu.Lock()
+	defer g.opMu.Unlock()
+	if g.blocked || !g.journalPending() {
+		return
+	}
+	g.unblock(ctx)
+}
+
+// Set bloklash holatini filtrga qo'llaydi va natijaviy holatni qaytaradi: `blocked`, `unavailable`, `failed` yoki
+// `off`. Takroriy chaqiruv xavfsiz: allaqachon bloklangan bo'lsa Set(true), qaytariladigan narsa yo'q bo'lsa
+// Set(false) backend'ga (PowerShell) tegmaydi. `failed` esa har chaqiruvda qayta uriniladi, shuning uchun
+// chaqiruvchi uni o'zgarishda yoki RetryInterval kabi siyrak oraliqda chaqirishi kerak (har soniya emas).
+//
+// Set faqat holat O'ZGARGANDA chaqiriladi, shuning uchun Set(false) o'zi qoldiqni tozalashni kafolatlamaydi: qoldiq
+// bloklash holati o'zgarmaganda (reboot'dan keyin ochiq) qoladi. Buning uchun Pending/Retry shartnomasi bor.
+//
+// Set(false) hech qachon Available'ni so'ramaydi (qoldiq jurnal bo'lmasa): filtr yoqilmagan bo'lsa, ochish tez va
+// PowerShell'siz.
+func (g *Guard) Set(ctx context.Context, locked bool) string {
+	g.opMu.Lock()
+	defer g.opMu.Unlock()
+	if locked {
+		return g.block(ctx)
+	}
+	return g.unblock(ctx)
+}
+
+func (g *Guard) block(ctx context.Context) string {
+	if g.blocked {
+		return g.set(StateBlocked, "")
+	}
+	if state, reason := g.probe(); state != "" {
+		return g.set(state, reason)
+	}
+	// Jurnal Block'dan oldin: Block o'rtasida (yoki undan keyin) qulasa, qoldiq topiladi. Jurnal yozilmasa
+	// bloklanmaydi: qulagan helper filtrni abadiy yoqilgan qoldirardi.
+	if err := g.writeJournal(); err != nil {
+		return g.set(StateFailed, fmt.Sprintf("jurnal yozilmadi: %v", err))
+	}
+	// Block yiqilsa ham jurnal qoladi: filtr qisman yoqilgan bo'lishi mumkin, Set(false) yoki Start uni o'chiradi.
+	if err := g.b.Block(ctx); err != nil {
+		return g.set(StateFailed, fmt.Sprintf("Keyboard Filter yoqilmadi: %v", err))
+	}
+	g.blocked = true
+	return g.set(StateBlocked, "")
+}
+
+func (g *Guard) unblock(ctx context.Context) string {
+	if !g.blocked && !g.journalPending() {
+		if g.probed && !g.available {
+			return g.set(StateUnavailable, ReasonEdition)
+		}
+		return g.set(StateOff, "")
+	}
+	// Qoldiq jurnal (bu jarayon bloklamagan), lekin bu kompyuterda filtr yo'q: yoqilgan bo'lishi mumkin emas.
+	if !g.blocked {
+		if state, _ := g.probe(); state == StateUnavailable {
+			if err := g.removeJournal(); err != nil {
+				return g.set(StateFailed, err.Error())
+			}
+			return g.set(StateUnavailable, ReasonEdition)
+		}
+	}
+	// Unblock yiqilsa ham filtr qisman o'chgan bo'lishi mumkin: "bloklangan" belgisi tushiriladi, keyingi
+	// Set(true) filtrni to'liq qayta yoqadi; jurnal esa qoldiqni eslab turadi.
+	g.blocked = false
+	if err := g.b.Unblock(ctx); err != nil {
+		return g.set(StateFailed, fmt.Sprintf("Keyboard Filter o'chirilmadi: %v", err))
+	}
+	if err := g.removeJournal(); err != nil {
+		// Filtr o'chdi, lekin jurnal hali "blocked" deydi: keyingi Start/Set(false) ortiqcha, zararsiz Unblock qiladi.
+		return g.set(StateFailed, err.Error())
+	}
+	return g.set(StateOff, "")
+}
+
+// probe Backend mavjudligini aniqlaydi. state bo'sh bo'lsa filtr mavjud. Aniq javob (mavjud yoki edition)
+// keshlanadi; probe xatosi keshlanmaydi: keyingi Set(true) qayta so'raydi (masalan, WMI hali tayyor emas).
+func (g *Guard) probe() (state, reason string) {
+	if !g.probed {
+		ok, why := g.b.Available()
+		switch {
+		case ok:
+			g.probed, g.available = true, true
+		case why == ReasonEdition:
+			g.probed, g.available = true, false
+		default:
+			if why == "" {
+				why = "Keyboard Filter mavjudligi aniqlanmadi"
+			}
+			return StateFailed, why
+		}
+	}
+	if !g.available {
+		return StateUnavailable, ReasonEdition
+	}
+	return "", ""
+}
+
+// journalPending jurnal fayli borligini bildiradi: u faqat Block'dan oldin yoziladi va faqat muvaffaqiyatli
+// Unblock'dan keyin o'chiriladi, ya'ni mavjud jurnal filtr yoqilgan bo'lishi mumkinligini bildiradi. Mazmuni
+// o'qilmaydi: fayl buzilgan yoki o'qib bo'lmaydigan bo'lsa ham "bloklash yo'q" deb o'ylamaymiz (policy.Pending kabi).
+func (g *Guard) journalPending() bool {
+	_, err := os.Stat(g.journalPath)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+// writeJournal jurnalni atomik yozadi: shu katalogdagi vaqtinchalik faylga yozib, fsync qilib, nishon ustiga rename
+// qiladi (yarim yozilgan jurnal hech qachon ko'rinmaydi).
+func (g *Guard) writeJournal() (err error) {
+	data, err := json.Marshal(journal{State: journalBlocked})
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(g.journalPath), ".cad-*.tmp")
+	if err != nil {
+		return fmt.Errorf("cad-journal.json vaqtinchalik fayli ochilmadi: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			tmp.Close()
+			os.Remove(tmp.Name())
+		}
+	}()
+	if _, err = tmp.Write(data); err != nil {
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(tmp.Name(), g.journalPath); err != nil {
+		return fmt.Errorf("cad-journal.json almashtirilmadi: %w", err)
+	}
+	return nil
+}
+
+func (g *Guard) removeJournal() error {
+	if err := os.Remove(g.journalPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("cad-journal.json o'chirilmadi: %w", err)
+	}
+	return nil
+}

@@ -118,7 +118,13 @@ export class MeshBindingService {
     if (result.status === 'node_not_found') throw new ApiError('conflict', 'Mesh node not found in this site');
     const agent = result.snapshot.agentOnline ? 'online' : 'offline';
     const [caps] = await this.db.select().from(deviceCapabilities).where(eq(deviceCapabilities.deviceId, device.id));
-    const view = this.devices.present(device, (caps?.report as CapabilityReport | undefined) ?? null, agent);
+    const locked = await this.devices.lockedDevices(this.db, [device.id]);
+    const view = this.devices.present(
+      device,
+      (caps?.report as CapabilityReport | undefined) ?? null,
+      agent,
+      locked.has(device.id),
+    );
     if (existing) return view;
 
     try {

@@ -100,6 +100,47 @@ jobs:
       # Panel build + headless Chromium (TLS tekshiruvi SPKI pin bilan, ekran kerak emas).
       - run: pnpm test:e2e:web
 
+  helper:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/helper
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/helper/go.mod
+          # Kesh kaliti go.sum (tashqi bog'liqlik: golang.org/x/sys).
+          cache-dependency-path: native/helper/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      # Windows build-tag'li kod Linux'da ham kompilyatsiya qilinishi shart (haqiqiy testlar helper-windows jobida).
+      - run: GOOS=windows GOARCH=amd64 go vet ./...
+      - name: Cross-build for windows/amd64 and windows/arm64
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=windows GOARCH=$arch go build -trimpath -o /dev/null ./cmd/netschool-helper
+          done
+
+  helper-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: native/helper
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/helper/go.mod
+          cache-dependency-path: native/helper/go.sum
+      # Windows build-tag'li testlar (registry, xizmat, ACL) faqat shu yerda ishlaydi.
+      - run: go vet ./...
+      - run: go test ./...
+
   compose-smoke:
     runs-on: ubuntu-latest
     defaults:

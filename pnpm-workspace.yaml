@@ -5,3 +5,9 @@ packages:
 allowBuilds:
   esbuild: true
   electron: true
+  # koffi'ning install skripti manbadan yig'adi; kerak emas — tayyor binary @koromix/koffi-<os>-<arch> paketlarida.
+  koffi: false
+# Companion'ning Windows paketi (pack-win) koffi'ning win32 native binary'sini oladi: Mac/Linux'da ham o'rnatiladi.
+supportedArchitectures:
+  os: [current, win32]
+  cpu: [current, x64, arm64]

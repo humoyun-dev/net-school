@@ -1,0 +1,35 @@
+{
+  "_comment": "TEST-ONLY kalit: bu private kalit faqat imzo vektorlari uchun yaratilgan, hech qanday tizimni himoya qilmaydi va hech qayerda ishlatilmaydi. Ed25519 deterministik: vektorlarni apps/companion/test/signature-fixture.test.ts qayta hisoblab tekshiradi, Go tomoni native/helper/internal/hub/signer_test.go o'qiydi.",
+  "vectors": [
+    {
+      "name": "get-empty-body",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIE5ldFNjaDBvbC10ZXN0LXZlY3Rvci1rZXktRE8tTk9U\n-----END PRIVATE KEY-----\n",
+      "deviceId": "7d1f2a40-3c55-4b8e-9a61-0f2e8c4d5b6a",
+      "method": "GET",
+      "pathWithQuery": "/api/v1/device/lock",
+      "timestamp": 1800000000000,
+      "bodyBase64": "",
+      "expectedSignature": "nOWe8SgYLife8tjTpEl985DwGSFz-b5tTuwbM1PddLFYVAosXrB0B4gyM4FOnRSxXjC54Zqe8yw_ckHADiPhDg"
+    },
+    {
+      "name": "put-json-body",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIE5ldFNjaDBvbC10ZXN0LXZlY3Rvci1rZXktRE8tTk9U\n-----END PRIVATE KEY-----\n",
+      "deviceId": "7d1f2a40-3c55-4b8e-9a61-0f2e8c4d5b6a",
+      "method": "PUT",
+      "pathWithQuery": "/api/v1/device/capabilities",
+      "timestamp": 1800000005123,
+      "bodyBase64": "eyJsb2NrIjoic3VwcG9ydGVkIiwibm90ZSI6Im/igJhxdXZjaGkg0LbQsNC9In0=",
+      "expectedSignature": "i4HI5jYtYYnqDCx1LYf9JbvT7UMm3TAVxc3ABI4lcNDZAwXPzpGHOqDxgIo8ag8_LqhyqHyq7_tXwHtqAVsvDA"
+    },
+    {
+      "name": "post-path-with-query",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIE5ldFNjaDBvbC10ZXN0LXZlY3Rvci1rZXktRE8tTk9U\n-----END PRIVATE KEY-----\n",
+      "deviceId": "7d1f2a40-3c55-4b8e-9a61-0f2e8c4d5b6a",
+      "method": "POST",
+      "pathWithQuery": "/api/v1/device/commands/6b1e0c52-9d2a-4f0e-8a77-3c5d1e9f4a20/receipt?wait=25&x=a%20b",
+      "timestamp": 1800000009999,
+      "bodyBase64": "eyJzdGF0dXMiOiJkb25lIn0=",
+      "expectedSignature": "0cb-m7oLrKQgeiwI5XtPGOEFxZq2jonObZzS-FhYu7pDyeX2KPAYutsw3IIAsAiqCJwS8cH9zwmQFiouE7CfBA"
+    }
+  ]
+}

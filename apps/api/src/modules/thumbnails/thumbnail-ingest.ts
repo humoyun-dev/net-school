@@ -72,7 +72,7 @@ export class ThumbnailIngest implements OnApplicationBootstrap, OnModuleDestroy 
     }
     let device: Awaited<ReturnType<DeviceVerifier['verify']>>;
     try {
-      device = await this.verifier.verify('GET', url, req.headers, Buffer.alloc(0));
+      device = await this.verifier.verify('GET', url, req.headers, Buffer.alloc(0), 'companion');
     } catch (err) {
       if (err instanceof ApiError && err.code === 'unauthenticated') {
         refuse(socket, 401, 'Unauthorized');

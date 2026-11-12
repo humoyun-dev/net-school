@@ -1,0 +1,97 @@
+# ADR 0014: Windows OS helper (SYSTEM xizmati) — arxitektura va cheklovlar
+
+Sana: 2026-11-11 · Holat: qabul qilingan (qo'lda qabul sinovi kutilmoqda) · Kontekst: P2d1 · Reja: [p2d1-windows-helper](../superpowers/plans/2026-11-09-p2d1-windows-helper.md) · Oldingi: [ADR 0013](0013-windows-hard-lock-results.md) · Qabul sinovi: [runbook va natija jadvali](../poc/results/windows-x64-2026-11-11-helper-manual.md)
+
+## Kontekst
+
+ADR 0013 ko'rsatdiki, o'quvchi huquqidagi Companion kuchli bloklashni ta'minlay olmaydi: `HKCU\...\Policies`ga faqat admin/SYSTEM yozadi, Ctrl+Alt+Del foydalanuvchi rejimidagi hook bilan to'silmaydi, o'quvchi Companion'ni Vazifalar menejeridan yopadi. Egasining talablari: bloklashda Ctrl+Alt+Del umuman ishlamasin, bloklashda dastur ochilmasin, o'quvchi kompyuteridagi agent SYSTEM darajasida ishlasin va yopib bo'lmasin. P2d1 Go'dagi `native/helper` (`netschool-helper.exe`) ni qurdi. Bu ADR uning qarorlarini va ma'lum cheklovlarini qayd etadi.
+
+## Qarorlar
+
+### 1. Arxitektura
+
+- **Xizmat.** `NetSchoolHelper` (`NetSchool Helper`), `Automatic`, SYSTEM, session 0. Xizmat DACL: oddiy (interaktiv yoki xizmat) foydalanuvchi faqat holatni ko'radi, to'xtata/o'chira olmaydi (`D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)`). Qulasa qayta ishga tushadi: 1 s, 1 s, 5 s (hisoblagich 86400 s da nollanadi).
+- **Guard.** Xizmat o'quvchi sessiyasida SYSTEM tokeni bilan oynasiz `guard` jarayonini ishga tushiradi. Unda faqat low-level klaviatura hook'i bor. O'quvchi SYSTEM jarayonini yopa olmaydi. Xizmat va guard faqat SYSTEM kira oladigan nomli pipe (`\\.\pipe\netschool-helper-guard`, `D:P(A;;GA;;;SY)`) orqali gaplashadi. Pipe nomi xizmat ishlab turganda hech qachon bo'sh qolmaydi (begona jarayon uni egallay olmaydi), ikki tomon ham narigi tomon SYSTEM ekanini tekshiradi. Qolgan xavf (pipe-squat): xizmat o'quvchi tizimda bo'lgan paytda qayta ishga tushsa (qulash, admin restart), o'quvchi `\\.\pipe\netschool-helper-guard`ni birinchi bo'lib yaratishi mumkin. Shunda xizmatning `Listen`i yiqiladi va hook `failed` bo'ladi (panelda `soft` + `hook_failed`, ya'ni ko'rinadi). Reboot'da tozalanadi.
+- **Companion va guard jarayonlari.** Ikkalasi o'quvchi sessiyasida himoyalangan xavfsizlik deskriptori bilan yaratiladi (jarayon va birinchi ip): SYSTEM va Administrators to'liq, o'quvchi va `OWNER RIGHTS` (S-1-3-4) faqat `SYNCHRONIZE`, `READ_CONTROL`, `*_QUERY_LIMITED_INFORMATION`. O'quvchi ularni to'xtata, muzlata, xotirasiga yoza, ota-ona qilib jarayon ocha yoki DACL'ni qayta yoza olmaydi.
+- **Companion muhiti.** `CreateEnvironmentBlock` o'quvchi tokeni bilan `HKCU\Environment`ni ham qo'shadi (`setx` bilan yoziladi). Helper blokni tozalaydi: `ELECTRON_*`, `NODE_*`, `NETSCHOOL_*`, `npm_config_*`, `CHROME_*`, `OPENSSL_*`, `SSLKEYLOGFILE`, `__COMPAT_LAYER` tashlanadi; `ProgramData`, `ALLUSERSPROFILE`, `SystemRoot`, `windir`, `ProgramFiles`, `ProgramW6432`, `CommonProgramFiles`, `CommonProgramW6432` Known Folders'dan, `Path`, `PATHEXT`, `ComSpec` tizim blokidan majburan qo'yiladi. Aks holda `ELECTRON_RUN_AS_NODE=1` Companion'ni overlay'siz Node'ga, `NODE_OPTIONS=--require` kod yuklashga, `NETSCHOOL_COMPANION_DIR`/`ProgramData` soxta enrollment'ga olib borardi. Qo'shimcha himoya: paketdagi Companion exe'sida Electron fuse'lari `EnableNodeOptionsEnvironmentVariable` va `EnableNodeCliInspectArguments` o'chiq (`RunAsNode` qoladi, `enroll.cmd` uni ishlatadi); oddiy (test bo'lmagan) Companion `NETSCHOOL_COMPANION_DIR`ni e'tiborsiz qoldiradi. Tozalangan muhit va himoyalangan jarayon SD'si faqat Companion (`session.CompanionLaunch`, `LaunchOptions` nol qiymati) va guard uchun; ochishdan keyin qayta ishga tushirilgan explorer (`session.ShellLaunch`) oddiy foydalanuvchi jarayoni: standart SD va filtrsiz `CreateEnvironmentBlock` (aks holda explorer'dan ochilgan har dastur logoff'gacha tozalangan muhit bilan ishlardi, o'quvchi esa o'z shell'ini boshqara olmasdi).
+- **Helper'ning o'z kaliti.** Helper hub'dan bloklash holatini Companion orqali emas, o'z Ed25519 kaliti bilan oladi (`x-ns-signer: helper`, imzo formati Companion'niki bilan bir xil). Hub imzolovchini yo'l bo'yicha tekshiradi: helper kaliti faqat `/api/v1/device/helper/*` yo'llarida, Companion kaliti faqat Companion yo'llarida o'tadi. Replay himoyasi uchun timestamp hisoblagichlari alohida (`last_signed_ts`, `helper_last_signed_ts`), shuning uchun ikki mijoz bir-birini bloklamaydi.
+- **Claim.** Enrollment claim'ida ixtiyoriy `helperPublicKey` + `helperProof` (helper kaliti bilan imzolangan `NSCLAIM1\n<token>\n<helperPublicKey>`). Ikkalasi birga keladi yoki umuman kelmaydi.
+- **Helper holati.** Helper komponentlar holatini `PUT /api/v1/device/helper/status` bilan yuboradi. Hub faqat oxirgisini va qabul vaqtini saqlaydi (`devices.helper_status`, `helper_status_at`), har hisobotga audit yozmaydi.
+- **Panel darajasi.** Hub `classroom.overlay` darajasini helper holatidan hisoblaydi (saqlangan Companion hisoboti o'zgarmaydi):
+  - helper hisoboti ≤ 90 s eski bo'lsa, daraja hub'ning o'z bloklash holatiga bog'liq (faol dars overlay'i yopiqmi — helper `lock-state` bilan bir xil manba; komponent holatlaridan taxmin qilinmaydi):
+    - bloklash yo'q: hech bir komponent `failed` bo'lmasa `hard` (bloklashsiz komponentlar `off` bo'ladi); biri `failed` bo'lsa `soft` + o'sha komponentning sababi (`hook_failed` | `policy_failed` | `process_guard_failed`);
+    - bloklangan: `hook`, `policy`, `processGuard` uchalasi `active` va `companion` `running` bo'lsa `hard`; aks holda `soft` + `active` bo'lmagan birinchi komponentning (hook → policy → processGuard tartibida) `*_failed` sababi, uchalasi `active` bo'lsa `companion_down` (ekranni overlay yopadi, uni Companion ko'rsatadi);
+  - helper hisoboti yo'q, eski yoki yaroqsiz (saqlangan holat `helperStatusSchema`dan o'tmasa) bo'lsa: Companion hisoboti, lekin hech qachon `hard` emas (`hard` → `soft` + `helper_missing`). Companion yolg'iz o'zi `soft` (2-band).
+- **`classroom.sas_block`.** Yangi capability, faqat hub hisoblaydi (Companion yuborgani e'tiborsiz qoldiriladi), faqat Windows qurilmalarida. Hub qo'shadigan kalit hisobotni `MAX_CAPABILITIES` (64) dan oshirmasligi uchun Companion'ning `classroom.*` bo'lmagan kalitlari tartiblangan ro'yxat oxiridan tashlanadi (joy bo'lmasa `sas_block` qo'shilmaydi): aks holda panelning `deviceSchema`si butun xona ro'yxatini rad etardi. Qiymatlar: `cad=blocked|off` → `available`; `unavailable` → `unsupported` (`reason: edition`); `failed` → `unsupported` (`reason: failed`); helper hisoboti yo'q/eski → `unsupported` (`reason: helper_missing`). Shu uchun capability nomlarida segment ichidagi `_` ruxsat etildi (`packages/contracts`).
+
+### 2. Injected tugmalar (avvalgi qoidadan chetlanish)
+
+P2d0'da (ADR 0013) "injected hodisalar to'silmaydi" qoidasi bor edi. P2d1'da qoida: injected tugma faqat `LLKHF_LOWER_IL_INJECTED` bitisiz bo'lsa o'tadi. MeshAgent (SYSTEM) orqali o'qituvchining masofaviy boshqaruvi o'tadi; o'quvchining o'rta darajadagi (medium IL) jarayonidan `SendInput(Win)` endi SYSTEM guard'da to'siladi. Companion'ning o'z hook'i o'rta darajada ishlaydi va o'quvchi `SendInput`ini MeshAgent kiritishidan ajrata olmaydi. Shuning uchun Companion yolg'iz o'zi har doim `soft`.
+
+### 3. Companion kuzatuvchisi (supervisor)
+
+Helper Companion'ni o'quvchi tokeni bilan, guard'ni SYSTEM tokeni bilan ishga tushiradi va kuzatadi. Jarayon `StartupCrashWindow` (5 s) dan kam yashasa, bu "ishga tushishda yiqilish": kutish 1 s, 2 s, 4 s … 30 s gacha oshadi. Aks holda 1 s dan keyin qayta ishga tushadi. Bu rejadagi "≥ 60 s yashasa nollanadi" dan chetlanish: qulagan Companion ≤ 3 s da qaytishi kerak.
+
+Ekranni overlay yopadi, uni esa Companion ko'rsatadi: Companion'siz bloklash kuchli emas (klaviatura, siyosat va process guard ishlaydi, lekin ekran ochiq). Avvalgi "kuchli bloklash Companion'ga bog'liq emas" degan fikr noto'g'ri edi: oddiy PowerShell sikli (`while(1){Stop-Process -Name 'NetSchool Companion' -Force}`) Companion'ni tushirib turardi, panel esa `hard` derdi. Endi:
+
+- Companion jarayoni o'quvchi to'xtata olmaydigan DACL bilan yaratiladi (1-band), shuning uchun bunday sikl "Отказано в доступе" oladi;
+- hub bloklangan holatda `hard` faqat helper `companion=running` desa (aks holda `companion_down`).
+
+Qolgan xavf: Companion o'zi yaratadigan jarayon va iplarga (Electron renderer, GPU, ish iplari) token'ning standart DACL'i qo'llanadi, ularni o'quvchi to'xtata yoki muzlata oladi. Overlay renderer'i o'lsa Companion oynani qayta yuklaydi (`render-process-gone`), oyna esa ekranni yopib turaveradi. Ish iplari muzlatilsa hub aloqasi to'xtashi va overlay lease (120 s) bilan yopilishi mumkin, helper esa bloklashni ushlab turadi. Token'ning `TokenDefaultDacl`ini cheklash keyingi ish (Windows'da sinov kerak: Chromium nomli obyektlari).
+
+### 4. Process guard
+
+Bloklash boshlanganda o'quvchi sessiyasidagi jarayonlar baseline sifatida olinadi. Har 250 ms:
+
+- boshqa sessiya, PID 0/4 → tegilmaydi;
+- `%ProgramFiles%\NetSchool\` ichidagi exe → faqat ota zanjiri (faqat NetSchool exe'lari orqali, ≤ 2 bo'g'in: xizmat → Companion/guard → Electron bolasi) helper xizmatining o'ziga yetsa yashaydi, aks holda baseline'da bo'lsa ham o'ldiriladi (o'quvchi o'zi ochgan Companion exe'si `RunAsNode` bilan skript ishga tushirgich bo'lib qolmasin);
+- `%ProgramFiles%\Mesh Agent\` ichidagi exe → faqat ota zanjiri (faqat Mesh Agent exe'lari orqali) session 0'dagi Mesh Agent exe'siga (MeshAgent xizmati) yetsa yashaydi; boshqa session 0 jarayoni (svchost, Task Scheduler) hisobga olinmaydi;
+- ruxsat ro'yxatidagi tizim jarayonlari (`System32` dagi `conhost`, `dwm`, `csrss`, `fontdrvhost`, `ctfmon`, `LogonUI`, `consent`, `WerFault`, `SystemSettingsBroker`; `%SystemRoot%\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\TextInputHost.exe`) → tegilmaydi;
+- `System32\taskmgr.exe` → baseline'da bo'lsa ham o'ldiriladi;
+- baseline'dagi jarayon → yashaydi (o'quvchining ochiq ishi);
+- baseline'da bo'lmagan jarayon faqat **bir xil dastur avlodi** bo'lsa yashaydi: ota zanjiri tirik baseline ajdodga yetadi va zanjirdagi hamma jarayon aynan shu exe (masalan, brauzerning yangi tablari). Rejadagi "baseline avlodi, explorer/taskmgr/sihost/RuntimeBroker'dan keyin emas" qoidasi shu bilan almashtirildi;
+- qolgani o'ldiriladi. Toolhelp ota PID'i eskirgan (PID qayta berilgan yoki snapshot paytida yaratilgan) jarayon bir skan o'tkazib yuboriladi.
+
+**Kirish paytidagi bloklash.** Bloklash o'quvchi kirishidan oldin boshlangan bo'lsa (reboot dars paytida, kech kirish), yangi sessiyada baseline sessiyada `%SystemRoot%\explorer.exe` paydo bo'lguncha yoki sessiya ko'ringanidan 60 s o'tguncha olinmaydi (shu paytgacha process guard hech narsani o'ldirmaydi, `off`); klaviatura guard'i, siyosat va CAD darhol yoqiladi. Explorer tekshiruvi xato bersa kutilmaydi, baseline darhol olinadi. Shu oraliqda ochilgan userinit, explorer, sihost baseline'ga kiradi. Baseline'dan keyin shell/UWP xostlari uchun alohida istisno yo'q: session 0 ota (Task Scheduler, COM surrogate) hech narsani oqlamaydi, chunki o'quvchi o'z vazifasi yoki HKCU COM sinfi bilan ham ularni ochtira oladi. Qolgan xavf: shu oraliqda ishga tushgan Run/Startup dasturlari ham baseline'ga kiradi, ya'ni o'quvchi bloklashdan oldin kirgandagidek kuchga ega bo'ladi.
+
+Ma'lum qoldiqlar: foydalanuvchi yoza oladigan joydagi baseline exe o'zini qayta ishga tushirib yashay oladi; `SysWOW64\Taskmgr.exe`, Process Explorer va baseline PowerShell yashaydi (Ctrl+Shift+Esc hook'da to'siladi, lekin oldindan ochilgani qoladi); 8.3 qisqa yo'llar normallashtirilmaydi; birinchi `Start` yiqilsa baseline 30 s dagi qayta urinishda olinadi. Qaysi shell/UWP jarayonlari (RuntimeBroker, SearchHost, TextInputHost, StartMenuExperienceHost, dllhost) o'ldirilishi qabul sinovida yoziladi, kerak bo'lsa ruxsat ro'yxati kengaytiriladi.
+
+### 5. Ctrl+Alt+Del (CAD)
+
+Keyboard Filter (`WEKF_PredefinedKey` `Ctrl+Alt+Del`, `Win+L`) faqat Education, Enterprise va IoT Enterprise nashrlarida. Funksiya o'chiq ("Disabled") bo'lsa ham `edition` deb hisoblanadi. Bloklashdan oldin jurnal yoziladi. Bloklash yo'q paytda jurnalda qolgan filtr har 30 s qayta ochishga uriniladi. Pro/Home'da Ctrl+Alt+Del ekrani ochiladi, lekin unda siyosat tufayli faqat «Отмена» qoladi. Egasining ochiq qarori o'zgarmagan: (a) laboratoriyalarni Windows Education'ga o'tkazish yoki (b) attestatsiya imzoli kernel klaviatura filtr drayveri (alohida reja P2d2).
+
+### 6. Ma'lumot va sozlama
+
+- Helper faqat `%ProgramData%\NetSchool\helper` ni ishlatadi: ACL faqat SYSTEM va Administrators (o'qish ham), meros olinmaydi (protected DACL), egasi `BA`. Fayllar: `helper.key`, `device.json`, `hub-ca.pem`, `lock.json`, `policy-journal.json`, `cad-journal.json`.
+- ACL handle orqali qo'yiladi (reparse point va hardlink kuzatilmaydi). Oldindan mavjud ishonchsiz katalog (masalan, o'quvchi yaratgan `%ProgramData%\NetSchool`, Companion enrollment'i bilan birga) o'chirib qayta yaratiladi.
+- Katalog tekshiruvdan o'tmasa helper hub'ga ulanmaydi (bloklash yo'q, ochiq) va har 60 s qayta tekshiradi. Ishonchsiz sozlama umuman o'qilmaydi.
+- Qolgan xavf: o'quvchi faylga handle ushlab tursa, himoyalashni faqat u tizimda bo'lgan paytda to'sa oladi. Xizmat boot paytida (o'quvchi kirishidan oldin) himoyalaydi.
+
+### 7. Enroll va migratsiya
+
+- `enroll.cmd`: Companion `enroll` helper kalitini `netschool-helper helper-key` bilan helper katalogida yaratadi (token stdin orqali), claim'dan keyin `set-hub` bilan hub manzili va CA'ni beradi (CA stdin orqali), so'ng `install`. Enroll helper kalitini hech qachon o'zi yozmaydi.
+- P2d1'dan oldin ro'yxatdan o'tgan kompyuterlar `enroll.cmd --force` va yangi token bilan qayta o'tkaziladi (helper kaliti yangilanadi). Hub'da eski qurilma yozuvi qoladi, uni admin retire qiladi.
+- **P0c'dan yangilash enrollment'ni o'chiradi.** P0c paketi `%ProgramData%\NetSchool`ni himoyalanmagan (meros) DACL bilan yaratgan. Helper uni ishonchsiz deb hisoblaydi va `helper-key` (claim'dan oldin) yoki `install` paytida butunlay o'chirib qayta yaratadi, `companion\device.json`/`device.key` ham o'chadi. Xavfsizlik uchun bu o'zgarmaydi. `helper-key`, `install` va `enroll` buni aniq ogohlantirish bilan chiqaradi (`helper-key` stdout JSON'ida `dataRootReplaced`). Demak P0c kompyuteri faqat yangi token bilan `enroll.cmd --force` orqali yangilanadi: `install.cmd` yolg'iz Companion'ni ro'yxatdan o'tmagan holda qoldiradi.
+- `set-hub`dan keyin xizmatni qayta ishga tushirish kerak (`install` buni qiladi).
+- `uninstall.cmd` faqat paket katalogidan ishga tushiriladi (o'rnatilgan nusxa o'zini o'chira olmaydi).
+
+### 8. Hub API
+
+Claim xatolari: helper kaliti yoki proof noto'g'ri → `400 validation_failed`; audit sabablari `invalid_helper_key`, `invalid_helper_proof`. Boshqa qurilmada ro'yxatdan o'tgan helper kaliti → `409`.
+
+### 9. Release sharti
+
+O'zgarmagan: qo'lda qabul sinovi ([runbook](../poc/results/windows-x64-2026-11-11-helper-manual.md)) standart (admin emas) o'quvchi hisobida o'tmaguncha helper release qilinmaydi va matrix'da hech narsa `passed` deb belgilanmaydi.
+
+## Oqibatlar
+
+- Panel "kuchli" faqat helper buni yaqinda (≤ 90 s) tasdiqlaganda ko'rsatadi. Helper o'chsa yoki hub'ga yetmasa, daraja 90 s ichida `soft`ga tushadi.
+- Companion overlay va UI bo'lib qoladi. Bloklashning majburlovchi qismi o'quvchi huquqidan tashqarida.
+- Pro/Home'da Ctrl+Alt+Del ekrani hali ochiladi (`classroom.sas_block: unsupported, edition`).
+
+## Ochiq qolganlar
+
+- Qo'lda qabul sinovi (Task 12 Step 2) — egasi o'tkazadi.
+- Ctrl+Alt+Del: Education yoki P2d2 drayveri (egasi qarori).
+- `CreateProcessAsUser` 1314 bilan yiqilsa `SeAssignPrimaryTokenPrivilege`/`SeIncreaseQuotaPrivilege` yoqish kerak bo'ladi (sinovda tekshiriladi).
+- Companion ↔ helper buyruq kanali, Companion kalitini helper'ga ko'chirish, imzolangan MSI (P2e), macOS/Linux helper'lari — bu rejaga kirmaydi.

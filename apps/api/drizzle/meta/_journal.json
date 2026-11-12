@@ -92,6 +92,13 @@
       "when": 1793679696355,
       "tag": "0012_power_forced",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794381585500,
+      "tag": "0013_device_helper",
+      "breakpoints": true
     }
   ]
 }

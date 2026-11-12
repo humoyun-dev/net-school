@@ -43,8 +43,16 @@ const configSchema = z.strictObject({
   enrolledAt: z.iso.datetime({ offset: true }),
 });
 
-export function machineDir(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
-  const override = env.NETSCHOOL_COMPANION_DIR;
+// `NETSCHOOL_COMPANION_DIR` faqat allowOverride bilan: e2e test build'i va administrator ishga tushiradigan `enroll`
+// (uning muhiti adminniki). Oddiy Companion uni e'tiborsiz qoldiradi: o'quvchi `setx` bilan foydalanuvchi muhitiga
+// yozib, Companion'ni soxta enrollment'ga yo'naltira olardi. Windows'da `ProgramData`ni helper Known Folder'dan
+// majburan qo'yadi (native/helper/internal/session/env.go), shuning uchun u muhitdan olinadi.
+export function machineDir(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  opts: { allowOverride?: boolean } = {},
+): string {
+  const override = opts.allowOverride ? env.NETSCHOOL_COMPANION_DIR : undefined;
   if (override) return override;
   if (platform === 'win32') {
     return win32.join(env.ProgramData ?? env.PROGRAMDATA ?? 'C:\\ProgramData', 'NetSchool', 'companion');

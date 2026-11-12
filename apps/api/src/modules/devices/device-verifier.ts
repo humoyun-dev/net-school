@@ -17,13 +17,30 @@ export interface AuthenticatedDevice {
   siteId: string;
 }
 
+// Imzolovchi: Companion (qurilma kaliti) yoki OS helper (alohida helper kaliti). Har birining o'z replay hisoblagichi bor.
+export type DeviceSigner = 'companion' | 'helper';
+
 function header(headers: IncomingHttpHeaders, name: string): string | undefined {
   const value = headers[name];
   return typeof value === 'string' ? value : undefined;
 }
 
+function helperKeyDer(stored: string | null): Buffer | null {
+  return stored === null ? null : Buffer.from(stored, 'base64url');
+}
+
+// `x-ns-signer` sarlavhasi imzo kiritmasiga kirmaydi, faqat qaysi kalit bilan tekshirilishini bildiradi:
+// yo'q yoki 'companion' — Companion, 'helper' — OS helper. Boshqa har qanday qiymat noma'lum (null).
+function claimedSigner(headers: IncomingHttpHeaders): DeviceSigner | null {
+  const value = header(headers, 'x-ns-signer');
+  if (value === undefined || value === 'companion') return 'companion';
+  return value === 'helper' ? 'helper' : null;
+}
+
 // Qurilma imzosi qoidasi (ADR 0005): HTTP guard va WS upgrade bitta joydan o'tadi.
 // Ed25519 imzo + ±30 s oyna + monoton timestamp (replay himoyasi). Har xato — bir xil 'unauthenticated'.
+// Marshrut qaysi imzolovchini talab qilishini `signer` aytadi; sarlavhadagi imzolovchi unga teng bo'lishi shart,
+// shuning uchun Companion imzosi helper yo'lida va aksincha o'tmaydi.
 @Injectable()
 export class DeviceVerifier {
   constructor(
@@ -36,7 +53,9 @@ export class DeviceVerifier {
     pathWithQuery: string,
     headers: IncomingHttpHeaders,
     rawBody: Buffer,
+    signer: DeviceSigner,
   ): Promise<AuthenticatedDevice> {
+    if (claimedSigner(headers) !== signer) throw new ApiError('unauthenticated');
     const deviceId = header(headers, 'x-ns-device-id');
     const timestamp = header(headers, 'x-ns-timestamp');
     const signature = header(headers, 'x-ns-signature');
@@ -51,21 +70,20 @@ export class DeviceVerifier {
       .from(devices)
       .where(and(eq(devices.id, deviceId), isNull(devices.retiredAt)));
     if (!device) throw new ApiError('unauthenticated');
-    const key = createPublicKey({ key: device.publicKey, format: 'der', type: 'spki' });
+    // Helper kaliti bo'lmagan qurilmada helper imzosi qabul qilinmaydi.
+    const keyDer = signer === 'helper' ? helperKeyDer(device.helperPublicKey) : device.publicKey;
+    if (!keyDer) throw new ApiError('unauthenticated');
+    const key = createPublicKey({ key: keyDer, format: 'der', type: 'spki' });
     const input = deviceSigningInput(method, pathWithQuery, timestamp, rawBody);
     if (!verifySignature(key, input, signature)) throw new ApiError('unauthenticated');
 
     // Imzo to'g'ri bo'lgandan keyingina holat o'zgaradi; parallel replay'dan faqat bittasi o'tadi.
+    // Hisoblagich imzolovchiga xos: Companion va helper timestamp'lari bir-biriga xalaqit bermaydi.
+    const counter = signer === 'helper' ? devices.helperLastSignedTs : devices.lastSignedTs;
     const accepted = await this.db
       .update(devices)
-      .set({ lastSignedTs: ts })
-      .where(
-        and(
-          eq(devices.id, device.id),
-          isNull(devices.retiredAt),
-          or(isNull(devices.lastSignedTs), lt(devices.lastSignedTs, ts)),
-        ),
-      )
+      .set(signer === 'helper' ? { helperLastSignedTs: ts } : { lastSignedTs: ts })
+      .where(and(eq(devices.id, device.id), isNull(devices.retiredAt), or(isNull(counter), lt(counter, ts))))
       .returning({ id: devices.id });
     if (accepted.length !== 1) throw new ApiError('unauthenticated');
 

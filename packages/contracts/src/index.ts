@@ -4,6 +4,7 @@ export * from './api/v1/commands.ts';
 export * from './api/v1/devices.ts';
 export * from './api/v1/errors.ts';
 export * from './api/v1/help-requests.ts';
+export * from './api/v1/helper.ts';
 export * from './api/v1/lessons.ts';
 export * from './api/v1/organization.ts';
 export * from './api/v1/power.ts';

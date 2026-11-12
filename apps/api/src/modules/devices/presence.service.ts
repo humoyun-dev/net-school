@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { CapabilityReport } from '@netschool/contracts';
+import type { CapabilityReport, HelperLockState, HelperStatus } from '@netschool/contracts';
 import { HEARTBEAT_INTERVAL_MS, THUMBNAIL_INTERVAL_MS, THUMBNAIL_MAX_WIDTH } from '@netschool/domain';
 import { and, eq, isNull } from 'drizzle-orm';
 import { canonical } from '../../common/canonical-json.ts';
@@ -33,6 +33,41 @@ export class PresenceService {
     @Inject(HelpRequestsService) private readonly help: HelpRequestsService,
   ) {}
 
+  // Qurilmaning faol darsi va uning overlay holati (yo'q bo'lsa null). Heartbeat va helper lock-state bitta so'rovdan foydalanadi.
+  async #activeLock(deviceId: string): Promise<(HelperLockState & { lessonId: string }) | null> {
+    const [joined] = await this.db
+      .select({ lessonId: lessonDevices.lessonId, locked: lessonDevices.overlayLocked, seq: lessonDevices.overlaySeq })
+      .from(lessonDevices)
+      .innerJoin(lessons, eq(lessons.id, lessonDevices.lessonId))
+      .where(and(eq(lessonDevices.deviceId, deviceId), isNull(lessonDevices.releasedAt), eq(lessons.status, 'active')));
+    if (!joined) return null;
+    return {
+      lessonId: joined.lessonId,
+      locked: joined.locked,
+      sequence: joined.seq === null ? null : String(joined.seq),
+      // Qurilma lease'ni monoton taymer bilan hisoblaydi; absolyut vaqt faqat ma'lumot uchun (spec §10).
+      leaseSeconds: OVERLAY_LEASE_MS / 1000,
+    };
+  }
+
+  // OS helper uchun bloklash holati: faol dars overlay'ining ko'zgusi, dars yo'q bo'lsa ochiq. Holat yaratmaydi va presence'ni yangilamaydi.
+  async lockStateOf(device: AuthenticatedDevice): Promise<HelperLockState> {
+    const active = await this.#activeLock(device.id);
+    return {
+      locked: active?.locked ?? false,
+      sequence: active?.sequence ?? null,
+      leaseSeconds: OVERLAY_LEASE_MS / 1000,
+    };
+  }
+
+  // Helper holati faqat oxirgisi saqlanadi (qabul vaqti bilan); har hisobotga audit yozilmaydi.
+  async reportHelperStatus(device: AuthenticatedDevice, status: HelperStatus): Promise<void> {
+    await this.db
+      .update(devices)
+      .set({ helperStatus: status, helperStatusAt: new Date(this.now()) })
+      .where(and(eq(devices.id, device.id), isNull(devices.retiredAt)));
+  }
+
   // Javob qurilmaning faol darsini va overlay lease'ini beradi: lease yangilanmasa overlay o'zi tushadi (spec §10).
   async heartbeat(device: AuthenticatedDevice) {
     const now = this.now();
@@ -40,13 +75,7 @@ export class PresenceService {
       .update(devices)
       .set({ lastHeartbeatAt: new Date(now) })
       .where(eq(devices.id, device.id));
-    const [joined] = await this.db
-      .select({ lessonId: lessonDevices.lessonId, locked: lessonDevices.overlayLocked, seq: lessonDevices.overlaySeq })
-      .from(lessonDevices)
-      .innerJoin(lessons, eq(lessons.id, lessonDevices.lessonId))
-      .where(
-        and(eq(lessonDevices.deviceId, device.id), isNull(lessonDevices.releasedAt), eq(lessons.status, 'active')),
-      );
+    const joined = await this.#activeLock(device.id);
     return {
       heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_MS / 1000,
       lesson: joined
@@ -54,10 +83,9 @@ export class PresenceService {
             id: joined.lessonId,
             overlay: {
               locked: joined.locked,
-              sequence: joined.seq === null ? null : String(joined.seq),
+              sequence: joined.sequence,
               leaseExpiresAt: new Date(now + OVERLAY_LEASE_MS).toISOString(),
-              // Qurilma lease'ni monoton taymer bilan hisoblaydi; absolyut vaqt faqat ma'lumot uchun (spec §10).
-              leaseSeconds: OVERLAY_LEASE_MS / 1000,
+              leaseSeconds: joined.leaseSeconds,
             },
             thumbnails: { intervalMs: THUMBNAIL_INTERVAL_MS, maxWidth: THUMBNAIL_MAX_WIDTH },
             helpRequest: await this.help.openOfDevice(this.db, joined.lessonId, device.id),
