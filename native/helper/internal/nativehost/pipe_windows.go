@@ -37,14 +37,14 @@ func Dial() (io.ReadWriteCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := verifyServer(h); err != nil {
+	if err := verifyServer(h, session); err != nil {
 		windows.CloseHandle(h)
 		return nil, err
 	}
 	return os.NewFile(uintptr(h), name), nil
 }
 
-func verifyServer(h windows.Handle) error {
+func verifyServer(h windows.Handle, session uint32) error {
 	var serverPID uint32
 	if err := windows.GetNamedPipeServerProcessId(h, &serverPID); err != nil {
 		return err
@@ -69,7 +69,7 @@ func verifyServer(h windows.Handle) error {
 	if err != nil {
 		return err
 	}
-	return ServerTrusted(procs, serverPID, servicePID, layout.New(pf, data, win).CompanionExe)
+	return ServerTrusted(procs, serverPID, servicePID, session, layout.New(pf, data, win).CompanionExe)
 }
 
 // helperServicePID SCM'dan (oddiy foydalanuvchi SERVICE_QUERY_STATUS huquqi bilan) xizmat PID'i; to'xtagan — 0.

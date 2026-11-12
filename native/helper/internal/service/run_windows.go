@@ -153,6 +153,11 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 
 	listener := &lazyListener{}
 	link := guard.NewLink(listener)
+	// Native messaging host (o'quvchi nomidan) xizmat yaratilish vaqtini o'qiy olsin; bo'lmasa host Companion pipe'ini
+	// rad etadi (fail-closed: web filtri `extension_missing`).
+	if err := AllowInteractiveQuery(); err != nil {
+		log.Warn("xizmat jarayoni DACL'i yangilanmadi: %v", err)
+	}
 	hubClient := NewLazyHub(GatedLoad(gate, func() (Hub, error) { return loadHub(p) }), clock)
 	s := New(Deps{
 		Hub:       hubClient,
