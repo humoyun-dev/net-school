@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { PolicyVersion } from '@netschool/contracts';
-import { type BaselineDocument, type EffectiveBaseline, mergeBaseline } from '@netschool/domain';
+import { type BaselineDocument, type EffectiveBaseline, type LessonDocument, mergeBaseline } from '@netschool/domain';
 import { and, desc, eq, isNull, type SQL } from 'drizzle-orm';
 import { Access } from '../../common/access.ts';
 import { canonical } from '../../common/canonical-json.ts';
@@ -10,7 +10,7 @@ import { isUniqueViolation, isUuid } from '../../common/db-errors.ts';
 import { ApiError } from '../../common/errors.ts';
 import type { RequestContext } from '../../common/request-context.ts';
 import { DB, type Db } from '../../db/client.ts';
-import { policyAssignments, policyVersions, sites } from '../../db/schema.ts';
+import { lessons, policyAssignments, policyVersions, sites } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 
 type VersionRow = typeof policyVersions.$inferSelect;
@@ -139,6 +139,35 @@ export class PolicyService {
     return this.createVersion(ctx, scope, ifMatch, old.document, old.id);
   }
 
+  async getLesson(ctx: RequestContext, lessonId: string) {
+    const { scope } = await this.#lessonScope(ctx, lessonId, 'lesson.read');
+    const current = await this.current(this.db, scope);
+    return { current: current ? toPolicyVersion(current) : null };
+  }
+
+  async putLesson(ctx: RequestContext, lessonId: string, ifMatch: number, document: LessonDocument) {
+    const { scope, active } = await this.#lessonScope(ctx, lessonId, 'lesson.policy');
+    // Tugagan darsning qatlami qurilmaga berilmaydi; o'zgartirish ma'nosiz va chalg'ituvchi.
+    if (!active) throw new ApiError('conflict');
+    return this.createVersion(ctx, scope, ifMatch, document, null);
+  }
+
+  // Qurilmaga beriladigan dars qatlami (faqat joriy versiya; dars faolligini chaqiruvchi tekshiradi).
+  async lessonLayerOf(
+    organizationId: string,
+    siteId: string,
+    lessonId: string,
+  ): Promise<{ versionId: string; version: number; contentHash: string; document: LessonDocument } | null> {
+    const row = await this.current(this.db, { organizationId, siteId, layer: 'lesson', lessonId });
+    if (!row) return null;
+    return {
+      versionId: row.id,
+      version: row.version,
+      contentHash: row.contentHash,
+      document: row.document as LessonDocument,
+    };
+  }
+
   // Yangi immutable versiya + assignment + audit bitta tranzaksiyada. Mazmun joriy bilan bir xil bo'lsa — 200 joriy.
   async createVersion(
     ctx: RequestContext,
@@ -209,6 +238,37 @@ export class PolicyService {
       if (isUniqueViolation(err)) throw new ApiError('conflict');
       throw err;
     }
+  }
+
+  async #lessonScope(
+    ctx: RequestContext,
+    lessonId: string,
+    action: 'lesson.read' | 'lesson.policy',
+  ): Promise<{ scope: PolicyScope; active: boolean }> {
+    const actor = this.access.actor(ctx);
+    const on = { targetType: 'lesson', targetId: lessonId };
+    const [lesson] = isUuid(lessonId)
+      ? await this.db
+          .select()
+          .from(lessons)
+          .where(and(eq(lessons.id, lessonId), eq(lessons.organizationId, actor.organizationId)))
+      : [];
+    if (!lesson) return this.access.deny(ctx, action, on);
+    await this.access.require(
+      ctx,
+      action,
+      {
+        organizationId: lesson.organizationId,
+        siteId: lesson.siteId,
+        roomId: lesson.roomId,
+        ownerUserId: lesson.teacherUserId,
+      },
+      on,
+    );
+    return {
+      scope: { organizationId: lesson.organizationId, siteId: lesson.siteId, layer: 'lesson', lessonId: lesson.id },
+      active: lesson.status === 'active',
+    };
   }
 
   async #baselineScope(
