@@ -6,7 +6,8 @@ export const MAX_PATTERN_LENGTH = 300;
 
 const SCHEME = /^https?:\/\//i;
 const ASCII_HOST = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/;
-const PATH = /^\/[A-Za-z0-9\-._~/%]*$/;
+// `%` va `;` yo'q: brauzer URL'i bilan solishtirish kanonik yo'l ustida (canonicalPath).
+const PATH = /^\/[A-Za-z0-9\-._~/]*$/;
 
 function asciiHost(raw: string): string | null {
   if (raw === '' || /[^\p{L}\p{N}.-]/u.test(raw)) return null;
@@ -21,7 +22,7 @@ function asciiHost(raw: string): string | null {
 }
 
 // Normallashtiradi yoki noto'g'ri bo'lsa null: kichik harfli punycode host, oxirgi nuqta, `http(s)://` va port
-// olib tashlanadi; yo'l registri saqlanadi, yolg'iz `/` tashlanadi.
+// olib tashlanadi; yo'l kichik harfga (yo'l bo'yicha bloklash registr bilan chetlab o'tilmasin), yolg'iz `/` tashlanadi.
 export function normalizePattern(input: string): UrlPattern | null {
   let rest = input.trim();
   if (rest.length === 0 || rest.length > MAX_PATTERN_LENGTH) return null;
@@ -39,10 +40,31 @@ export function normalizePattern(input: string): UrlPattern | null {
   }
   const host = asciiHost(hostPart);
   if (!host) return null;
-  if (path === '/') path = '';
   if (path !== '' && !PATH.test(path)) return null;
+  path = canonicalPath(path);
+  if (path === '/') path = '';
   const out = `${wildcard ? '*.' : ''}${host}${path}`;
   return out.length > MAX_PATTERN_LENGTH ? null : out;
+}
+
+// Kanonik yo'l: %-kodlash ochiladi, `;param` tashlanadi, `//` birlashadi, `.`/`..` hal qilinadi, kichik harf.
+// Pattern va brauzer URL'i bir xil kanonlashtiriladi, aks holda `/%64ocs`, `//docs`, `/DOCS` blokdan o'tadi.
+export function canonicalPath(path: string): string {
+  let decoded = path;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    // noto'g'ri %-ketma-ketlik — xom holicha
+  }
+  const out: string[] = [];
+  for (const raw of decoded.toLowerCase().split('/')) {
+    const seg = raw.split(';')[0] ?? '';
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') out.pop();
+    else out.push(seg);
+  }
+  const trailing = decoded.endsWith('/') && out.length > 0 ? '/' : '';
+  return `/${out.join('/')}${trailing}`;
 }
 
 function split(pattern: UrlPattern): { wildcard: boolean; host: string; path: string } {
@@ -64,6 +86,6 @@ export function matchesUrl(pattern: UrlPattern, url: URL): boolean {
   const hostOk = host === p.host || (p.wildcard && host.endsWith(`.${p.host}`));
   if (!hostOk) return false;
   if (p.path === '') return true;
-  const path = url.pathname;
+  const path = canonicalPath(url.pathname);
   return path === p.path || path.startsWith(p.path.endsWith('/') ? p.path : `${p.path}/`);
 }

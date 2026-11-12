@@ -24,7 +24,7 @@ const lesson = (mode: LessonDocument['web']['mode'], patterns: string[]): Lesson
 
 describe('url patterns', () => {
   test('normalizes and rejects url patterns', () => {
-    expect(normalizePattern('HTTPS://Example.COM./Docs')).toBe('example.com/Docs');
+    expect(normalizePattern('HTTPS://Example.COM./Docs')).toBe('example.com/docs');
     expect(normalizePattern('*.Пример.рф')).toBe('*.xn--e1afmkfd.xn--p1ai');
     expect(normalizePattern('example.com:8080')).toBe('example.com');
     expect(normalizePattern('http://example.com/')).toBe('example.com');
@@ -52,6 +52,21 @@ describe('url patterns', () => {
     expect(matchesUrl('*.example.com', new URL('https://example.com/'))).toBe(true);
     expect(matchesUrl('*.example.com', new URL('https://badexample.com/'))).toBe(false);
     expect(matchesUrl('example.com', new URL('https://a.example.com/'))).toBe(false);
+  });
+
+  test('path matching resists case, encoding and slash tricks', () => {
+    expect(normalizePattern('example.com/a%20b')).toBeNull();
+    expect(normalizePattern('Example.com/Docs')).toBe('example.com/docs');
+    for (const url of [
+      'https://example.com/DOCS/a',
+      'https://example.com/%64ocs/a',
+      'https://example.com//docs/a',
+      'https://example.com/./docs/a',
+      'https://example.com/x/../docs',
+      'https://example.com/docs;x=1/a',
+    ]) {
+      expect(matchesUrl('example.com/docs', new URL(url)), url).toBe(true);
+    }
   });
 
   test('path prefix matches by segment prefix', () => {
