@@ -37,8 +37,9 @@ function fragment(pattern: UrlPattern): string {
   const path = slash < 0 ? '' : body.slice(slash);
   const hostRe = `${wildcard ? '([^/?#]*\\.)?' : ''}${escapeRe(host)}\\.?(:\\d+)?`;
   const segments = path.split('/').filter((s) => s !== '');
-  const pathRe = segments.length === 0 ? '' : `/+${segments.map(escapeRe).join('/+')}`;
-  return `${hostRe}${pathRe}`;
+  // Chegara pattern ichida: host'dan keyin faqat [/?#] yoki oxir; `;param` faqat yo'l segmentidan keyin.
+  if (segments.length === 0) return `${hostRe}([/?#]|$)`;
+  return `${hostRe}/+${segments.map(escapeRe).join('/+')}([/?#;]|$)`;
 }
 
 // userinfo (`user@`) ixtiyoriy: `https://x@bad.com` ham bloklanadi; `;param` yo'l oxiri sifatida (canonicalPath).
@@ -46,7 +47,7 @@ function groups(patterns: UrlPattern[], size: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < patterns.length; i += size) {
     const chunk = patterns.slice(i, i + size).map(fragment);
-    out.push(`^https?://([^/?#@]*@)?(${chunk.join('|')})([/?#;]|$)`);
+    out.push(`^https?://([^/?#@]*@)?(${chunk.join('|')})`);
   }
   return out;
 }

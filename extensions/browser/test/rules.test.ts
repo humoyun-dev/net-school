@@ -54,6 +54,8 @@ describe('dnr rules', () => {
     expect(blocked(rules, 'https://example.com/docs;jsessionid=1')).toBe(true);
     const allow = toDnrRules({ block: [], allowOnly: ['good.com'] });
     expect(blocked(allow, 'https://good.com@bad.com/')).toBe(true);
+    // `;` faqat yo'l segmentidan keyin chegara: host'dan keyin emas.
+    expect(blocked(allow, 'https://good.com;.bad.com/')).toBe(true);
   });
 
   test('group size can be reduced for unsupported regexes', () => {

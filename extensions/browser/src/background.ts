@@ -16,7 +16,9 @@ const state = new PolicyState({ local: area(chrome.storage.local), session: area
 );
 const browser: 'chrome' | 'edge' = navigator.userAgent.includes('Edg/') ? 'edge' : 'chrome';
 let port: chrome.runtime.Port | null = null;
+// current — navigatsiya tekshiruvi holati (darhol); installed — DNR'da tasdiqlangan holat (refresh qayta uradi).
 let current: Effective | null = null;
+let installed: { baselineHash: string | null; lessonHash: string | null; rules: string } | null = null;
 
 async function install(groupSize: number): Promise<number> {
   const rules = toDnrRules(current?.web ?? { block: [], allowOnly: null }, groupSize);
@@ -33,11 +35,20 @@ async function apply(eff: Effective): Promise<void> {
     expected = await install(MAX_PATTERNS_PER_REGEX);
   } catch {
     // Regex guruhi RE2 chegarasidan oshgan bo'lishi mumkin: har pattern alohida qoida bilan qayta urinish.
-    expected = await install(1);
+    try {
+      expected = await install(1);
+    } catch (err) {
+      installed = null;
+      throw err;
+    }
   }
   // Haqiqatda o'rnatilganini tekshirish: receipt faqat tasdiqlangan holat uchun; xato bo'lsa receipt yuborilmaydi.
-  const installed = await chrome.declarativeNetRequest.getDynamicRules();
-  if (installed.length !== expected) throw new Error('dnr rules mismatch');
+  const present = await chrome.declarativeNetRequest.getDynamicRules();
+  if (present.length !== expected) {
+    installed = null;
+    throw new Error('dnr rules mismatch');
+  }
+  installed = { baselineHash: eff.baselineHash, lessonHash: eff.lessonHash, rules: JSON.stringify(eff.web) };
   port?.postMessage({
     type: 'applied',
     browser,
@@ -67,7 +78,12 @@ function connect(): void {
 // Dars muddati tugaganini tekshirish (Companion yo'q bo'lsa ham dars qoidalari ≤ 120 s'da tushadi).
 async function refresh(): Promise<void> {
   const eff = await state.effective();
-  if (!current || current.lessonHash !== eff.lessonHash || current.baselineHash !== eff.baselineHash) await apply(eff);
+  const same =
+    installed !== null &&
+    installed.lessonHash === eff.lessonHash &&
+    installed.baselineHash === eff.baselineHash &&
+    installed.rules === JSON.stringify(eff.web);
+  if (!same) await apply(eff);
 }
 
 chrome.alarms.create('netschool-refresh', { periodInMinutes: 0.5 });
