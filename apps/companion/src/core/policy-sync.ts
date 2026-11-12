@@ -73,7 +73,11 @@ export class PolicySync {
       this.#emit();
       return;
     }
-    if (this.#lesson && hint.lesson) this.#lesson.expiresAt = this.#expiry(this.#lesson.layer);
+    if (this.#lesson && hint.lesson) {
+      // Yangilangan lease extension'ga ham yetadi: u o'z muddatini faqat push'dan oladi.
+      this.#lesson.expiresAt = this.#expiry(this.#lesson.layer);
+      this.#emit();
+    }
   }
 
   onExtensionReport(report: ExtensionReport): void {
@@ -120,11 +124,12 @@ export class PolicySync {
     return [...this.#reports.values()].filter((r) => now - r.at <= EXTENSION_FRESH_MS);
   }
 
-  // Qoida natijasi: extension yo'q → failed; birortasi joriy hash'ni tasdiqlagan → applied; aks holda null (kutish).
+  // Qoida natijasi: extension yo'q → failed; ulangan HAR brauzer joriy hash'ni tasdiqlagan → applied; aks holda null
+  // (kutish: bitta brauzer eski qoidalarda qolsa o'quvchi o'sha brauzerga o'tib siyosatni chetlab o'tardi).
   #rule(hash: string, pick: (r: ExtensionReport) => string | null) {
     const fresh = this.#fresh();
     if (fresh.length === 0) return { state: 'failed' as const, code: 'extension_missing' };
-    return fresh.some((r) => pick(r) === hash) ? { state: 'applied' as const } : null;
+    return fresh.every((r) => pick(r) === hash) ? { state: 'applied' as const } : null;
   }
 
   #receipts(): PolicyReceipt[] {

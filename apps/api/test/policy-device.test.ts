@@ -214,4 +214,36 @@ describe('device policy', () => {
     const own = await app.request('GET', `/api/v1/policies/status?roomId=${roomId}`, { cookie: teacher });
     expect(own.status).toBe(200);
   });
+
+  test('a new lesson with the same allowlist does not reuse the old receipt', async () => {
+    const first = (await startLesson(app, teacher, roomId)).json.id;
+    await putLesson(first, 'allowlist', ['x.com']);
+    const l = (await asCompanion('GET', DEVICE_POLICY)).json.lesson;
+    await asCompanion('PUT', DEVICE_RECEIPT, {
+      layer: 'lesson',
+      lessonId: first,
+      version: 1,
+      hash: l.hash,
+      rules: { 'web.lesson': { state: 'applied' } },
+    });
+    expect((await status()).lesson.status).toBe('applied');
+    await endLesson(app, teacher, first);
+    const second = (await startLesson(app, teacher, roomId)).json.id;
+    await putLesson(second, 'allowlist', ['x.com']);
+    expect((await status()).lesson).toMatchObject({ desired: { lessonId: second }, status: 'pending' });
+  });
+
+  test('a receipt older than the staleness window is pending', async () => {
+    await putBaseline({ web: { blocked: ['a.com'] } }, '0');
+    const b = (await asCompanion('GET', DEVICE_POLICY)).json.baseline;
+    await asCompanion('PUT', DEVICE_RECEIPT, {
+      layer: 'baseline',
+      revision: b.revision,
+      hash: b.hash,
+      rules: { 'web.blocked': { state: 'applied' } },
+    });
+    expect((await status()).baseline.status).toBe('applied');
+    now += 16 * 60_000;
+    expect((await status()).baseline.status).toBe('pending');
+  });
 });

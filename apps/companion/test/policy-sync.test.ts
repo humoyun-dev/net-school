@@ -181,4 +181,27 @@ describe('policy sync', () => {
     await expect(broken.onHint(hint(2))).rejects.toThrow('offline');
     expect(broken.current().baseline?.hash).toBe(H1);
   });
+
+  test('lease renewal is pushed to the extension', async () => {
+    served = { baseline: baseline(1, H1), lesson: lesson() };
+    const sync = make();
+    await sync.onHint(hint(1, 1));
+    const before = pushes.length;
+    now += 60_000;
+    await sync.onHint(hint(1, 1));
+    expect(pushes.length).toBe(before + 1);
+    expect(pushes.at(-1)?.lesson?.expiresInMs).toBe(120_000);
+  });
+
+  test('every fresh browser must confirm the current hash', async () => {
+    const sync = make();
+    await sync.onHint(hint(1));
+    sync.onExtensionReport({ browser: 'chrome', extensionVersion: '1.0.0', baselineHash: H1, lessonHash: null });
+    sync.onExtensionReport({ browser: 'edge', extensionVersion: '1.0.0', baselineHash: H2, lessonHash: null });
+    await sync.tick();
+    expect(receipts.filter((r) => r.rules['web.blocked']?.state === 'applied')).toHaveLength(0);
+    sync.onExtensionReport({ browser: 'edge', extensionVersion: '1.0.0', baselineHash: H1, lessonHash: null });
+    await sync.tick();
+    expect(receipts.at(-1)?.rules).toEqual({ 'web.blocked': { state: 'applied' } });
+  });
 });

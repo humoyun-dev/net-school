@@ -36,6 +36,8 @@ export interface PolicyDevice {
 
 // Spec §10: dars qatlami lease'i overlay bilan bir xil.
 export const LESSON_POLICY_LEASE_SECONDS = 120;
+// Shundan eski receipt holatni tasdiqlamaydi (Helper o'zgarmagan receipt'ni har 300 s, Companion har 60 s yuboradi).
+export const RECEIPT_STALE_MS = 15 * 60_000;
 
 type LayerStatus = 'applied' | 'partial' | 'failed' | 'pending';
 type ReceiptRow = typeof policyReceipts.$inferSelect;
@@ -194,8 +196,8 @@ export class PolicyDeliveryService {
         const companion = pick('baseline', 'companion');
         const helper = pick('baseline', 'helper');
         const baselineStatus = worst([
-          this.#layerStatus(baseline.document, 'baseline', 'companion', baseline.hash, companion),
-          this.#layerStatus(baseline.document, 'baseline', 'helper', baseline.hash, helper),
+          this.#layerStatus(baseline.document, 'baseline', 'companion', baseline.hash, companion, () => true),
+          this.#layerStatus(baseline.document, 'baseline', 'helper', baseline.hash, helper, () => true),
         ]);
         const lessonId = lessonsOf.get(d.id);
         const layer = lessonId ? layers.get(lessonId) : null;
@@ -213,7 +215,18 @@ export class PolicyDeliveryService {
               ? {
                   desired: { lessonId, version: layer.version },
                   companion: view(lessonReceipt, layer.document, 'lesson', 'companion'),
-                  status: this.#layerStatus(layer.document, 'lesson', 'companion', layer.contentHash, lessonReceipt),
+                  status: this.#layerStatus(
+                    layer.document,
+                    'lesson',
+                    'companion',
+                    layer.contentHash,
+                    lessonReceipt,
+                    // Bir xil allowlist'li yangi dars eski darsning receipt'ini meros qilmaydi.
+                    (applied) => {
+                      const a = applied as { lessonId?: string; version?: number };
+                      return a.lessonId === lessonId && a.version === layer.version;
+                    },
+                  ),
                 }
               : null,
         };
@@ -227,10 +240,12 @@ export class PolicyDeliveryService {
     reporter: PolicyReporter,
     desiredHash: string,
     receipt: ReceiptRow | null,
+    matches: (applied: unknown) => boolean,
   ): LayerStatus {
     const expected = activeRules(layer, doc, reporter);
     if (expected.length === 0) return 'applied';
-    if (!receipt || receipt.contentHash !== desiredHash) return 'pending';
+    if (!receipt || receipt.contentHash !== desiredHash || !matches(receipt.applied)) return 'pending';
+    if (this.now() - receipt.reportedAt.getTime() > RECEIPT_STALE_MS) return 'pending';
     return receiptStatus(expected, receipt.rules as Rules);
   }
 

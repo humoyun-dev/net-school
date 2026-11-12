@@ -28,11 +28,17 @@ export function normalizePattern(input: string): UrlPattern | null {
   if (rest.length === 0 || rest.length > MAX_PATTERN_LENGTH) return null;
   rest = rest.replace(SCHEME, '');
   if (/^[a-z][a-z0-9+.-]*:(?!\d)/i.test(rest)) return null; // boshqa sxema (javascript:, ftp: ...)
+  // `javascript:1`, `data:1` port kabi ko'rinadi: ma'lum sxema nomlari host sifatida qabul qilinmaydi.
+  if (/^(javascript|data|file|about|blob|vbscript|ftp|ws|wss|mailto|chrome|edge|view-source)(:|$)/i.test(rest))
+    return null;
   const slash = rest.indexOf('/');
   let hostPart = slash < 0 ? rest : rest.slice(0, slash);
   let path = slash < 0 ? '' : rest.slice(slash);
   const port = hostPart.match(/:(\d{1,5})$/);
-  if (port) hostPart = hostPart.slice(0, -port[0].length);
+  if (port) {
+    if (Number(port[1]) > 65535) return null;
+    hostPart = hostPart.slice(0, -port[0].length);
+  }
   let wildcard = false;
   if (hostPart.startsWith('*.')) {
     wildcard = true;

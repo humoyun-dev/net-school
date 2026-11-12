@@ -42,6 +42,9 @@ describe('url patterns', () => {
       'example.com/a b',
       'user@example.com',
       'example.com?q=1',
+      'javascript:1',
+      'data:1',
+      'example.com:99999',
     ]) {
       expect(normalizePattern(bad), bad).toBeNull();
     }
