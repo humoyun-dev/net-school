@@ -41,18 +41,19 @@ function fragment(pattern: UrlPattern): string {
   return `${hostRe}${pathRe}`;
 }
 
-function groups(patterns: UrlPattern[]): string[] {
+// userinfo (`user@`) ixtiyoriy: `https://x@bad.com` ham bloklanadi; `;param` yo'l oxiri sifatida (canonicalPath).
+function groups(patterns: UrlPattern[], size: number): string[] {
   const out: string[] = [];
-  for (let i = 0; i < patterns.length; i += MAX_PATTERNS_PER_REGEX) {
-    const chunk = patterns.slice(i, i + MAX_PATTERNS_PER_REGEX).map(fragment);
-    out.push(`^https?://(${chunk.join('|')})([/?#]|$)`);
+  for (let i = 0; i < patterns.length; i += size) {
+    const chunk = patterns.slice(i, i + size).map(fragment);
+    out.push(`^https?://([^/?#@]*@)?(${chunk.join('|')})([/?#;]|$)`);
   }
   return out;
 }
 
 // Effective web siyosatidan dinamik qoidalar (to'liq almashtiriladi). Faqat navigatsiya (main_frame → bloklangan
 // sahifa, sub_frame → blok): resurslar (CDN, rasm) sahifa ishlashi uchun tegilmaydi.
-export function toDnrRules(web: EffectiveWeb): DnrRule[] {
+export function toDnrRules(web: EffectiveWeb, groupSize = MAX_PATTERNS_PER_REGEX): DnrRule[] {
   const rules: DnrRule[] = [];
   let id = 1;
   const add = (priority: number, type: 'block' | 'allow', condition: DnrRule['condition']) => {
@@ -78,11 +79,11 @@ export function toDnrRules(web: EffectiveWeb): DnrRule[] {
       condition: { ...condition, resourceTypes: ['sub_frame'] },
     });
   };
-  for (const regexFilter of groups(web.block)) {
+  for (const regexFilter of groups(web.block, groupSize)) {
     add(PRIORITY_BLOCK, 'block', { regexFilter, isUrlFilterCaseSensitive: false });
   }
   if (web.allowOnly !== null) {
-    for (const regexFilter of groups(web.allowOnly)) {
+    for (const regexFilter of groups(web.allowOnly, groupSize)) {
       add(PRIORITY_ALLOW, 'allow', { regexFilter, isUrlFilterCaseSensitive: false });
     }
     add(PRIORITY_CATCH_ALL, 'block', { urlFilter: '|http' });

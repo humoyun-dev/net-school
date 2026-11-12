@@ -1,4 +1,4 @@
-import { BLOCKED_PAGE, isBlocked, toDnrRules } from './rules.ts';
+import { BLOCKED_PAGE, isBlocked, MAX_PATTERNS_PER_REGEX, toDnrRules } from './rules.ts';
 import { type Effective, type KV, type PolicyMessage, PolicyState } from './state.ts';
 
 // P2c managed extension (Chrome/Edge, force-install). Siyosatni native messaging host orqali Companion'dan oladi,
@@ -18,14 +18,26 @@ const browser: 'chrome' | 'edge' = navigator.userAgent.includes('Edg/') ? 'edge'
 let port: chrome.runtime.Port | null = null;
 let current: Effective | null = null;
 
-async function apply(eff: Effective): Promise<void> {
-  const rules = toDnrRules(eff.web);
+async function install(groupSize: number): Promise<number> {
+  const rules = toDnrRules(current?.web ?? { block: [], allowOnly: null }, groupSize);
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: existing.map((r) => r.id), addRules: rules });
-  // Haqiqatda o'rnatilganini tekshirish: receipt faqat tasdiqlangan holat uchun.
-  const installed = await chrome.declarativeNetRequest.getDynamicRules();
-  if (installed.length !== rules.length) throw new Error('dnr rules mismatch');
+  return rules.length;
+}
+
+async function apply(eff: Effective): Promise<void> {
+  // Navigatsiya tekshiruvi DNR'dan oldin yangilanadi: DNR yiqilsa ham asosiy sahifalar bloklanadi (fail-closed).
   current = eff;
+  let expected: number;
+  try {
+    expected = await install(MAX_PATTERNS_PER_REGEX);
+  } catch {
+    // Regex guruhi RE2 chegarasidan oshgan bo'lishi mumkin: har pattern alohida qoida bilan qayta urinish.
+    expected = await install(1);
+  }
+  // Haqiqatda o'rnatilganini tekshirish: receipt faqat tasdiqlangan holat uchun; xato bo'lsa receipt yuborilmaydi.
+  const installed = await chrome.declarativeNetRequest.getDynamicRules();
+  if (installed.length !== expected) throw new Error('dnr rules mismatch');
   port?.postMessage({
     type: 'applied',
     browser,

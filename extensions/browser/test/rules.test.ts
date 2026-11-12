@@ -48,6 +48,19 @@ describe('dnr rules', () => {
     expect(blocked(rules, 'https://example.com/')).toBe(false);
   });
 
+  test('userinfo and ;params do not slip past a block', () => {
+    const rules = toDnrRules({ block: ['bad.com', 'example.com/docs'], allowOnly: null });
+    expect(blocked(rules, 'https://user:pw@bad.com/')).toBe(true);
+    expect(blocked(rules, 'https://example.com/docs;jsessionid=1')).toBe(true);
+    const allow = toDnrRules({ block: [], allowOnly: ['good.com'] });
+    expect(blocked(allow, 'https://good.com@bad.com/')).toBe(true);
+  });
+
+  test('group size can be reduced for unsupported regexes', () => {
+    const block = Array.from({ length: 5 }, (_, i) => `s${i}.com`);
+    expect(toDnrRules({ block, allowOnly: null }, 1).length).toBe(10);
+  });
+
   test('allowOnly empty blocks all http(s) navigation but not subresources', () => {
     const rules = toDnrRules({ block: [], allowOnly: [] });
     expect(blocked(rules, 'https://any.com/')).toBe(true);
