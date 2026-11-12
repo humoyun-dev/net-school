@@ -113,6 +113,7 @@ describe('loadConfig', () => {
       meshInstanceId: 'local',
       gateway: null,
       webDistDir: null,
+      extensionIds: { chrome: null, edge: null },
     });
   });
 

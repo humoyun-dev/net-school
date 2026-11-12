@@ -48,7 +48,11 @@ describe('device presence', () => {
   test('heartbeat updates last seen', async () => {
     const res = await send('POST', '/api/v1/device/heartbeat', {});
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ heartbeatIntervalSeconds: 10, lesson: null });
+    expect(res.json).toEqual({
+      heartbeatIntervalSeconds: 10,
+      lesson: null,
+      policy: { baseline: { org: 0, site: 0 }, lesson: null },
+    });
     const [row] = await app.db.db.select().from(devices).where(eq(devices.id, deviceId));
     expect(row?.lastHeartbeatAt?.getTime()).toBe(now);
     expect((await send('POST', '/api/v1/device/heartbeat', { extra: 1 })).status).toBe(400);
@@ -73,7 +77,11 @@ describe('device presence', () => {
       helpRequest: null,
     });
     await endLesson(app, teacher, lessonId);
-    expect((await beat()).json).toEqual({ heartbeatIntervalSeconds: 10, lesson: null });
+    expect((await beat()).json).toEqual({
+      heartbeatIntervalSeconds: 10,
+      lesson: null,
+      policy: { baseline: { org: 0, site: 0 }, lesson: null },
+    });
   });
 
   test('capability change is stored and audited once', async () => {

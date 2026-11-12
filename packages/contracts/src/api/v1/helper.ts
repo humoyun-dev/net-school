@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { baselineRevisionSchema } from './policy.ts';
 
 // OS helper (SYSTEM xizmati) uchun hub shartnomalari: alohida helper kaliti bilan imzolangan so'rovlar (reja P2d1; imzo qoidasi ADR 0005'dagi bilan bir xil).
 
@@ -8,6 +9,8 @@ export const helperLockStateSchema = z.object({
   locked: z.boolean(),
   sequence: z.string().nullable(),
   leaseSeconds: z.int().positive(),
+  // P2c: bazaviy siyosat revision'i; o'zgarsa helper `/device/helper/policy`ni oladi.
+  baseline: baselineRevisionSchema,
 });
 export type HelperLockState = z.infer<typeof helperLockStateSchema>;
 

@@ -16,6 +16,8 @@ export interface ApiConfig {
   gateway: GatewayConfig | null;
   // Veb-panel build katalogi (index.html bilan); null — API panel bermaydi.
   webDistDir?: string | null;
+  // P2c: do'kondagi NetSchool extension ID'lari (Helper forcelist'i uchun); null — hali chiqarilmagan.
+  extensionIds?: { chrome: string | null; edge: string | null };
 }
 
 export interface GatewayConfig {
@@ -93,6 +95,16 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
   const webDistDir = read(env, 'WEB_DIST_DIR') || null;
   if (webDistDir && !existsSync(join(webDistDir, 'index.html'))) problems.push('WEB_DIST_DIR must contain index.html');
 
+  const extensionId = (name: string): string | null => {
+    const value = read(env, name) || null;
+    if (value !== null && !/^[a-p]{32}$/.test(value)) problems.push(`${name} must be a 32-letter extension id`);
+    return value;
+  };
+  const extensionIds = {
+    chrome: extensionId('NETSCHOOL_EXTENSION_ID_CHROME'),
+    edge: extensionId('NETSCHOOL_EXTENSION_ID_EDGE'),
+  };
+
   // Xabar faqat o'zgaruvchi nomlarini aytadi, qiymatlarni emas.
   if (problems.length > 0) throw new Error(`Invalid configuration: ${problems.join('; ')}`);
   return {
@@ -105,6 +117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     meshInstanceId,
     gateway,
     webDistDir,
+    extensionIds,
   };
 }
 

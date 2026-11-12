@@ -261,7 +261,11 @@ describe('hub client against the real hub', () => {
     const identity = await freshIdentity();
     const client = track(new HubClient({ origin: app.origin, ca: app.ca, signer: new RequestSigner(identity) }));
     const res = await client.json('POST', '/api/v1/device/heartbeat', {}, heartbeatResponseSchema);
-    expect(res).toEqual({ heartbeatIntervalSeconds: 10, lesson: null });
+    expect(res).toEqual({
+      heartbeatIntervalSeconds: 10,
+      lesson: null,
+      policy: { baseline: { org: 0, site: 0 }, lesson: null },
+    });
   });
 
   test('a device clock running ahead is corrected from the hub Date header', async () => {

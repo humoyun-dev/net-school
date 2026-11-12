@@ -8,6 +8,7 @@ import { DB, type Db } from '../../db/client.ts';
 import { deviceCapabilities, devices, lessonDevices, lessons } from '../../db/schema.ts';
 import { AuditWriter } from '../audit/audit.writer.ts';
 import { HelpRequestsService } from '../help-requests/help-requests.service.ts';
+import { PolicyDeliveryService } from '../policy/policy-delivery.service.ts';
 import type { AuthenticatedDevice } from './device-auth.guard.ts';
 
 // O'zgargan capability kalitlari va yuqori darajadagi maydonlar (os, desktopSession, …).
@@ -31,10 +32,11 @@ export class PresenceService {
     @Inject(CLOCK) private readonly now: Clock,
     @Inject(AuditWriter) private readonly audit: AuditWriter,
     @Inject(HelpRequestsService) private readonly help: HelpRequestsService,
+    @Inject(PolicyDeliveryService) private readonly policy: PolicyDeliveryService,
   ) {}
 
   // Qurilmaning faol darsi va uning overlay holati (yo'q bo'lsa null). Heartbeat va helper lock-state bitta so'rovdan foydalanadi.
-  async #activeLock(deviceId: string): Promise<(HelperLockState & { lessonId: string }) | null> {
+  async #activeLock(deviceId: string): Promise<(Omit<HelperLockState, 'baseline'> & { lessonId: string }) | null> {
     const [joined] = await this.db
       .select({ lessonId: lessonDevices.lessonId, locked: lessonDevices.overlayLocked, seq: lessonDevices.overlaySeq })
       .from(lessonDevices)
@@ -57,6 +59,7 @@ export class PresenceService {
       locked: active?.locked ?? false,
       sequence: active?.sequence ?? null,
       leaseSeconds: OVERLAY_LEASE_MS / 1000,
+      baseline: await this.policy.baselineRevision(device.organizationId, device.siteId),
     };
   }
 
@@ -91,6 +94,7 @@ export class PresenceService {
             helpRequest: await this.help.openOfDevice(this.db, joined.lessonId, device.id),
           }
         : null,
+      policy: await this.policy.hintOf(device, joined?.lessonId ?? null),
     };
   }
 

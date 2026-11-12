@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { capabilityReportSchema } from '../../capabilities.ts';
+import { policyHintSchema } from './policy.ts';
 
 const base64url = z.string().regex(/^[A-Za-z0-9_-]+$/);
 const timestamp = z.iso.datetime({ offset: true });
@@ -72,6 +73,8 @@ export type HeartbeatLesson = z.infer<typeof heartbeatLessonSchema>;
 export const heartbeatResponseSchema = z.object({
   heartbeatIntervalSeconds: z.literal(10),
   lesson: heartbeatLessonSchema.nullable(),
+  // P2c: siyosat versiyalari ishorasi (eski hub yubormaydi).
+  policy: policyHintSchema.optional(),
 });
 export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
