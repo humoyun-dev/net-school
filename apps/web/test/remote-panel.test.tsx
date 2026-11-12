@@ -125,16 +125,20 @@ describe('remote panel', () => {
     });
     renderPanel(send as unknown as Api['send']);
     const frame = (await screen.findByTitle('pc-01')) as HTMLIFrameElement;
-    act(() => {
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          source: frame.contentWindow,
-          origin: 'https://hub:8444',
-          data: { source: 'netschool-viewer', state: 'connected' },
-        }),
-      );
+    // Tinglovchi effektda ulanadi va iframe contentWindow'i yuklanishda almashishi mumkin: holat qabul
+    // qilinmaguncha xabar qayta yuboriladi (CI'da sekin muhitda poyga bo'lgan).
+    await waitFor(() => {
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: frame.contentWindow,
+            origin: 'https://hub:8444',
+            data: { source: 'netschool-viewer', state: 'connected' },
+          }),
+        );
+      });
+      expect(screen.getByText('Ulandi')).toBeTruthy();
     });
-    expect(screen.getByText('Ulandi')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Maxsus tugmalar' })).toBeNull();
   });
 
