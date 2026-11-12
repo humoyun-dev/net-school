@@ -1,4 +1,4 @@
-import { ChevronsUpDown, DoorOpen, LogOut, Power } from 'lucide-react';
+import { ChevronsUpDown, DoorOpen, LogOut, Power, ShieldCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router';
 import { hasRole, useMe, useSession } from '../auth/session.tsx';
@@ -138,6 +138,9 @@ export function Shell() {
                   </div>
                   <SidebarLink to="/power" icon={<Power />}>
                     {t('nav.power')}
+                  </SidebarLink>
+                  <SidebarLink to="/policies" icon={<ShieldCheck />}>
+                    {t('nav.policies')}
                   </SidebarLink>
                 </div>
               )}

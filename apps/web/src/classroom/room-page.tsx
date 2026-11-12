@@ -19,6 +19,8 @@ import { latestResultFor } from './lesson-state.ts';
 import { ThumbnailFeed } from './thumbnail-feed.ts';
 import { useRoomDevices } from './use-devices.ts';
 import { useLessonEvents } from './use-events.ts';
+import { usePolicyStatus } from './use-policy-status.ts';
+import { WebPolicyControl } from './web-policy-control.tsx';
 
 export type FeedFactory = (
   lessonId: string,
@@ -45,6 +47,7 @@ export function RoomPage(props: {
   const errorText = useErrorText();
   const [state, update] = useLessonEvents(roomId);
   const devices = useRoomDevices(roomId);
+  const policyStatus = usePolicyStatus(roomId);
   const [selected, setSelected] = useState<string[]>([]);
   const [frames, setFrames] = useState<Record<string, string>>({});
   const [title, setTitle] = useState('');
@@ -129,6 +132,7 @@ export function RoomPage(props: {
           </Badge>
         )}
         {lesson && canCommand && <CommandResults commands={[...state.commands.values()]} />}
+        {lesson && canCommand && <WebPolicyControl lessonId={lesson.id} />}
         {lesson && canCommand && !confirmEnd && (
           <Button variant="secondary" onClick={() => setConfirmEnd(true)}>
             {t('lesson.end')}
@@ -217,6 +221,7 @@ export function RoomPage(props: {
                 canCommand={canCommand}
                 onToggle={() => setSelected((s) => (s.includes(d.id) ? s.filter((x) => x !== d.id) : [...s, d.id]))}
                 onClearHelp={clearHelp}
+                policy={policyStatus.get(d.id) ?? null}
                 actions={lesson && canCommand ? props.renderActions?.(d.id, lesson.id, d.hostname) : null}
               />
             );

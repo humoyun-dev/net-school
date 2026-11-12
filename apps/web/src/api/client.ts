@@ -22,7 +22,13 @@ export interface Api {
     path: string,
     body: unknown,
     schema: ZodType<T> | null,
-    opts?: { idempotencyKey?: string; signal?: AbortSignal; keepalive?: boolean; noAuthRedirect?: boolean },
+    opts?: {
+      idempotencyKey?: string;
+      signal?: AbortSignal;
+      keepalive?: boolean;
+      noAuthRedirect?: boolean;
+      headers?: Record<string, string>;
+    },
   ): Promise<T>;
 }
 
@@ -33,11 +39,18 @@ export function createApi(fetchImpl: typeof fetch, onUnauthenticated: () => void
     path: string,
     body: unknown,
     schema: ZodType<T> | null,
-    opts: { idempotencyKey?: string; signal?: AbortSignal; keepalive?: boolean; noAuthRedirect?: boolean } = {},
+    opts: {
+      idempotencyKey?: string;
+      signal?: AbortSignal;
+      keepalive?: boolean;
+      noAuthRedirect?: boolean;
+      headers?: Record<string, string>;
+    } = {},
   ): Promise<T> {
     const headers = new Headers({ accept: 'application/json' });
     if (body !== undefined) headers.set('content-type', 'application/json');
     if (opts.idempotencyKey) headers.set('idempotency-key', opts.idempotencyKey);
+    for (const [name, value] of Object.entries(opts.headers ?? {})) headers.set(name, value);
     const res = await fetchImpl(path, {
       method,
       headers,
