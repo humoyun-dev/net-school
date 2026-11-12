@@ -409,8 +409,15 @@ func (j *Job) StartAsSystemInSession(s Session, exe string, args []string) (supe
 	return startAsSystemInSession(s, exe, args, j.h)
 }
 
-// Close Job dastagini yopadi: Job'dagi hamma jarayon o'ldiriladi.
-func (j *Job) Close() error { return windows.CloseHandle(j.h) }
+// Close Job'dagi hamma jarayonni killExitCode bilan o'ldiradi va dastakni yopadi. KILL_ON_JOB_CLOSE ham
+// o'ldiradi, lekin chiqish kodi 0 bo'ladi (toza chiqishdan farqlanmaydi), shuning uchun avval TerminateJobObject.
+func (j *Job) Close() error {
+	terr := windows.TerminateJobObject(j.h, killExitCode)
+	if err := windows.CloseHandle(j.h); err != nil {
+		return err
+	}
+	return terr
+}
 
 // ExitError jarayon nol bo'lmagan kod bilan tugadi.
 type ExitError struct{ Code uint32 }

@@ -120,7 +120,10 @@ func listNames(dir windows.Handle) ([]string, error) {
 		nameLengthOffset               = 60
 		nameOffset                     = 104
 	)
-	buf := make([]byte, 64<<10)
+	// NtQueryDirectoryFile buferni 8 baytga tekislangan bo'lishini talab qiladi (aks holda ERROR_NOACCESS).
+	// []byte'ning tekislanishi 1 (kompilyator uni stekka ham qo'yishi mumkin), shuning uchun []uint64 ustida.
+	words := make([]uint64, (64<<10)/8)
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), len(words)*8)
 	class := uint32(fileIDBothDirectoryRestartInfo)
 	var names []string
 	for {
