@@ -79,3 +79,7 @@ docker compose -f compose.yaml -f compose.poc.yaml up -d --build
   ```
 
   CLI xatoda ham 0 bilan chiqadi: `api` loglarida MeshCentral'ga ulanish xatosi yo'qligini tekshiring.
+
+## Brauzer extension'i (P2c)
+
+Extension do'konga (Chrome Web Store, Edge Add-ons) unlisted chiqarilgach `.env`ga 32 harfli ID'larni yozing va `api`ni qayta ishga tushiring: `NETSCHOOL_EXTENSION_ID_CHROME`, `NETSCHOOL_EXTENSION_ID_EDGE`. Bo'sh bo'lsa Helper extension'ni majburan o'rnatmaydi (panelda `extension_unpublished`). Tartib: [runbook A](../../docs/poc/results/windows-x64-2026-11-12-policy-manual.md).

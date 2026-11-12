@@ -92,6 +92,9 @@ services:
       # Remote session gateway (ikkinchi HTTPS listener, xuddi shu TLS sertifikati bilan).
       GATEWAY_PORT: "8444"
       GATEWAY_PUBLIC_ORIGIN: ${GATEWAY_PUBLIC_ORIGIN:?GATEWAY_PUBLIC_ORIGIN is required, e.g. https://hub.school.lan:8444}
+      # P2c: do'kondagi NetSchool extension ID'lari (bo'sh — hali chiqarilmagan, Helper forcelist yozmaydi).
+      NETSCHOOL_EXTENSION_ID_CHROME: ${NETSCHOOL_EXTENSION_ID_CHROME:-}
+      NETSCHOOL_EXTENSION_ID_EDGE: ${NETSCHOOL_EXTENSION_ID_EDGE:-}
     secrets: [api_tls_cert, api_tls_key, netschool_database_url, meshcentral_service_password]
     networks:
       hub:
