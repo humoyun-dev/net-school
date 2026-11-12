@@ -15,9 +15,10 @@ import { hubPolicyDeps, PolicySync, type WebPolicyPush } from '../core/policy-sy
 import { ThumbnailUploader } from '../core/thumbnails.ts';
 import { ElectronFrameSource } from './capture.ts';
 import { dismissArgSchema, isTrustedSender } from './ipc.ts';
-import { platformFacts } from './platform.ts';
+import { currentSessionId, platformFacts } from './platform.ts';
 import { hardenSession } from './security.ts';
 import { createTray } from './tray.ts';
+import { startWebPipe, webPipeName } from './web-pipe.ts';
 import { keyboardHookAvailable, WindowsKeyboardHook } from './win-keyboard-hook.ts';
 import { Windows } from './windows.ts';
 import { WindowsRegistry } from './windows-registry.ts';
@@ -148,6 +149,18 @@ async function main(): Promise<void> {
     const restoreTimer = hardLock ? setInterval(() => void hardLock.reconcile(), 30_000) : null; // yo'qolgan hook va qolib ketgan siyosat
     restoreTimer?.unref();
     await agent.start();
+    // Web pipe: ochilmasa (koffi yo'q, nom band) extension ulanmaydi va panelda `extension_missing` ko'rinadi.
+    const sessionId = currentSessionId();
+    const webPipe =
+      sessionId === null
+        ? null
+        : await startWebPipe(webPipeName(sessionId), policy, (fn) => {
+            webListeners.add(fn);
+            return () => webListeners.delete(fn);
+          }).catch((err: unknown) => {
+            console.error('web pipe', err);
+            return null;
+          });
     if (process.env.NETSCHOOL_COMPANION_SHOW_STATUS === '1') windows.showStatus();
     // Avval agent to'xtaydi (sikllar keshga yozishni tugatadi), keyin kesh yopiladi va chiqish davom etadi.
     let shuttingDown = false;
@@ -158,6 +171,7 @@ async function main(): Promise<void> {
       windows.allowClose();
       void agent.stop().finally(async () => {
         if (restoreTimer) clearInterval(restoreTimer);
+        await webPipe?.close();
         await hardLock?.dispose();
         cache.close();
         app.quit();
