@@ -39,7 +39,7 @@ export type RuleKey =
 export type PolicyLayer = 'baseline' | 'lesson';
 export type PolicyReporter = 'companion' | 'helper';
 export type RuleState = 'applied' | 'failed' | 'unsupported';
-export type ReceiptStatus = 'applied' | 'partial' | 'failed';
+export type PolicyReceiptStatus = 'applied' | 'partial' | 'failed';
 
 const union = (...lists: (readonly UrlPattern[] | undefined)[]): UrlPattern[] =>
   [...new Set(lists.flatMap((l) => l ?? []))].sort();
@@ -101,7 +101,7 @@ export function activeRules(
 export function receiptStatus(
   expected: readonly RuleKey[],
   rules: Partial<Record<RuleKey, { state: RuleState }>>,
-): ReceiptStatus {
+): PolicyReceiptStatus {
   if (expected.length === 0) return 'applied';
   const applied = expected.filter((k) => rules[k]?.state === 'applied').length;
   if (applied === expected.length) return 'applied';
