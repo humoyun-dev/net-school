@@ -22,6 +22,8 @@ type Paths struct {
 
 	DataRoot, HelperData                                          string
 	DeviceJSON, HubCA, HelperKey, Lock, PolicyJournal, CADJournal string
+	// P2c: bazaviy siyosat keshi (helper katalogida) va native messaging host manifest'i katalogi (Users o'qiydi).
+	BaselineCache, BrowserDir string
 	// HelperKeyPending `helper-key` yangi kalitni shu yerga yozadi; hub claim'ni qabul qilgach `set-hub` uni
 	// helper.key o'rniga qo'yadi (claim yiqilsa ishlayotgan kalit buzilmaydi).
 	HelperKeyPending string
@@ -56,6 +58,8 @@ func New(programFiles, programData, windowsDir string) Paths {
 		Lock:             join(data, "lock.json"),
 		PolicyJournal:    join(data, "policy-journal.json"),
 		CADJournal:       join(data, "cad-journal.json"),
+		BaselineCache:    join(data, "baseline.json"),
+		BrowserDir:       join(dataRoot, "browser"),
 		EnrollDir:        join(dataRoot, "companion"),
 		Explorer:         join(windowsDir, "explorer.exe"),
 	}

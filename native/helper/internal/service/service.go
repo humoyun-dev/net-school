@@ -155,6 +155,9 @@ type Deps struct {
 	// DataDir helper katalogi tekshirilganmi (DirGate). nil — doim tekshirilgan (testlar). Tekshirilmagan paytda
 	// lock.json o'qilmaydi; katalog keyin tekshiruvdan o'tsa saqlangan bloklash bir marta tiklanadi.
 	DataDir DirVerifier
+	// Baseline P2c bazaviy siyosat agenti; nil — siyosatsiz (testlar). Kesh helper katalogida, shuning uchun
+	// katalog tekshirilmaguncha ishlamaydi.
+	Baseline *PolicyAgent
 }
 
 // DirVerifier DirGate porti.
@@ -259,6 +262,9 @@ func (s *Service) Step(ctx context.Context) {
 		s.note("hub lock-state", err)
 		if err == nil {
 			s.d.Lock.Apply(state)
+			if s.d.Baseline != nil {
+				s.d.Baseline.Hint(state.Baseline)
+			}
 		}
 	}
 	// Lease hub'siz ham tugashi uchun Tick har Step'da (lock.Locked muddatni o'zi tekshirmaydi).
@@ -302,6 +308,10 @@ func (s *Service) Step(ctx context.Context) {
 		if state != "" {
 			s.mesh = state
 		}
+	}
+
+	if s.d.Baseline != nil && s.dirVerified {
+		s.d.Baseline.Step(ctx, now, s.session, s.hasSession)
 	}
 
 	s.noteComponents()

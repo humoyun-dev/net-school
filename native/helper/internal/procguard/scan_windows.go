@@ -309,3 +309,10 @@ func closeAll(handles map[uint32]windows.Handle) {
 		_ = windows.CloseHandle(h)
 	}
 }
+
+// Snapshot hamma jarayonlar (sessiyasi, image yo'li va ota PID bilan). Dastaklar yopiladi; o'ldirish yo'q.
+func Snapshot() (map[uint32]Proc, error) {
+	procs, handles, err := snapshot(noSession, false)
+	closeAll(handles)
+	return procs, err
+}

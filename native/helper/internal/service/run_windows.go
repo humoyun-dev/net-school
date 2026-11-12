@@ -50,6 +50,7 @@ type paths struct {
 	dataRoot, helperData                       string
 	deviceJSON, hubCA                          string
 	helperKey, lock, policyJournal, cadJournal string
+	baselineCache, browserDir                  string
 	helperExe, companionExe, explorerExe       string
 }
 
@@ -76,6 +77,8 @@ func resolvePaths() (paths, error) {
 		lock:          l.Lock,
 		policyJournal: l.PolicyJournal,
 		cadJournal:    l.CADJournal,
+		baselineCache: l.BaselineCache,
+		browserDir:    l.BrowserDir,
 		helperExe:     l.HelperExe,
 		companionExe:  l.CompanionExe,
 		explorerExe:   l.Explorer,
@@ -150,8 +153,10 @@ func (*handler) Execute(_ []string, requests <-chan winsvc.ChangeRequest, change
 
 	listener := &lazyListener{}
 	link := guard.NewLink(listener)
+	hubClient := NewLazyHub(GatedLoad(gate, func() (Hub, error) { return loadHub(p) }), clock)
 	s := New(Deps{
-		Hub:       NewLazyHub(GatedLoad(gate, func() (Hub, error) { return loadHub(p) }), clock),
+		Hub:       hubClient,
+		Baseline:  newBaselineAgent(p, hubClient.(PolicyHub), log.Warn),
 		Lock:      lock.New(clock, GatedStore(gate, lock.NewFileStore(p.lock))),
 		Policy:    policy.NewPolicy(policy.NewRegistry(), p.policyJournal),
 		Guard:     link,

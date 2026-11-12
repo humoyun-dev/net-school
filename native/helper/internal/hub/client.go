@@ -33,6 +33,8 @@ type LockState struct {
 	Locked       bool    `json:"locked"`
 	Sequence     *string `json:"sequence"`
 	LeaseSeconds int     `json:"leaseSeconds"`
+	// P2c: bazaviy siyosat revision'i (eski hub yubormaydi — nil).
+	Baseline *Revision `json:"baseline"`
 }
 
 // Status helper komponentlarining joriy holati (`helperStatusSchema`). Qiymatlar quyidagi konstantalardan; hub
