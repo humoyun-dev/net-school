@@ -96,4 +96,17 @@ describe('capability report', () => {
         }
     expect(capabilityReport(facts({ platform: 'freebsd' })).os).toBe('other');
   });
+
+  test('web.filter is reported only when the extension state is known', () => {
+    expect(capabilityReport(facts({})).capabilities['web.filter']).toBeUndefined();
+    expect(capabilityReport(facts({ webFilter: 'available' })).capabilities['web.filter']).toEqual({
+      state: 'available',
+      provider: 'managed_extension',
+    });
+    expect(capabilityReport(facts({ webFilter: 'requires_setup' })).capabilities['web.filter']).toEqual({
+      state: 'requires_setup',
+      provider: 'managed_extension',
+      reason: 'extension_missing',
+    });
+  });
 });

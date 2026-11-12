@@ -14,6 +14,7 @@ import { CommandProcessor } from '../src/core/commands.ts';
 import { HubClient } from '../src/core/hub-client.ts';
 import { type DeviceIdentity, generateDeviceKey, RequestSigner } from '../src/core/identity.ts';
 import { OverlayController } from '../src/core/overlay.ts';
+import { hubPolicyDeps, PolicySync } from '../src/core/policy-sync.ts';
 import type { ThumbnailUploader } from '../src/core/thumbnails.ts';
 
 // Har test to'liq hub (ilova, DB, TLS) ishga tushiradi: to'liq suite yukida 5 s yetmaydi.
@@ -115,6 +116,7 @@ function makeAgent(
     sources?: ClockSources;
     facts?: () => Promise<PlatformFacts>;
     thumbnails?: ThumbnailUploader | null;
+    policy?: (hub: HubClient, cache: StateCache) => PolicySync;
   } = {},
 ): Run {
   const signer = new RequestSigner(identity);
@@ -140,6 +142,7 @@ function makeAgent(
       thumbnails: over.thumbnails ?? null,
       facts: over.facts ?? (async () => WINDOWS),
       onStatus: (s) => statuses.push(s),
+      ...(over.policy ? { policy: over.policy(hub, cache) } : {}),
     },
     FAST,
   );
@@ -460,6 +463,37 @@ describe('companion agent', () => {
       const calls = spy.mock.calls.length;
       await new Promise((r) => setTimeout(r, 400));
       expect(spy.mock.calls.length).toBe(calls);
+    } finally {
+      await w.close();
+    }
+  });
+
+  test('heartbeat policy hint fetches the baseline and reports a receipt', async () => {
+    const w = await world();
+    try {
+      const { identity } = await lessonWithDevice(w);
+      const put = await w.app.request('PUT', `/api/v1/policies/baseline?siteId=${w.siteId}`, {
+        body: { schemaVersion: 1, web: { blocked: ['bad.com'] } },
+        cookie: w.admin,
+        headers: { 'if-match': '0' },
+      });
+      expect(put.status).toBe(201);
+      let sync: PolicySync | null = null;
+      const run = makeAgent(w.app.origin, w.app.ca, identity, {
+        policy: (hub, cache) => {
+          sync = new PolicySync(hubPolicyDeps(hub, cache, createClock(), () => {}));
+          return sync;
+        },
+      });
+      await run.agent.start();
+      await eventually(() => (sync?.current().baseline?.blocked ?? []).includes('bad.com'));
+      expect(run.cache.loadBaseline()?.revision).toEqual({ org: 0, site: 1 });
+      const status = async () =>
+        (await w.app.request('GET', `/api/v1/policies/status?siteId=${w.siteId}`, { cookie: w.admin })).json.devices[0];
+      await eventually(async () => (await status())?.baseline.companion !== null);
+      expect((await status()).baseline.companion.rules).toEqual({
+        'web.blocked': { state: 'failed', code: 'extension_missing' },
+      });
     } finally {
       await w.close();
     }

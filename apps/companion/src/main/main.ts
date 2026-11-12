@@ -11,6 +11,7 @@ import { RequestSigner } from '../core/identity.ts';
 import { LockPolicy } from '../core/lock-policy.ts';
 import { loadEnrollment, machineDir } from '../core/machine-store.ts';
 import { OverlayController } from '../core/overlay.ts';
+import { hubPolicyDeps, PolicySync, type WebPolicyPush } from '../core/policy-sync.ts';
 import { ThumbnailUploader } from '../core/thumbnails.ts';
 import { ElectronFrameSource } from './capture.ts';
 import { dismissArgSchema, isTrustedSender } from './ipc.ts';
@@ -111,13 +112,24 @@ async function main(): Promise<void> {
       windows.update(status);
       tray.update(status);
     };
+    // P2c: siyosat; web qoidalari brauzer extension'iga web pipe orqali beriladi (faqat Windows).
+    const webListeners = new Set<(push: WebPolicyPush) => void>();
+    const policy = new PolicySync(
+      hubPolicyDeps(hub, cache, systemClock, (push) => {
+        for (const fn of webListeners) fn(push);
+      }),
+    );
     const agent = new CompanionAgent({
       hub,
       cache,
       overlay,
       commands,
       thumbnails,
-      facts: () => platformFacts(hardLockFacts),
+      policy,
+      facts: async () => ({
+        ...(await platformFacts(hardLockFacts)),
+        ...(process.platform === 'win32' ? { webFilter: policy.webFilterState() } : {}),
+      }),
       enforcement: () => (hookReady && overlay.view().locked && hardLock.facts().enforced ? 'hard' : 'soft'),
       onStatus,
     });

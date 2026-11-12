@@ -1,5 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
+import { deviceBaselineSchema } from '@netschool/contracts';
 import { z } from 'zod';
+import type { CachedBaseline } from './policy-sync.ts';
 
 // Qurilmadagi per-user holat: bajarilgan buyruqlar (takroriy yetkazishni qayta bajarmaslik) va overlay lease.
 // Kadrlar va matnlar bu yerga yozilmaydi.
@@ -67,6 +69,10 @@ export class StateCache {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         json TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS policy_baseline (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        json TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS policy_journal (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         json TEXT NOT NULL
@@ -123,6 +129,22 @@ export class StateCache {
     const row = this.#db.prepare('SELECT json FROM policy_journal WHERE id = 1').get();
     if (!row) return null;
     return policyJournalSchema.parse(JSON.parse(String(row.json)));
+  }
+
+  // P2c: oxirgi bazaviy siyosat (oflayn ham amalda qoladi). Buzilgan qator — "yo'q" (hub'dan qayta olinadi).
+  saveBaseline(baseline: CachedBaseline): void {
+    this.#db.prepare('INSERT OR REPLACE INTO policy_baseline (id, json) VALUES (1, ?)').run(JSON.stringify(baseline));
+  }
+
+  loadBaseline(): CachedBaseline | null {
+    const row = this.#db.prepare('SELECT json FROM policy_baseline WHERE id = 1').get();
+    if (!row) return null;
+    try {
+      const parsed = deviceBaselineSchema.safeParse(JSON.parse(String(row.json)));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 
   close(): void {
