@@ -64,6 +64,12 @@ const ownSite: [Action, Target, Who[]][] = [
   ['remote.control', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
   ['remote.control', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
   ['remote.manage', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin']],
+  ['policy.manage', site(SITE), ['orgAdmin', 'siteAdmin', 'itSupport']],
+  ['policy.manage', { organizationId: ORG, siteId: null }, ['orgAdmin']],
+  ['policy.read', site(SITE), ['orgAdmin', 'siteAdmin', 'itSupport']],
+  ['policy.read', site(SITE, room), ['orgAdmin', 'siteAdmin', 'itSupport', 'teacher']],
+  ['lesson.policy', site(SITE, { ...room, ownerUserId: 'u' }), ['orgAdmin', 'siteAdmin', 'teacher']],
+  ['lesson.policy', site(SITE, { ...room, ownerUserId: 'someone-else' }), ['orgAdmin', 'siteAdmin']],
 ];
 
 const cases = ownSite.flatMap(([action, target, allowed]) =>

@@ -26,7 +26,10 @@ export type Action =
   | 'remote.view'
   | 'remote.control'
   | 'remote.manage'
-  | 'power.manage';
+  | 'power.manage'
+  | 'policy.read'
+  | 'policy.manage'
+  | 'lesson.policy';
 
 export interface Target {
   organizationId: string;
@@ -63,6 +66,9 @@ const SITE_ADMIN_ACTIONS = new Set<Action>([
   'remote.control',
   'remote.manage',
   'power.manage',
+  'policy.read',
+  'policy.manage',
+  'lesson.policy',
 ]);
 // site.configure_mesh hech qaysi to'plamda yo'q: site → MeshCentral domain bog'lanishi faqat org admin'da.
 const IT_SUPPORT_ACTIONS = new Set<Action>([
@@ -75,6 +81,9 @@ const IT_SUPPORT_ACTIONS = new Set<Action>([
   'command.read',
   // Quvvat: site IT admini (ADR 0007).
   'power.manage',
+  // Bazaviy siyosat: site IT admini o'z site'ida (P2c dizayni §3).
+  'policy.read',
+  'policy.manage',
 ]);
 const TEACHER_ROOM_ACTIONS = new Set<Action>([
   'room.read',
@@ -82,6 +91,7 @@ const TEACHER_ROOM_ACTIONS = new Set<Action>([
   'lesson.start',
   'lesson.read',
   'command.read',
+  'policy.read',
 ]);
 // Faqat o'z darsida: boshqa teacher darsini yopish, unga buyruq berish yoki yordam so'rovini yopish (help.clear = command.issue) yoki masofaviy sessiya ochish mumkin emas.
 // remote.manage (boshqaning sessiyasini yopish) teacher'da yo'q; it_support va student'da ham remote.* yo'q.
@@ -91,6 +101,7 @@ const TEACHER_OWNER_ACTIONS = new Set<Action>([
   'help.clear',
   'remote.view',
   'remote.control',
+  'lesson.policy',
 ]);
 
 // Sof qoida: rad etish default; har ruxsat aniq rol va ko'lamdan kelib chiqadi.
